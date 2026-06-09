@@ -1,0 +1,242 @@
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabaseUntyped } from '@/lib/supabase/client';
+import { Clock, Plus, Trash2, Save, AlertCircle, Wand2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+interface TimeConfig {
+  school_start_time: string;
+  school_end_time: string;
+  lesson_duration_minutes: number;
+  morning_break_start: string;
+  morning_break_end: string;
+  lunch_start: string;
+  lunch_end: string;
+  afternoon_break_start: string;
+  afternoon_break_end: string;
+}
+
+interface Activity {
+  id?: string;
+  day_of_week: number;
+  activity_name: string;
+  start_time: string;
+  end_time: string;
+}
+
+const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+const REQUIRED_CONFIG: TimeConfig = {
+  school_start_time: '08:20',
+  school_end_time: '15:20',
+  lesson_duration_minutes: 40,
+  morning_break_start: '10:20',  // FIRST BREAK start
+  morning_break_end: '11:00',    // FIRST BREAK end
+  afternoon_break_start: '12:20', // SECOND BREAK start (BEFORE LUNCH)
+  afternoon_break_end: '12:50',   // SECOND BREAK end
+  lunch_start: '12:50',           // LUNCH start (AFTER SECOND BREAK)
+  lunch_end: '13:30',             // LUNCH end
+};
+
+const REQUIRED_ACTIVITIES = [
+  { day_of_week: 1, activity_name: 'Games', start_time: '15:20', end_time: '16:20' },
+  { day_of_week: 2, activity_name: 'Clubs', start_time: '15:20', end_time: '16:20' },
+  { day_of_week: 3, activity_name: 'Study Hall', start_time: '15:20', end_time: '16:20' },
+  { day_of_week: 4, activity_name: 'Drama', start_time: '15:20', end_time: '16:20' },
+  { day_of_week: 5, activity_name: 'Music Club', start_time: '15:20', end_time: '16:20' },
+];
+
+export default function TimetableSetup() {
+  const { user } = useAuth();
+  const [schoolId, setSchoolId] = useState<string>('');
+  const [config, setConfig] = useState<TimeConfig>(REQUIRED_CONFIG);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [newActivity, setNewActivity] = useState<Activity>({ day_of_week: 1, activity_name: '', start_time: '15:20', end_time: '16:20' });
+
+  useEffect(() => {
+    fetchData();
+  }, [user?.id]);
+
+  const resolveSchoolId = async () => {
+    if (user?.schoolId) return user.schoolId;
+    const { data: profile } = await supabaseUntyped.from('profiles').select('school_id').eq('id', user?.id).single();
+    return profile?.school_id || '';
+  };
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const resolvedSchoolId = await resolveSchoolId();
+      if (!resolvedSchoolId) {
+        toast.error('No school assigned to your account');
+        return;
+      }
+      setSchoolId(resolvedSchoolId);
+
+      const { data: configData } = await supabaseUntyped
+        .from('school_timetable_config')
+        .select('*')
+        .eq('school_id', resolvedSchoolId)
+        .maybeSingle();
+      setConfig(configData ? { ...REQUIRED_CONFIG, ...configData } : REQUIRED_CONFIG);
+
+      const { data: activitiesData } = await supabaseUntyped
+        .from('school_activities')
+        .select('*')
+        .eq('school_id', resolvedSchoolId)
+        .order('day_of_week');
+      setActivities(activitiesData || []);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load timetable setup');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfigChange = (field: keyof TimeConfig, value: string | number) => {
+    setConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const saveConfig = async (overrideConfig = config) => {
+    if (!schoolId) throw new Error('No school selected');
+    const { error } = await supabaseUntyped
+      .from('school_timetable_config')
+      .upsert({ school_id: schoolId, ...overrideConfig }, { onConflict: 'school_id' });
+    if (error) throw error;
+  };
+
+  const handleSaveConfig = async () => {
+    setSaving(true);
+    try {
+      await saveConfig();
+      toast.success('Timetable schedule saved successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save configuration');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyRequiredTemplate = async () => {
+    setSaving(true);
+    try {
+      setConfig(REQUIRED_CONFIG);
+      await saveConfig(REQUIRED_CONFIG);
+      for (const activity of REQUIRED_ACTIVITIES) {
+        await supabaseUntyped.from('school_activities').upsert({ school_id: schoolId, ...activity }, { onConflict: 'school_id,day_of_week,activity_name' });
+      }
+      toast.success('Exact timetable template saved: breaks, lunch, and activities are ready');
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to apply template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddActivity = async () => {
+    if (!newActivity.activity_name.trim()) {
+      toast.error('Activity name is required');
+      return;
+    }
+    try {
+      const { error } = await supabaseUntyped.from('school_activities').upsert({ school_id: schoolId, ...newActivity }, { onConflict: 'school_id,day_of_week,activity_name' });
+      if (error) throw error;
+      toast.success('Activity saved');
+      setNewActivity({ day_of_week: 1, activity_name: '', start_time: '15:20', end_time: '16:20' });
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to save activity');
+    }
+  };
+
+  const handleDeleteActivity = async (id: string) => {
+    try {
+      const { error } = await supabaseUntyped.from('school_activities').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Activity deleted');
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete activity');
+    }
+  };
+
+  if (loading) return <div className="text-center py-8">Loading...</div>;
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-[#111111]">Timetable Setup</h1>
+          <p className="text-sm text-[#666666]">Save the exact required timetable in one click, then generate the blackboard timetable.</p>
+        </div>
+        <button onClick={applyRequiredTemplate} disabled={saving} className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
+          <Wand2 className="w-4 h-4" /> Use Required Template
+        </button>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex gap-3 text-sm text-blue-900">
+        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="font-black">Correct break order is locked in this setup.</p>
+          <p>FIRST BREAK 10:20–11:00 · SECOND BREAK 12:20–12:50 (BEFORE LUNCH) · LUNCH 12:50–1:30. After-school activities run 3:20–4:20 PM.</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+        <h2 className="text-lg font-bold text-[#111111] mb-4 flex items-center gap-2"><Clock className="w-5 h-5" /> School Hours and Breaks</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <TimeInput label="School starts" value={config.school_start_time} onChange={(value) => handleConfigChange('school_start_time', value)} />
+          <TimeInput label="School ends" value={config.school_end_time} onChange={(value) => handleConfigChange('school_end_time', value)} />
+          <div><label className="block text-sm font-medium text-[#111111] mb-2">Lesson duration</label><input type="number" value={config.lesson_duration_minutes} onChange={(e) => handleConfigChange('lesson_duration_minutes', parseInt(e.target.value))} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" min="20" max="60" /></div>
+          <TimeInput label="FIRST BREAK starts" value={config.morning_break_start} onChange={(value) => handleConfigChange('morning_break_start', value)} />
+          <TimeInput label="FIRST BREAK ends" value={config.morning_break_end} onChange={(value) => handleConfigChange('morning_break_end', value)} />
+          <div className="hidden md:block" />
+          <TimeInput label="SECOND BREAK starts (before Lunch)" value={config.afternoon_break_start} onChange={(value) => handleConfigChange('afternoon_break_start', value)} />
+          <TimeInput label="SECOND BREAK ends" value={config.afternoon_break_end} onChange={(value) => handleConfigChange('afternoon_break_end', value)} />
+          <div className="hidden md:block" />
+          <TimeInput label="LUNCH starts" value={config.lunch_start} onChange={(value) => handleConfigChange('lunch_start', value)} />
+          <TimeInput label="LUNCH ends" value={config.lunch_end} onChange={(value) => handleConfigChange('lunch_end', value)} />
+        </div>
+        <button onClick={handleSaveConfig} disabled={saving} className="flex items-center gap-2 bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"><Save className="w-4 h-4" />{saving ? 'Saving...' : 'Save Configuration'}</button>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+        <h2 className="text-lg font-bold text-[#111111] mb-4">After-School Activities (3:20–4:20 PM)</h2>
+        <div className="bg-gray-50 p-4 rounded-xl mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div><label className="block text-sm font-medium text-[#111111] mb-2">Day</label><select value={newActivity.day_of_week} onChange={(e) => setNewActivity({ ...newActivity, day_of_week: parseInt(e.target.value) })} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]">{dayNames.map((day, idx) => <option key={day} value={idx + 1}>{day}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-[#111111] mb-2">Activity</label><input type="text" placeholder="Games, Clubs, Study Hall" value={newActivity.activity_name} onChange={(e) => setNewActivity({ ...newActivity, activity_name: e.target.value })} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" /></div>
+            <TimeInput label="Start" value={newActivity.start_time} onChange={(value) => setNewActivity({ ...newActivity, start_time: value })} />
+            <TimeInput label="End" value={newActivity.end_time} onChange={(value) => setNewActivity({ ...newActivity, end_time: value })} />
+          </div>
+          <button onClick={handleAddActivity} className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8]"><Plus className="w-4 h-4" />Save Activity</button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {activities.length === 0 ? <p className="text-sm text-gray-500">No activities saved yet. Use the required template to add all five.</p> : activities.map((activity) => (
+            <div key={activity.id || `${activity.day_of_week}-${activity.activity_name}`} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+              <div><p className="font-bold text-[#111111]">{dayNames[activity.day_of_week - 1]} — {activity.activity_name}</p><p className="text-sm text-[#666666]">{activity.start_time?.slice(0, 5)} - {activity.end_time?.slice(0, 5)}</p></div>
+              {activity.id && <button onClick={() => handleDeleteActivity(activity.id!)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimeInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-[#111111] mb-2">{label}</label>
+      <input type="time" value={value?.slice(0, 5) || ''} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+    </div>
+  );
+}
