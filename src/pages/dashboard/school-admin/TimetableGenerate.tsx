@@ -5,11 +5,43 @@ import { Zap, CheckCircle, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { generateSlots } from '@/lib/timetable-generator';
 
+// Frontend config interface (matches what timetable-generator expects)
+interface FrontendConfig {
+  lesson_duration: number;
+  school_start: string;
+  school_end: string;
+  first_break_start: string;
+  first_break_end: string;
+  second_break_start: string;
+  second_break_end: string;
+  lunch_start: string;
+  lunch_end: string;
+  activities: Record<string, string>;
+}
+
+// Map DB config to frontend config
+const mapDbToFrontend = (dbConfig: any, dbActivities: Record<string, string>): FrontendConfig | null => {
+  if (!dbConfig) return null;
+  
+  return {
+    lesson_duration: dbConfig.lesson_duration_minutes || 40,
+    school_start: dbConfig.school_start_time?.slice(0, 5) || '08:20',
+    school_end: dbConfig.school_end_time?.slice(0, 5) || '15:40',
+    first_break_start: dbConfig.morning_break_start?.slice(0, 5) || '09:40',
+    first_break_end: dbConfig.morning_break_end?.slice(0, 5) || '10:20',
+    second_break_start: dbConfig.afternoon_break_start?.slice(0, 5) || '11:40',
+    second_break_end: dbConfig.afternoon_break_end?.slice(0, 5) || '12:20',
+    lunch_start: dbConfig.lunch_start?.slice(0, 5) || '12:50',
+    lunch_end: dbConfig.lunch_end?.slice(0, 5) || '13:30',
+    activities: dbActivities
+  };
+};
+
 export default function TimetableGenerate() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<FrontendConfig | null>(null);
   const [assignmentCount, setAssignmentCount] = useState(0);
   const [teacherCount, setTeacherCount] = useState(0);
   const [classCount, setClassCount] = useState(0);
@@ -24,9 +56,24 @@ export default function TimetableGenerate() {
       setLoading(true);
       const schoolId = user?.schoolId;
 
+      // Fetch config
       const { data: configData } = await supabase
         .from('school_timetable_config').select('*').eq('school_id', schoolId).maybeSingle();
-      setConfig(configData);
+      
+      // Fetch activities from school_activities table
+      const { data: activitiesData } = await supabase
+        .from('school_activities')
+        .select('day_of_week, activity_name')
+        .eq('school_id', schoolId)
+        .order('day_of_week');
+      
+      const activities: Record<string, string> = {};
+      (activitiesData || []).forEach((a: any) => {
+        activities[String(a.day_of_week)] = a.activity_name;
+      });
+
+      const mappedConfig = mapDbToFrontend(configData, activities);
+      setConfig(mappedConfig);
 
       const { count: ac } = await supabase
         .from('teacher_subject_assignments').select('*', { count: 'exact', head: true })
@@ -58,16 +105,37 @@ export default function TimetableGenerate() {
       return;
     }
 
+    // Validate all required time fields are present
+    const requiredFields = [
+      'first_break_start', 'first_break_end',
+      'second_break_start', 'second_break_end',
+      'lunch_start', 'lunch_end'
+    ];
+    
+    for (const field of requiredFields) {
+      if (!config[field as keyof FrontendConfig]) {
+        toast.error(`Missing ${field} in timetable configuration. Please update the setup.`);
+        return;
+      }
+    }
+
     try {
       setGenerating(true);
       const schoolId = user?.schoolId;
 
       // 1. Rebuild time slots using shared generator
       const slots = generateSlots(config);
+      console.log('Generated slots:', slots);
+      
       await supabase.from('timetable_time_slots').delete().eq('school_id', schoolId);
       const { data: createdSlots, error: slotError } = await supabase
         .from('timetable_time_slots')
-        .insert(slots.map(s => ({ ...s, school_id: schoolId })))
+        .insert(slots.map(s => ({ 
+          ...s, 
+          school_id: schoolId,
+          // Ensure slot_type uses 'activity' not 'activities' for DB constraint
+          slot_type: s.slot_type === 'activities' ? 'activity' : s.slot_type
+        })))
         .select();
       if (slotError) throw slotError;
 
@@ -87,19 +155,20 @@ export default function TimetableGenerate() {
       const classBusy = new Set<string>();
 
       // 4. Fill fixed slots (Breaks, Lunch, Activities)
-      const fixedSlots = createdSlots.filter(s => ['break', 'lunch', 'activities'].includes(s.slot_type));
-      const lessonSlots = createdSlots.filter(s => s.slot_type === 'lesson').sort((a, b) => a.slot_order - b.slot_order);
+      const fixedSlots = createdSlots?.filter(s => ['break', 'lunch', 'activity', 'activities'].includes(s.slot_type)) || [];
+      const lessonSlots = createdSlots?.filter(s => s.slot_type === 'lesson').sort((a, b) => a.slot_order - b.slot_order) || [];
 
       for (const cls of classes) {
         for (let day = 1; day <= 5; day++) {
           for (const slot of fixedSlots) {
+            const isActivity = slot.slot_type === 'activities' || slot.slot_type === 'activity';
             entries.push({
               school_id: schoolId,
               day_of_week: day,
               time_slot_id: slot.id,
               class_id: cls.id,
-              entry_type: slot.slot_type,
-              activity_name: slot.slot_type === 'activities' ? (config.activities?.[day] || config.activities?.[String(day)] || 'Activity') : slot.label
+              entry_type: isActivity ? 'activity' : slot.slot_type,
+              activity_name: isActivity ? (config.activities?.[String(day)] || 'Activity') : slot.label
             });
           }
         }
@@ -108,7 +177,6 @@ export default function TimetableGenerate() {
       // 5. Simple lesson allocation logic
       for (const cls of classes) {
         const classAssignments = assignments.filter(a => a.class_id === cls.id);
-        let currentSlotIdx = 0;
 
         for (const assignment of classAssignments) {
           const lessonsToSchedule = assignment.lessons_per_week || 0;

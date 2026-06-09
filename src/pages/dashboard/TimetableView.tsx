@@ -129,6 +129,7 @@ export default function TimetableView() {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [teacherKey, setTeacherKey] = useState<TeacherKeyEntry[]>([]);
   const [config, setConfig] = useState<TimetableConfig | null>(null);
+  const [activities, setActivities] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
@@ -155,13 +156,42 @@ export default function TimetableView() {
   };
 
   const fetchConfig = async () => {
-    const { data } = await supabase
+    // Fetch config
+    const { data: configData } = await supabase
       .from('school_timetable_config')
       .select('*')
       .eq('school_id', user?.schoolId)
       .maybeSingle();
-    if (data) {
-      setConfig(data as TimetableConfig);
+    
+    // Fetch activities from school_activities table
+    const { data: activitiesData } = await supabase
+      .from('school_activities')
+      .select('day_of_week, activity_name')
+      .eq('school_id', user?.schoolId)
+      .order('day_of_week');
+    
+    // Build activities record
+    const acts: Record<string, string> = {};
+    (activitiesData || []).forEach((a: any) => {
+      acts[String(a.day_of_week)] = a.activity_name;
+    });
+    setActivities(acts);
+    
+    if (configData) {
+      // Map DB columns to frontend interface
+      const mappedConfig: TimetableConfig = {
+        lesson_duration: configData.lesson_duration_minutes || 40,
+        school_start: configData.school_start_time?.slice(0, 5) || '08:20',
+        school_end: configData.school_end_time?.slice(0, 5) || '15:40',
+        first_break_start: configData.morning_break_start?.slice(0, 5) || '09:40',
+        first_break_end: configData.morning_break_end?.slice(0, 5) || '10:20',
+        second_break_start: configData.afternoon_break_start?.slice(0, 5) || '11:40',
+        second_break_end: configData.afternoon_break_end?.slice(0, 5) || '12:20',
+        lunch_start: configData.lunch_start?.slice(0, 5) || '12:50',
+        lunch_end: configData.lunch_end?.slice(0, 5) || '13:30',
+        activities: acts
+      };
+      setConfig(mappedConfig);
     }
   };
 
@@ -258,10 +288,9 @@ export default function TimetableView() {
   const getEntry = (day: number, classId: string, slotId: string) => entryLookup.get(`${day}-${classId}-${slotId}`);
 
   const getActivityForDay = (day: number): string => {
-    if (config?.activities) {
-      const activity = config.activities[day] || config.activities[String(day)];
-      if (activity) return activity;
-    }
+    // Use activities from school_activities table
+    const activity = activities[day] || activities[String(day)];
+    if (activity) return activity;
     // Fallback to entries
     const dayActivities = entries.filter(e => e.day_of_week === day && (e.entry_type === 'activities' || e.entry_type === 'activity'));
     const uniqueActivities = [...new Set(dayActivities.map(a => a.activity_name).filter(Boolean))];

@@ -13,19 +13,37 @@ export interface TimetableSlot {
 
 export interface TimetableConfig {
   lesson_duration: number;
+  school_start: string;
+  school_end: string;
   first_break_start: string;
   first_break_end: string;
   second_break_start: string;
   second_break_end: string;
   lunch_start: string;
   lunch_end: string;
-  school_start?: string;
-  school_end?: string;
   activities?: Record<string, string>;
 }
 
-const timeToMinutes = (time: string): number => {
-  const [h, m] = time.split(':').map(Number);
+/**
+ * Safely convert time string to minutes.
+ * Handles null/undefined/invalid formats gracefully.
+ */
+const timeToMinutes = (time: string | null | undefined): number => {
+  if (!time || typeof time !== 'string') {
+    console.warn(`timeToMinutes received invalid time: ${time}, returning 0`);
+    return 0;
+  }
+  const parts = time.split(':');
+  if (parts.length < 2) {
+    console.warn(`timeToMinutes received malformed time: ${time}, returning 0`);
+    return 0;
+  }
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (isNaN(h) || isNaN(m)) {
+    console.warn(`timeToMinutes received non-numeric time: ${time}, returning 0`);
+    return 0;
+  }
   return h * 60 + m;
 };
 
@@ -36,12 +54,40 @@ const minutesToTime = (totalMinutes: number): string => {
 };
 
 /**
+ * Get a safe string value with a default fallback
+ */
+const safeString = (value: string | null | undefined, fallback: string): string => {
+  if (value && typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  return fallback;
+};
+
+/**
  * Generate time slots following the exact break order from the timetable image:
  * Lesson 1 → Lesson 2 → FIRST BREAK → Lesson 3 → Lesson 4 → SECOND BREAK → Lesson 5 → Lesson 6 → LUNCH → Lesson 7 → Lesson 8 → ACTIVITIES
  */
 export function generateSlots(config: TimetableConfig): TimetableSlot[] {
-  const duration = config.lesson_duration || 40;
-  const schoolStart = config.school_start || '08:20';
+  // Use defaults for any missing values to prevent crashes
+  const duration = config?.lesson_duration || 40;
+  const schoolStart = safeString(config?.school_start, '08:20');
+  
+  // Break times with safe fallbacks
+  const firstBreakStart = safeString(config?.first_break_start, '09:40');
+  const firstBreakEnd = safeString(config?.first_break_end, '10:20');
+  const secondBreakStart = safeString(config?.second_break_start, '11:40');
+  const secondBreakEnd = safeString(config?.second_break_end, '12:20');
+  const lunchStart = safeString(config?.lunch_start, '12:50');
+  const lunchEnd = safeString(config?.lunch_end, '13:30');
+
+  console.log('generateSlots called with config:', {
+    duration,
+    schoolStart,
+    firstBreakStart, firstBreakEnd,
+    secondBreakStart, secondBreakEnd,
+    lunchStart, lunchEnd
+  });
+
   let currentMinutes = timeToMinutes(schoolStart);
   const slots: TimetableSlot[] = [];
 
@@ -70,10 +116,10 @@ export function generateSlots(config: TimetableConfig): TimetableSlot[] {
     slot_order: 3,
     label: 'FIRST BREAK',
     slot_type: 'break',
-    start_time: config.first_break_start,
-    end_time: config.first_break_end,
+    start_time: firstBreakStart,
+    end_time: firstBreakEnd,
   });
-  currentMinutes = timeToMinutes(config.first_break_end);
+  currentMinutes = timeToMinutes(firstBreakEnd);
 
   // Lesson 3
   slots.push({
@@ -100,10 +146,10 @@ export function generateSlots(config: TimetableConfig): TimetableSlot[] {
     slot_order: 6,
     label: 'SECOND BREAK',
     slot_type: 'break',
-    start_time: config.second_break_start,
-    end_time: config.second_break_end,
+    start_time: secondBreakStart,
+    end_time: secondBreakEnd,
   });
-  currentMinutes = timeToMinutes(config.second_break_end);
+  currentMinutes = timeToMinutes(secondBreakEnd);
 
   // Lesson 5
   slots.push({
@@ -130,10 +176,10 @@ export function generateSlots(config: TimetableConfig): TimetableSlot[] {
     slot_order: 9,
     label: 'LUNCH',
     slot_type: 'lunch',
-    start_time: config.lunch_start,
-    end_time: config.lunch_end,
+    start_time: lunchStart,
+    end_time: lunchEnd,
   });
-  currentMinutes = timeToMinutes(config.lunch_end);
+  currentMinutes = timeToMinutes(lunchEnd);
 
   // Lesson 7
   slots.push({
@@ -164,6 +210,8 @@ export function generateSlots(config: TimetableConfig): TimetableSlot[] {
     end_time: minutesToTime(currentMinutes + duration),
   });
 
+  console.log('Generated slots:', slots.map(s => `${s.slot_order}: ${s.label} (${s.start_time}-${s.end_time})`));
+
   return slots;
 }
 
@@ -177,18 +225,21 @@ export function getActivityForDay(config: TimetableConfig | null, day: number): 
 
 /**
  * Format time for display (e.g., "08:20" → "8:20")
+ * Handles null/undefined safely
  */
-export function formatTimeDisplay(time: string): string {
-  if (!time) return '';
-  const [h, m] = time.split(':');
-  const hour = Number(h);
+export function formatTimeDisplay(time: string | null | undefined): string {
+  if (!time || typeof time !== 'string') return '';
+  const parts = time.split(':');
+  if (parts.length < 2) return time;
+  const hour = Number(parts[0]);
+  const min = parts[1];
   const hour12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-  return `${hour12}:${m}`;
+  return `${hour12}:${min}`;
 }
 
 /**
  * Format time range for header display
  */
-export function formatTimeRange(start: string, end: string): string {
+export function formatTimeRange(start: string | null | undefined, end: string | null | undefined): string {
   return `${formatTimeDisplay(start)}–${formatTimeDisplay(end)}`;
 }

@@ -8,8 +8,8 @@ interface SchoolConfig {
   school_end_time: string;
   morning_break_start: string;
   morning_break_end: string;
-  lunch_break_start: string;
-  lunch_break_end: string;
+  lunch_start: string;
+  lunch_end: string;
   afternoon_break_start: string;
   afternoon_break_end: string;
   lesson_duration_minutes: number;
@@ -18,13 +18,13 @@ interface SchoolConfig {
 export default function TimetableSetup() {
   const [config, setConfig] = useState<SchoolConfig>({
     school_start_time: '08:20',
-    school_end_time: '16:20',
-    morning_break_start: '10:20',
-    morning_break_end: '10:50',
-    lunch_break_start: '12:10',
-    lunch_break_end: '13:00',
-    afternoon_break_start: '15:00',
-    afternoon_break_end: '15:20',
+    school_end_time: '15:40',
+    morning_break_start: '09:40',
+    morning_break_end: '10:20',
+    lunch_start: '12:50',
+    lunch_end: '13:30',
+    afternoon_break_start: '11:40',
+    afternoon_break_end: '12:20',
     lesson_duration_minutes: 40,
   });
 
@@ -64,15 +64,15 @@ export default function TimetableSetup() {
 
       if (data) {
         setConfig({
-          school_start_time: data.school_start_time,
-          school_end_time: data.school_end_time,
-          morning_break_start: data.morning_break_start,
-          morning_break_end: data.morning_break_end,
-          lunch_break_start: data.lunch_break_start,
-          lunch_break_end: data.lunch_break_end,
-          afternoon_break_start: data.afternoon_break_start,
-          afternoon_break_end: data.afternoon_break_end,
-          lesson_duration_minutes: data.lesson_duration_minutes,
+          school_start_time: data.school_start_time || '08:20',
+          school_end_time: data.school_end_time || '15:40',
+          morning_break_start: data.morning_break_start || '09:40',
+          morning_break_end: data.morning_break_end || '10:20',
+          lunch_start: data.lunch_start || '12:50',
+          lunch_end: data.lunch_end || '13:30',
+          afternoon_break_start: data.afternoon_break_start || '11:40',
+          afternoon_break_end: data.afternoon_break_end || '12:20',
+          lesson_duration_minutes: data.lesson_duration_minutes || 40,
         });
       }
     } catch (err: any) {
@@ -90,12 +90,23 @@ export default function TimetableSetup() {
 
     setSaving(true);
     try {
+      // Map frontend config to DB column names
+      const dbConfig = {
+        school_id: schoolId,
+        school_start_time: config.school_start_time,
+        school_end_time: config.school_end_time,
+        morning_break_start: config.morning_break_start,
+        morning_break_end: config.morning_break_end,
+        lunch_start: config.lunch_start,
+        lunch_end: config.lunch_end,
+        afternoon_break_start: config.afternoon_break_start,
+        afternoon_break_end: config.afternoon_break_end,
+        lesson_duration_minutes: config.lesson_duration_minutes,
+      };
+      
       const { error } = await supabase
         .from('school_timetable_config')
-        .upsert({
-          school_id: schoolId,
-          ...config,
-        }, {
+        .upsert(dbConfig, {
           onConflict: 'school_id',
         });
 
@@ -215,8 +226,8 @@ export default function TimetableSetup() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Start Time</label>
                 <input
                   type="time"
-                  value={config.lunch_break_start}
-                  onChange={e => setConfig({ ...config, lunch_break_start: e.target.value })}
+                  value={config.lunch_start}
+                  onChange={e => setConfig({ ...config, lunch_start: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -224,8 +235,8 @@ export default function TimetableSetup() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">End Time</label>
                 <input
                   type="time"
-                  value={config.lunch_break_end}
-                  onChange={e => setConfig({ ...config, lunch_break_end: e.target.value })}
+                  value={config.lunch_end}
+                  onChange={e => setConfig({ ...config, lunch_end: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -287,7 +298,7 @@ export default function TimetableSetup() {
         <div className="text-sm text-gray-600 space-y-1">
           <p>• School hours: {config.school_start_time} - {config.school_end_time}</p>
           <p>• Morning break: {config.morning_break_start} - {config.morning_break_end}</p>
-          <p>• Lunch break: {config.lunch_break_start} - {config.lunch_break_end}</p>
+          <p>• Lunch break: {config.lunch_start} - {config.lunch_end}</p>
           <p>• Afternoon break: {config.afternoon_break_start} - {config.afternoon_break_end}</p>
           <p>• Lesson duration: {config.lesson_duration_minutes} minutes</p>
         </div>
