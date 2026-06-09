@@ -8,6 +8,8 @@ interface TimetableConfig {
   id?: string;
   school_id: string;
   lesson_duration: number;
+  school_start: string;
+  school_end: string;
   first_break_start: string;
   first_break_end: string;
   second_break_start: string;
@@ -25,6 +27,8 @@ export default function TimetableSetup() {
   const [config, setConfig] = useState<TimetableConfig>({
     school_id: '',
     lesson_duration: 40,
+    school_start: '08:20',
+    school_end: '15:40',
     first_break_start: '09:40',
     first_break_end: '10:20',
     second_break_start: '11:40',
@@ -136,31 +140,31 @@ export default function TimetableSetup() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-[#111111] mb-2">Lesson duration (min)</label>
-            <input 
-              type="number" 
-              value={config.lesson_duration} 
-              onChange={(e) => handleConfigChange('lesson_duration', parseInt(e.target.value))} 
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" 
+            <input
+              type="number"
+              value={config.lesson_duration}
+              onChange={(e) => handleConfigChange('lesson_duration', parseInt(e.target.value))}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             />
           </div>
-          <div className="hidden md:block" />
-          <div className="hidden md:block" />
-          
+          <TimeInput label="School starts" value={config.school_start} onChange={(value) => handleConfigChange('school_start', value)} />
+          <TimeInput label="School ends" value={config.school_end} onChange={(value) => handleConfigChange('school_end', value)} />
+
           <TimeInput label="FIRST BREAK starts" value={config.first_break_start} onChange={(value) => handleConfigChange('first_break_start', value)} />
           <TimeInput label="FIRST BREAK ends" value={config.first_break_end} onChange={(value) => handleConfigChange('first_break_end', value)} />
           <div className="hidden md:block" />
-          
+
           <TimeInput label="SECOND BREAK starts" value={config.second_break_start} onChange={(value) => handleConfigChange('second_break_start', value)} />
           <TimeInput label="SECOND BREAK ends" value={config.second_break_end} onChange={(value) => handleConfigChange('second_break_end', value)} />
           <div className="hidden md:block" />
-          
+
           <TimeInput label="LUNCH starts" value={config.lunch_start} onChange={(value) => handleConfigChange('lunch_start', value)} />
           <TimeInput label="LUNCH ends" value={config.lunch_end} onChange={(value) => handleConfigChange('lunch_end', value)} />
         </div>
       </div>
 
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <h2 className="text-lg font-bold text-[#111111] mb-4">After-School Activities (3:40–4:20 PM)</h2>
+        <h2 className="text-lg font-bold text-[#111111] mb-4">After-School Activities</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {dayNames.map((day, idx) => (
             <div key={day}>
