@@ -1,49 +1,18 @@
 import { Link } from 'react-router';
 import { ArrowRight, Sparkles, Smartphone } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { usePWA } from '@/hooks/usePWA';
 
 function DownloadAppButton() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-
-  useEffect(() => {
-    // Check if already installed
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsInstalled(true);
-      return;
-    }
-
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-
-    const installedHandler = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handler);
-    window.addEventListener('appinstalled', installedHandler);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-      window.removeEventListener('appinstalled', installedHandler);
-    };
-  }, []);
+  const { isInstallable, isInstalled, install } = usePWA();
 
   const handleDownload = async () => {
-    if (deferredPrompt) {
-      // Show native browser install prompt
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setIsInstalled(true);
-      }
-      setDeferredPrompt(null);
-    } else if (isInstalled) {
+    if (isInstalled) {
       alert('CBE-Analytics is already installed on your device!');
-    } else {
+      return;
+    }
+    const installed = await install();
+    if (!installed) {
       // Fallback for browsers that do not support beforeinstallprompt (e.g. Safari iOS)
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       if (isIOS) {
@@ -53,6 +22,9 @@ function DownloadAppButton() {
       }
     }
   };
+
+  // Only show button if installable or installed (don't show if not installable and not installed)
+  if (!isInstallable && !isInstalled) return null;
 
   return (
     <button
