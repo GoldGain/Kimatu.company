@@ -265,7 +265,7 @@ export default function TimetableView() {
     // Fallback to entries
     const dayActivities = entries.filter(e => e.day_of_week === day && (e.entry_type === 'activities' || e.entry_type === 'activity'));
     const uniqueActivities = [...new Set(dayActivities.map(a => a.activity_name).filter(Boolean))];
-    return uniqueActivities.join(' / ') || '\u2014';
+    return uniqueActivities.join(' / ') || '—';
   };
 
   const getCellContent = (entry: TimetableEntry | undefined, slot: TimeSlot): React.ReactNode => {
@@ -280,9 +280,9 @@ export default function TimetableView() {
       const dayNum = 0; // Will be set by caller
       return <span className="text-emerald-600 font-black text-sm">{entry?.activity_name || ''}</span>;
     }
-    if (!entry) return <span className="text-gray-400">\u2014</span>;
+    if (!entry) return <span className="text-gray-400">&mdash;</span>;
     if (entry.entry_type === 'activity' || entry.entry_type === 'activities') return <span className="text-emerald-600 font-black text-sm">{entry.activity_name}</span>;
-    if (!entry.subject_code && !entry.subject_name) return <span className="text-gray-400">\u2014</span>;
+    if (!entry.subject_code && !entry.subject_name) return <span className="text-gray-400">&mdash;</span>;
     const code = getSubjectCode(entry.subject_name || '', entry.subject_code || '');
     const teacherNumDisplay = entry.teacher_number ? `T${String(entry.teacher_number).padStart(2, '0')}` : '';
     return (
@@ -295,33 +295,22 @@ export default function TimetableView() {
 
   // Build schedule summary from actual config or fallback
   const scheduleSummary = useMemo(() => {
-    if (config) {
-      const firstBreak = formatTimeRange(config.first_break_start, config.first_break_end);
-      const secondBreak = formatTimeRange(config.second_break_start, config.second_break_end);
-      const lunch = formatTimeRange(config.lunch_start, config.lunch_end);
-      // Activities start after lunch end + 2 lessons
-      const activitiesSlot = timeSlots.find(s => s.slot_type === 'activities');
-      const activitiesTime = activitiesSlot
-        ? formatTimeRange(activitiesSlot.start_time, activitiesSlot.end_time)
-        : formatTimeRange(config.school_end || '15:40', '16:20');
-      return {
-        dayStart: config.school_start || '08:20',
-        dayEnd: config.school_end || '15:40',
-        firstBreak,
-        secondBreak,
-        lunch,
-        activitiesTime,
-      };
-    }
-    // Fallback defaults
-    return {
-      dayStart: '08:20',
-      dayEnd: '15:40',
-      firstBreak: '9:40–10:20',
-      secondBreak: '11:40–12:20',
-      lunch: '1:40–2:20',
-      activitiesTime: '3:40–4:20',
-    };
+    // Find actual times from timeSlots (which are database-driven)
+    const firstBreakSlot = timeSlots.find(s => s.slot_type === 'break' && s.label?.toUpperCase().includes('FIRST'));
+    const secondBreakSlot = timeSlots.find(s => s.slot_type === 'break' && s.label?.toUpperCase().includes('SECOND'));
+    const lunchSlot = timeSlots.find(s => s.slot_type === 'lunch');
+    const activitiesSlot = timeSlots.find(s => s.slot_type === 'activities');
+    const firstLesson = timeSlots.find(s => s.slot_order === 1);
+    const lastLesson = timeSlots.find(s => s.slot_order === 11);
+
+    const firstBreak = firstBreakSlot ? formatTimeRange(firstBreakSlot.start_time, firstBreakSlot.end_time) : '9:40–10:20';
+    const secondBreak = secondBreakSlot ? formatTimeRange(secondBreakSlot.start_time, secondBreakSlot.end_time) : '11:40–12:20';
+    const lunch = lunchSlot ? formatTimeRange(lunchSlot.start_time, lunchSlot.end_time) : '1:40–2:20';
+    const activitiesTime = activitiesSlot ? formatTimeRange(activitiesSlot.start_time, activitiesSlot.end_time) : '3:40–4:20';
+    const dayStart = firstLesson ? formatTimeDisplay(firstLesson.start_time) : (config?.school_start || '08:20');
+    const dayEnd = lastLesson ? formatTimeDisplay(lastLesson.end_time) : (config?.school_end || '15:40');
+
+    return { dayStart, dayEnd, firstBreak, secondBreak, lunch, activitiesTime };
   }, [config, timeSlots]);
 
   const downloadPdf = async () => {

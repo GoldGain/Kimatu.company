@@ -147,11 +147,11 @@ const TimetablePDF: React.FC<TimetablePDFProps> = ({
         </span>
       );
     }
-    if (!entry) return <span style={{ color: '#9ca3af' }}>\u2014</span>;
+    if (!entry) return <span style={{ color: '#9ca3af' }}>&mdash;</span>;
     if (entry.entry_type === 'activity' || entry.entry_type === 'activities') {
       return <span style={{ color: '#059669', fontWeight: 800, fontSize: '0.875rem' }}>{entry.activity_name}</span>;
     }
-    if (!entry.subject_code && !entry.subject_name) return <span style={{ color: '#9ca3af' }}>\u2014</span>;
+    if (!entry.subject_code && !entry.subject_name) return <span style={{ color: '#9ca3af' }}>&mdash;</span>;
     const code = getSubjectCode(entry.subject_name || '', entry.subject_code || '');
     const teacherNumDisplay = entry.teacher_number ? `T${String(entry.teacher_number).padStart(2, '0')}` : '';
     return (
