@@ -45,24 +45,11 @@ interface TeacherKeyEntry {
 const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-const CLASS_GROUPS = ['9A', '9B', '8A', '8B', '7'];
-
 /** Extracurricular columns displayed on far right */
 const EXTRACURRICULAR_COLUMNS = ['Clubs & Societies', 'Guidance & Counselling', 'Games & Sports', 'Careers'];
 
-/**
- * Vertical divider letters placed between time slot columns.
- * These appear as large letters between certain column pairs,
- * matching the traditional school timetable layout.
- */
-const VERTICAL_DIVIDERS: Record<number, string> = {
-  1: 'B',
-  3: 'D',
-  5: 'E',
-  6: 'A',
-  7: 'K',
-  8: 'L',
-};
+/** Vertical divider letters placed between time slot columns */
+const DIVIDER_LETTERS = ['B', 'D', 'E', 'A', 'K', 'L', 'N', 'C', 'H'];
 
 const SUBJECT_CODE_MAP: Record<string, string> = {
   Mathematics: 'MATH',
@@ -112,11 +99,6 @@ const getSubjectCode = (name: string, code: string): string => {
 const displayClassName = (cls: SchoolClass): string => {
   const name = cls.name?.replace(/^grade\s*/i, '').trim() || String(cls.level);
   return name.toUpperCase();
-};
-
-const classMatchesGroup = (cls: SchoolClass, group: string): boolean => {
-  const className = displayClassName(cls);
-  return className === group;
 };
 
 export default function TimetableView() {
@@ -271,6 +253,14 @@ export default function TimetableView() {
     [timeSlots]
   );
 
+  /** Use actual classes from database */
+  const classGroups = useMemo(() => {
+    return classes.map((c) => ({
+      ...c,
+      displayName: displayClassName(c),
+    }));
+  }, [classes]);
+
   const entryLookup = useMemo(() => {
     const lookup = new Map<string, TimetableEntry[]>();
     entries.forEach((entry) => {
@@ -305,18 +295,15 @@ export default function TimetableView() {
     return parts.join(' ') || '';
   };
 
-  /** Get activity for a specific day and class */
-  const getActivityForDayClass = (day: number, classId: string): string => {
-    const dayActivities = entries.filter(
-      (e) =>
-        e.day_of_week === day &&
-        e.class_id === classId &&
-        (e.entry_type === 'activities' || e.entry_type === 'activity')
-    );
-    const uniqueActivities = [
-      ...new Set(dayActivities.map((a) => a.activity_name).filter(Boolean)),
-    ];
-    return uniqueActivities.join(' / ') || activities[String(day)] || '';
+  /** Get extracurricular text for a cell */
+  const getExtracurricularText = (col: string, groupIdx: number): string => {
+    const colTexts: Record<string, string[]> = {
+      'Clubs & Societies': ['Club', '&', 'Societies', '', ''],
+      'Guidance & Counselling': ['Guidance', '&', 'Counselling', '', ''],
+      'Games & Sports': ['Games', '&', 'Sports', '', ''],
+      'Careers': ['Careers', '', '', '', ''],
+    };
+    return colTexts[col]?.[groupIdx] || '';
   };
 
   /** Build schedule summary for header */
@@ -370,8 +357,6 @@ export default function TimetableView() {
     );
   }
 
-  const totalGridColumns = lessonSlots.length + EXTRACURRICULAR_COLUMNS.length;
-
   return (
     <div className="max-w-full mx-auto space-y-4 timetable-page">
       <style>{`
@@ -388,7 +373,7 @@ export default function TimetableView() {
         }
         .timetable-grid th,
         .timetable-grid td {
-          border: 1px solid #1a1a1a;
+          border: 1.5px solid #1a1a1a;
         }
         .timetable-grid .day-header {
           background-color: #1e3a5f;
@@ -400,23 +385,24 @@ export default function TimetableView() {
           background-color: #1e3a5f;
           color: white;
           font-weight: 800;
-          font-size: 0.65rem;
+          font-size: 0.6rem;
           text-align: center;
-          padding: 6px 2px;
+          padding: 4px 1px;
         }
         .timetable-grid .class-label {
-          background-color: #2a2a2a;
+          background-color: #374151;
           color: white;
           font-weight: 700;
-          font-size: 0.75rem;
+          font-size: 0.65rem;
           text-align: center;
-          width: 36px;
+          width: 40px;
+          padding: 3px 1px;
         }
         .timetable-grid .cell-content {
-          font-size: 0.65rem;
+          font-size: 0.6rem;
           font-weight: 700;
           text-align: center;
-          padding: 4px 2px;
+          padding: 3px 1px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -426,46 +412,50 @@ export default function TimetableView() {
           text-orientation: mixed;
           transform: rotate(180deg);
           font-weight: 900;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
           letter-spacing: 0.1em;
           text-align: center;
-          background-color: #f3f4f6;
-          color: #1a1a1a;
-          width: 28px;
+          background-color: #1f2937;
+          color: white;
+          width: 26px;
         }
         .timetable-grid .divider-col {
-          background-color: #f3f4f6;
+          background-color: #e5e7eb;
           font-weight: 900;
-          font-size: 1.1rem;
+          font-size: 1rem;
           color: #1a1a1a;
           text-align: center;
-          width: 22px;
+          width: 18px;
+          padding: 2px;
         }
         .timetable-grid .extra-header {
           background-color: #1e3a5f;
           color: white;
           font-weight: 700;
-          font-size: 0.6rem;
+          font-size: 0.55rem;
           text-align: center;
           writing-mode: vertical-rl;
           text-orientation: mixed;
           transform: rotate(180deg);
-          padding: 6px 2px;
-          width: 32px;
+          padding: 4px 1px;
+          width: 28px;
         }
         .timetable-grid .extra-cell {
           background-color: #f8fafc;
-          font-size: 0.55rem;
+          font-size: 0.5rem;
           font-weight: 600;
           text-align: center;
-          padding: 4px 2px;
+          padding: 3px 1px;
           color: #334155;
         }
         .timetable-grid .even-row {
           background-color: #ffffff;
         }
         .timetable-grid .odd-row {
-          background-color: #fafafa;
+          background-color: #f9fafb;
+        }
+        .timetable-grid .has-data {
+          background-color: #eff6ff;
         }
       `}</style>
 
@@ -535,25 +525,39 @@ export default function TimetableView() {
         <div className="overflow-x-auto">
           <table
             className="timetable-grid w-full"
-            style={{ minWidth: `${280 + lessonSlots.length * 80 + EXTRACURRICULAR_COLUMNS.length * 40}px` }}
+            style={{
+              minWidth: `${200 + lessonSlots.length * 85 + (lessonSlots.length > 0 ? (lessonSlots.length - 1) * 22 : 0) + EXTRACURRICULAR_COLUMNS.length * 32}px`,
+            }}
           >
             <thead>
-              {/* Time slot row */}
               <tr>
-                <th className="day-header" colSpan={1} rowSpan={2} style={{ width: '28px' }}></th>
-                <th className="class-label" rowSpan={2} style={{ width: '36px' }}></th>
-                {lessonSlots.map((slot) => (
+                <th
+                  className="day-header"
+                  colSpan={1}
+                  rowSpan={2}
+                  style={{ width: '26px' }}
+                ></th>
+                <th
+                  className="class-label"
+                  rowSpan={2}
+                  style={{ width: '40px' }}
+                ></th>
+                {lessonSlots.map((slot, idx) => (
                   <React.Fragment key={slot.id}>
-                    <th className="slot-header">
-                      {formatTimeDisplay(slot.start_time)}–{formatTimeDisplay(slot.end_time)}
+                    <th className="slot-header" style={{ minWidth: '80px' }}>
+                      {formatTimeDisplay(slot.start_time)}–
+                      {formatTimeDisplay(slot.end_time)}
                     </th>
-                    {VERTICAL_DIVIDERS[slot.slot_order] && (
-                      <th className="slot-header" style={{ width: '22px', fontSize: '0.55rem', padding: '2px' }}></th>
+                    {idx < lessonSlots.length - 1 && (
+                      <th
+                        className="slot-header"
+                        style={{ width: '18px', padding: '0' }}
+                      ></th>
                     )}
                   </React.Fragment>
                 ))}
                 {EXTRACURRICULAR_COLUMNS.map((col) => (
-                  <th key={col} className="extra-header" style={{ width: '36px' }}>
+                  <th key={col} className="extra-header" style={{ width: '30px' }}>
                     {col}
                   </th>
                 ))}
@@ -562,43 +566,43 @@ export default function TimetableView() {
             <tbody>
               {DAYS.map((day, dayIdx) => (
                 <React.Fragment key={day}>
-                  {CLASS_GROUPS.map((group, groupIdx) => {
-                    // Find class that matches this group
-                    const matchingClass = classes.find((c) => classMatchesGroup(c, group));
-                    const rowKey = `${day}-${group}`;
+                  {classGroups.map((group, groupIdx) => {
+                    const rowKey = `${day}-${group.id}`;
                     const isEvenGroup = groupIdx % 2 === 0;
 
                     return (
                       <tr key={rowKey} className={isEvenGroup ? 'even-row' : 'odd-row'}>
                         {/* Day label - only on first group row */}
                         {groupIdx === 0 && (
-                          <td
-                            className="day-cell"
-                            rowSpan={CLASS_GROUPS.length}
-                          >
+                          <td className="day-cell" rowSpan={classGroups.length}>
                             {day}
                           </td>
                         )}
                         {/* Class group label */}
-                        <td className="class-label">{group}</td>
+                        <td className="class-label">{group.displayName}</td>
                         {/* Lesson cells */}
-                        {lessonSlots.map((slot) => {
-                          const entriesForCell = matchingClass
-                            ? getEntries(dayIdx + 1, matchingClass.id, slot.id)
-                            : [];
+                        {lessonSlots.map((slot, slotIdx) => {
+                          const entriesForCell = getEntries(
+                            dayIdx + 1,
+                            group.id,
+                            slot.id
+                          );
                           const display = getCellDisplay(entriesForCell);
-                          const hasDivider = !!VERTICAL_DIVIDERS[slot.slot_order];
+                          const hasData = !!display;
 
                           return (
                             <React.Fragment key={`${rowKey}-${slot.id}`}>
-                              <td className="cell-content" style={{ minWidth: '70px' }}>
+                              <td
+                                className={`cell-content ${hasData ? 'has-data' : ''}`}
+                                style={{ minWidth: '80px' }}
+                              >
                                 {display || (
                                   <span className="text-gray-300">—</span>
                                 )}
                               </td>
-                              {hasDivider && (
+                              {slotIdx < lessonSlots.length - 1 && (
                                 <td className="divider-col">
-                                  {VERTICAL_DIVIDERS[slot.slot_order]}
+                                  {DIVIDER_LETTERS[slotIdx % DIVIDER_LETTERS.length]}
                                 </td>
                               )}
                             </React.Fragment>
@@ -606,37 +610,8 @@ export default function TimetableView() {
                         })}
                         {/* Extracurricular cells */}
                         {EXTRACURRICULAR_COLUMNS.map((col) => (
-                          <td
-                            key={`${rowKey}-${col}`}
-                            className="extra-cell"
-                          >
-                            {col === 'Clubs & Societies' && groupIdx === 0
-                              ? 'Club'
-                              : col === 'Guidance & Counselling' && groupIdx === 0
-                              ? 'Guidance'
-                              : col === 'Games & Sports' && groupIdx === 0
-                              ? 'Games'
-                              : col === 'Careers' && groupIdx === 0
-                              ? 'Careers'
-                              : col === 'Clubs & Societies' && groupIdx === 1
-                              ? '&'
-                              : col === 'Guidance & Counselling' && groupIdx === 1
-                              ? '&'
-                              : col === 'Games & Sports' && groupIdx === 1
-                              ? '&'
-                              : col === 'Careers' && groupIdx === 1
-                              ? ''
-                              : col === 'Clubs & Societies' && groupIdx === 2
-                              ? 'Societies'
-                              : col === 'Guidance & Counselling' && groupIdx === 2
-                              ? 'Counselling'
-                              : col === 'Games & Societies' && groupIdx === 2
-                              ? 'Sports'
-                              : col === 'Games & Sports' && groupIdx === 2
-                              ? 'Sports'
-                              : col === 'Careers' && groupIdx === 2
-                              ? ''
-                              : ''}
+                          <td key={`${rowKey}-${col}`} className="extra-cell">
+                            {getExtracurricularText(col, groupIdx)}
                           </td>
                         ))}
                       </tr>
@@ -655,13 +630,18 @@ export default function TimetableView() {
             </h3>
             <div className="flex flex-wrap gap-3">
               {teacherKey.map((teacher) => (
-                <div key={teacher.teacher_number} className="flex items-center gap-1.5 text-xs">
+                <div
+                  key={teacher.teacher_number}
+                  className="flex items-center gap-1.5 text-xs"
+                >
                   <span className="font-black text-blue-600">
                     T{String(teacher.teacher_number).padStart(2, '0')}
                   </span>
                   <span className="text-gray-600">{teacher.teacher_name}</span>
                   {teacher.subjects.length > 0 && (
-                    <span className="text-gray-400">({teacher.subjects.join(', ')})</span>
+                    <span className="text-gray-400">
+                      ({teacher.subjects.join(', ')})
+                    </span>
                   )}
                 </div>
               ))}
