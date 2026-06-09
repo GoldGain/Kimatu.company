@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from "@/lib/supabase/client";
+import { supabaseUntyped } from "@/lib/supabase/client";
 import { createScopedUser } from '@/lib/supabase/createUser';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStudents } from '@/hooks/useSupabaseData';
@@ -42,6 +43,43 @@ export default function SchoolAdminStudents() {
     fetchClasses();
   }, [user?.schoolId]);
 
+  /**
+   * Ensures a parent account exists for the given email.
+   * - If a profile with that email already exists → return its id.
+   * - If not → create a new auth user with role=parent and return the new id.
+   * Returns the parent profile id (UUID).
+   */
+  const ensureParentAccount = async (parentEmail: string, parentName: string): Promise<string> => {
+    const normalizedEmail = parentEmail.trim().toLowerCase();
+
+    // 1. Check if a profile already exists with this email
+    const { data: existingProfile } = await supabaseUntyped
+      .from('profiles')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (existingProfile?.id) {
+      return existingProfile.id as string;
+    }
+
+    // 2. Create a new parent account
+    const nameParts = (parentName || 'Parent').trim().split(' ');
+    const firstName = nameParts[0] || 'Parent';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    const result = await createScopedUser({
+      email: normalizedEmail,
+      password: 'Parent@2025',
+      first_name: firstName,
+      last_name: lastName,
+      role: 'parent',
+      school_id: user?.schoolId || null,
+    });
+
+    return result.user.id;
+  };
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdding(true);
@@ -50,7 +88,7 @@ export default function SchoolAdminStudents() {
       const studentEmail = formData.student_email || `${formData.admission_number.toLowerCase().replace(/\s+/g, '')}@student.edu`;
       const studentPassword = `${formData.admission_number}@2025`;
 
-      // 1. Create auth user without disrupting the school-admin session.
+      // 1. Create auth user for student without disrupting the school-admin session.
       const authData = await createScopedUser({
         email: studentEmail,
         password: studentPassword,
@@ -61,19 +99,32 @@ export default function SchoolAdminStudents() {
         metadata: { admission_number: formData.admission_number },
       });
 
-      const userId = authData.user.id;
+      const studentUserId = authData.user.id;
 
-      // 2. Insert into students table
-      const { error: studentError } = await supabase
+      // 2. Handle parent account creation/lookup
+      let parentId: string | null = null;
+      if (formData.parent_email && formData.parent_email.trim()) {
+        try {
+          parentId = await ensureParentAccount(formData.parent_email, formData.parent_name);
+        } catch (parentError: any) {
+          // Log but don't block student creation if parent creation fails
+          console.warn('Parent account creation warning:', parentError.message);
+          toast.warning(`Student created but parent account issue: ${parentError.message}`);
+        }
+      }
+
+      // 3. Insert into students table
+      const { data: studentData, error: studentError } = await supabaseUntyped
         .from('students')
         .insert({
-          profile_id: userId,
+          profile_id: studentUserId,
           school_id: user?.schoolId,
           admission_number: formData.admission_number,
           first_name: formData.first_name,
           last_name: formData.last_name,
           class_id: formData.class_id,
           student_email: studentEmail,
+          parent_id: parentId,
           parent_name: formData.parent_name,
           parent_phone: formData.parent_phone,
           parent_email: formData.parent_email,
@@ -82,11 +133,31 @@ export default function SchoolAdminStudents() {
           gender: formData.gender || null,
           is_active: true,
           enrollment_date: new Date().toISOString().split('T')[0],
-        });
+        })
+        .select('id')
+        .single();
 
       if (studentError) throw new Error('Database error: ' + studentError.message);
 
-      toast.success(`✅ Student added! Login: ${studentEmail} | Password: ${studentPassword}`);
+      const studentId = (studentData as any)?.id;
+
+      // 4. Create parent_student_links row so parent portal shows the child
+      if (parentId && studentId) {
+        const { error: linkError } = await supabaseUntyped
+          .from('parent_student_links')
+          .upsert(
+            { parent_id: parentId, student_id: studentId },
+            { onConflict: 'parent_id,student_id' }
+          );
+        if (linkError) {
+          console.warn('parent_student_links upsert warning:', linkError.message);
+        }
+      }
+
+      const parentMsg = parentId
+        ? ` | Parent: ${formData.parent_email} (Password: Parent@2025)`
+        : '';
+      toast.success(`✅ Student added! Login: ${studentEmail} | Password: ${studentPassword}${parentMsg}`);
       setShowAdd(false);
       setFormData({
         admission_number: '', student_email: '', first_name: '', last_name: '', class_id: '',
@@ -140,7 +211,8 @@ export default function SchoolAdminStudents() {
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
           <h3 className="text-lg font-semibold mb-2">Add New Student</h3>
-          <p className="text-xs text-blue-600 mb-4">Password will be set to: <strong>[Admission Number]@2025</strong></p>
+          <p className="text-xs text-blue-600 mb-1">Student password: <strong>[Admission Number]@2025</strong></p>
+          <p className="text-xs text-green-600 mb-4">Parent account auto-created with password: <strong>Parent@2025</strong></p>
           <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <input placeholder="Admission Number *" value={formData.admission_number} onChange={e => setFormData({...formData, admission_number: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" required />
             <input placeholder="Student Email (optional)" value={formData.student_email} onChange={e => setFormData({...formData, student_email: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
@@ -164,7 +236,13 @@ export default function SchoolAdminStudents() {
             <input type="date" value={formData.date_of_birth} onChange={e => setFormData({...formData, date_of_birth: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
             <input placeholder="Parent Name" value={formData.parent_name} onChange={e => setFormData({...formData, parent_name: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
             <input placeholder="Parent Phone" value={formData.parent_phone} onChange={e => setFormData({...formData, parent_phone: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
-            <input placeholder="Parent Email" value={formData.parent_email} onChange={e => setFormData({...formData, parent_email: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+            <input 
+              placeholder="Parent Email (auto-creates parent account)" 
+              value={formData.parent_email} 
+              onChange={e => setFormData({...formData, parent_email: e.target.value})} 
+              className="w-full px-4 py-2.5 border rounded-xl text-sm" 
+              type="email"
+            />
             
             <div className="md:col-span-3 flex justify-end gap-3 mt-2">
               <button type="button" onClick={() => setShowAdd(false)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
@@ -204,7 +282,7 @@ export default function SchoolAdminStudents() {
                     <td className="px-6 py-4 text-sm text-gray-600">{s.classes?.name || '-'}</td>
                     <td className="px-6 py-4">
                       <div className="text-sm">{s.parent_name || '-'}</div>
-                      <div className="text-xs text-gray-500">{s.parent_phone || '-'}</div>
+                      <div className="text-xs text-gray-500">{s.parent_email || s.parent_phone || '-'}</div>
                     </td>
                   </tr>
                 ))

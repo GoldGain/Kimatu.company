@@ -80,17 +80,27 @@ export default function ParentChildren() {
   useEffect(() => { fetchChildren(); }, []);
 
   const fetchChildren = async () => {
+    // Load children linked via parent_student_links
     const { data: linked } = await supabaseUntyped
       .from('parent_student_links')
       .select('*, students(*, classes(name))')
       .eq('parent_id', user?.id);
     if (linked) {
-      const kids = linked.map((l: any) => l.students as unknown as ChildRecord);
+      const kids = linked.map((l: any) => l.students as unknown as ChildRecord).filter(Boolean);
       setChildren(kids);
       if (kids.length > 0) selectChildDetails(kids[0]);
     }
   };
 
+  /**
+   * Fetches the school's payment config.
+   * Payment is ONLY enabled if:
+   * 1. The school's reseller has parent_pay_enabled = true
+   * 2. The reseller has a valid paystack_public_key
+   *
+   * This means ONLY Theophillus's schools will show the payment button,
+   * since only Theophillus's reseller records have these fields set.
+   */
   const fetchSchoolPayConfig = async (schoolId: string): Promise<SchoolPayConfig | null> => {
     const { data: school } = await supabaseUntyped
       .from('schools')
@@ -100,19 +110,25 @@ export default function ParentChildren() {
     if (!school) return null;
 
     let resellerPaystackKey: string | null = null;
+    let resellerPayEnabled = false;
+
     if (school.reseller_id) {
       const { data: reseller } = await supabaseUntyped
         .from('resellers')
-        .select('paystack_public_key, parent_pay_enabled')
+        .select('paystack_public_key, parent_pay_enabled, name')
         .eq('id', school.reseller_id)
         .maybeSingle();
+
+      // Only enable payment if reseller has both parent_pay_enabled AND a valid Paystack key
       if (reseller?.parent_pay_enabled && reseller?.paystack_public_key) {
         resellerPaystackKey = reseller.paystack_public_key;
+        resellerPayEnabled = true;
       }
     }
 
     return {
-      parent_pay_enabled: school.parent_pay_enabled && !!resellerPaystackKey,
+      // Payment gate: school must have parent_pay_enabled AND reseller must have key
+      parent_pay_enabled: !!(school.parent_pay_enabled && resellerPayEnabled && resellerPaystackKey),
       view_results_fee: school.view_results_fee || 50,
       pdf_report_fee: school.pdf_report_fee || 50,
       reseller_id: school.reseller_id,
@@ -150,7 +166,6 @@ export default function ParentChildren() {
     setChildAttendance([]);
 
     const payConfig = await fetchSchoolPayConfig(child.school_id);
-    console.log('[DEBUG] payConfig:', payConfig);
     setSchoolPayConfig(payConfig);
 
     const { data: attendance } = await supabase
@@ -163,10 +178,9 @@ export default function ParentChildren() {
 
     if (payConfig?.parent_pay_enabled) {
       const paid = await checkResultsPaid(child.id);
-      console.log('[DEBUG] paid:', paid, 'child:', child.id);
       if (paid) await loadResults(child.id);
     } else {
-      console.log('[DEBUG] Loading results without payment check');
+      // Free results for non-Theophillus schools
       await loadResults(child.id);
     }
   };
@@ -174,6 +188,10 @@ export default function ParentChildren() {
   const handlePayForResults = useCallback(async () => {
     if (!selectedChild || !schoolPayConfig || !user?.email) {
       toast.error('Missing payment information');
+      return;
+    }
+    if (!schoolPayConfig.reseller_paystack_public_key) {
+      toast.error('Payment not configured for this school');
       return;
     }
     setPaying(true);
@@ -185,9 +203,9 @@ export default function ParentChildren() {
       const reference = `results_${selectedChild.id}_${Date.now()}`;
 
       const handler = window.PaystackPop.setup({
-        key: schoolPayConfig.reseller_paystack_public_key!,
+        key: schoolPayConfig.reseller_paystack_public_key,
         email: user.email,
-        amount: amount * 100,
+        amount: amount * 100, // Paystack uses kobo/cents
         currency: 'KES',
         ref: reference,
         metadata: {
@@ -254,10 +272,13 @@ export default function ParentChildren() {
         <p className="text-sm text-[#666666]">View your children&apos;s progress</p>
       </div>
       <div className="flex gap-3 flex-wrap">
+        {children.length === 0 && (
+          <p className="text-sm text-gray-500">No children linked to your account yet. Contact your school admin.</p>
+        )}
         {children.map((child, i) => (
           <button key={i} onClick={() => selectChildDetails(child)} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${selectedChild?.id === child.id ? 'bg-[#2563EB] text-white' : 'bg-white text-[#111111] shadow-sm hover:bg-gray-50'}`}>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedChild?.id === child.id ? 'bg-white/20' : 'bg-blue-100 text-blue-600'}`}>
-              {child.first_name[0]}{child.last_name[0]}
+              {child.first_name?.[0]}{child.last_name?.[0]}
             </div>
             <span className="text-sm font-medium">{child.first_name} {child.last_name}</span>
           </button>
@@ -267,7 +288,7 @@ export default function ParentChildren() {
         <>
           <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
             <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">{selectedChild.first_name[0]}{selectedChild.last_name[0]}</div>
+              <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">{selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}</div>
               <div>
                 <h3 className="text-lg font-semibold">{selectedChild.first_name} {selectedChild.last_name}</h3>
                 <p className="text-sm text-[#666666]">{selectedChild.classes?.name} | {selectedChild.admission_number} | {selectedChild.curriculum}</p>
@@ -303,7 +324,9 @@ export default function ParentChildren() {
                 </div>
                 <div>
                   <p className="font-semibold text-[#111111] text-lg">Results are locked</p>
-                  <p className="text-sm text-[#666666] mt-1">Pay <strong>KES {schoolPayConfig?.view_results_fee || 50}</strong> to view {selectedChild.first_name}&apos;s results</p>
+                  <p className="text-sm text-[#666666] mt-1">
+                    Pay <strong>KES {schoolPayConfig?.view_results_fee || 50}</strong> to view {selectedChild.first_name}&apos;s results
+                  </p>
                 </div>
                 <button
                   onClick={handlePayForResults}

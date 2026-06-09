@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, Loader2, BookOpen, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Plus, Loader2, BookOpen, Pencil, Trash2, X, Check, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type CurriculumType = 'CBE' | '844';
@@ -20,6 +20,36 @@ interface Subject {
   created_at?: string | null;
 }
 
+// Pre-populated subjects by curriculum
+const CBE_SUBJECTS: { name: string; category: CategoryType }[] = [
+  { name: 'English',               category: 'Languages'    },
+  { name: 'Kiswahili',             category: 'Languages'    },
+  { name: 'Mathematics',           category: 'Mathematics'  },
+  { name: 'Integrated Science',    category: 'Sciences'     },
+  { name: 'Social Studies',        category: 'Humanities'   },
+  { name: 'Pre-Technical Studies', category: 'Technical'    },
+  { name: 'Business Studies',      category: 'Humanities'   },
+  { name: 'Agriculture',           category: 'Sciences'     },
+  { name: 'Creative Arts',         category: 'Creative'     },
+  { name: 'Physical Education',    category: 'Creative'     },
+  { name: 'Religious Education',   category: 'Humanities'   },
+];
+
+const SUBJECTS_844: { name: string; category: CategoryType }[] = [
+  { name: 'English',          category: 'Languages'   },
+  { name: 'Kiswahili',        category: 'Languages'   },
+  { name: 'Mathematics',      category: 'Mathematics' },
+  { name: 'Biology',          category: 'Sciences'    },
+  { name: 'Chemistry',        category: 'Sciences'    },
+  { name: 'Physics',          category: 'Sciences'    },
+  { name: 'History',          category: 'Humanities'  },
+  { name: 'Geography',        category: 'Humanities'  },
+  { name: 'CRE',              category: 'Humanities'  },
+  { name: 'Business Studies', category: 'Humanities'  },
+  { name: 'Agriculture',      category: 'Sciences'    },
+  { name: 'Computer Studies', category: 'Technical'   },
+];
+
 const emptyForm = {
   name: '',
   code: '',
@@ -34,6 +64,10 @@ export default function SchoolAdminSubjects() {
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
+  const [bulkAdding, setBulkAdding] = useState(false);
+
+  // Quick-add from pre-populated list
+  const [selectedPreset, setSelectedPreset] = useState<string>('');
 
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,6 +92,20 @@ export default function SchoolAdminSubjects() {
     if (user?.schoolId) fetchSubjects();
   }, [user?.schoolId, fetchSubjects]);
 
+  // Get pre-populated list for selected curriculum
+  const getPresetList = (curriculum: CurriculumType) =>
+    curriculum === 'CBE' ? CBE_SUBJECTS : SUBJECTS_844;
+
+  // Get subjects not yet added for the selected curriculum
+  const getAvailablePresets = (curriculum: CurriculumType) => {
+    const existing = subjects
+      .filter(s => s.curriculum === curriculum)
+      .map(s => s.name.toLowerCase());
+    return getPresetList(curriculum).filter(
+      p => !existing.includes(p.name.toLowerCase())
+    );
+  };
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) { toast.error('Subject name is required'); return; }
@@ -79,6 +127,56 @@ export default function SchoolAdminSubjects() {
       fetchSubjects();
     }
     setAdding(false);
+  };
+
+  const handleQuickAdd = async () => {
+    if (!selectedPreset) { toast.error('Select a subject from the list'); return; }
+    const [curriculum, name] = selectedPreset.split('::');
+    const preset = getPresetList(curriculum as CurriculumType).find(p => p.name === name);
+    if (!preset) return;
+
+    setAdding(true);
+    const { error } = await supabaseUntyped.from('subjects').insert([{
+      school_id: user?.schoolId,
+      name: preset.name,
+      code: null,
+      curriculum: curriculum,
+      category: preset.category,
+      class_levels: [],
+    }]);
+    if (error) {
+      toast.error('Failed to add subject: ' + error.message);
+    } else {
+      toast.success(`"${preset.name}" added!`);
+      setSelectedPreset('');
+      fetchSubjects();
+    }
+    setAdding(false);
+  };
+
+  const handleBulkAdd = async (curriculum: CurriculumType) => {
+    const available = getAvailablePresets(curriculum);
+    if (available.length === 0) {
+      toast.info(`All ${curriculum === 'CBE' ? 'CBE' : '8-4-4'} subjects already added!`);
+      return;
+    }
+    setBulkAdding(true);
+    const rows = available.map(p => ({
+      school_id: user?.schoolId,
+      name: p.name,
+      code: null,
+      curriculum,
+      category: p.category,
+      class_levels: [],
+    }));
+    const { error } = await supabaseUntyped.from('subjects').insert(rows);
+    if (error) {
+      toast.error('Failed to bulk add subjects: ' + error.message);
+    } else {
+      toast.success(`Added ${available.length} ${curriculum === 'CBE' ? 'CBE' : '8-4-4'} subjects!`);
+      fetchSubjects();
+    }
+    setBulkAdding(false);
   };
 
   const startEdit = (subject: Subject) => {
@@ -138,7 +236,7 @@ export default function SchoolAdminSubjects() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#111111]">Subjects</h1>
-          <p className="text-sm text-[#666666]">{subjects.length} subject{subjects.length !== 1 ? 's' : ''} registered for your school</p>
+          <p className="text-sm text-[#666666]">{subjects.length} subject{subjects.length !== 1 ? 's' : ''} registered</p>
         </div>
         <button
           onClick={() => setShowAdd(!showAdd)}
@@ -149,10 +247,63 @@ export default function SchoolAdminSubjects() {
         </button>
       </div>
 
-      {/* Add Subject Form */}
+      {/* Quick-Add from Pre-populated List */}
+      <div className="bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+        <div className="flex items-center gap-2 mb-3">
+          <Wand2 className="w-5 h-5 text-emerald-600" />
+          <h3 className="font-semibold text-[#111111]">Quick Add from Standard Subjects</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+          <select
+            value={selectedPreset}
+            onChange={e => setSelectedPreset(e.target.value)}
+            className={`flex-1 ${inputClass}`}
+          >
+            <option value="">— Select a subject to add —</option>
+            <optgroup label="CBE Subjects">
+              {getAvailablePresets('CBE').map(p => (
+                <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (CBE)</option>
+              ))}
+            </optgroup>
+            <optgroup label="8-4-4 Subjects">
+              {getAvailablePresets('844').map(p => (
+                <option key={`844::${p.name}`} value={`844::${p.name}`}>{p.name} (8-4-4)</option>
+              ))}
+            </optgroup>
+          </select>
+          <button
+            onClick={handleQuickAdd}
+            disabled={adding || !selectedPreset}
+            className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            Add Selected
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => handleBulkAdd('CBE')}
+            disabled={bulkAdding}
+            className="flex items-center gap-2 border border-blue-200 text-blue-700 bg-blue-50 px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-100 disabled:opacity-50"
+          >
+            {bulkAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+            Add All CBE Subjects ({getAvailablePresets('CBE').length} remaining)
+          </button>
+          <button
+            onClick={() => handleBulkAdd('844')}
+            disabled={bulkAdding}
+            className="flex items-center gap-2 border border-purple-200 text-purple-700 bg-purple-50 px-4 py-2 rounded-xl text-sm font-medium hover:bg-purple-100 disabled:opacity-50"
+          >
+            {bulkAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+            Add All 8-4-4 Subjects ({getAvailablePresets('844').length} remaining)
+          </button>
+        </div>
+      </div>
+
+      {/* Add Subject Form (custom) */}
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-          <h3 className="text-lg font-semibold mb-4 text-[#111111]">Add New Subject</h3>
+          <h3 className="text-lg font-semibold mb-4 text-[#111111]">Add Custom Subject</h3>
           <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Subject Name *</label>
@@ -226,7 +377,7 @@ export default function SchoolAdminSubjects() {
         <div className="bg-white rounded-2xl p-12 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] text-center">
           <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <p className="text-[#666666] font-medium">No subjects yet</p>
-          <p className="text-sm text-gray-400 mt-1">Click "Add Subject" to create your first subject.</p>
+          <p className="text-sm text-gray-400 mt-1">Use the quick-add buttons above to add standard subjects.</p>
         </div>
       ) : (
         Object.entries(grouped).map(([curriculum, subjectList]) => (

@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getSchoolLevelBand, gradeDisplayLabel } from '@/lib/grading';
+import { getSchoolLevelBand, gradeDisplayLabel, calculateCompetencyGrade, calculate844Grade } from '@/lib/grading';
 
 function getPercentage(result: any): number {
   if (result.percentage !== undefined && result.percentage !== null) return Number(result.percentage);
@@ -13,30 +13,25 @@ function getPercentage(result: any): number {
   return outOf > 0 ? Math.round((Number(result.marks || 0) / outOf) * 100) : 0;
 }
 
-function isPrimaryLevel(level: number | null | undefined): boolean {
-  return Number(level || 0) <= 6;
+// Use shared grading library — grade_level takes priority over level
+function isPrimaryLevel(classData: any): boolean {
+  const gl = classData?.grade_level ?? classData?.level;
+  return Number(gl || 0) <= 6;
 }
 
-function gradeFromPercentage(percentage: number, level: number | null | undefined) {
-  if (isPrimaryLevel(level)) {
-    if (percentage >= 75) return { grade: 'EE', points: null, descriptor: 'Exceeding Expectation' };
-    if (percentage >= 41) return { grade: 'ME', points: null, descriptor: 'Meeting Expectation' };
-    if (percentage >= 21) return { grade: 'AE', points: null, descriptor: 'Approaching Expectation' };
-    return { grade: 'BE', points: null, descriptor: 'Below Expectation' };
+function gradeFromPercentage(percentage: number, classData: any) {
+  const curriculum = String(classData?.curriculum || 'CBE').toUpperCase();
+  if (curriculum === '844' || curriculum === '8-4-4') {
+    const g = calculate844Grade(percentage);
+    return { grade: g.grade, points: g.points, descriptor: g.descriptor, is844: true };
   }
-
-  if (percentage >= 90) return { grade: 'EE1', points: 8, descriptor: 'Exceeding Expectation 1' };
-  if (percentage >= 75) return { grade: 'EE2', points: 7, descriptor: 'Exceeding Expectation 2' };
-  if (percentage >= 58) return { grade: 'ME1', points: 6, descriptor: 'Meeting Expectation 1' };
-  if (percentage >= 41) return { grade: 'ME2', points: 5, descriptor: 'Meeting Expectation 2' };
-  if (percentage >= 31) return { grade: 'AE1', points: 4, descriptor: 'Approaching Expectation 1' };
-  if (percentage >= 21) return { grade: 'AE2', points: 3, descriptor: 'Approaching Expectation 2' };
-  if (percentage >= 11) return { grade: 'BE1', points: 2, descriptor: 'Below Expectation 1' };
-  return { grade: 'BE2', points: 1, descriptor: 'Below Expectation 2' };
+  const band = getSchoolLevelBand(classData);
+  const g = calculateCompetencyGrade(percentage, band);
+  return { grade: g.subLevel, points: g.points || null, descriptor: g.descriptor, is844: false };
 }
 
-function overallGradeLabel(avgPct: number, level?: number | null) {
-  return gradeFromPercentage(avgPct, level).grade;
+function overallGradeLabel(avgPct: number, classData?: any) {
+  return gradeFromPercentage(avgPct, classData).grade;
 }
 
 function get844Grade(percentage: number) {
@@ -123,7 +118,7 @@ export default function StudentReportCard() {
     try {
       const { data: studentData } = await supabaseUntyped
         .from('students')
-        .select('*, classes(name, level)')
+        .select('*, classes(name, level, grade_level, curriculum)')
         .eq('profile_id', user?.id)
         .single();
       setStudent(studentData);
@@ -215,14 +210,16 @@ export default function StudentReportCard() {
       const term = terms.find(t => t.id === selectedTerm);
       const displaySchoolName = schoolName || 'School';
 
-      const level = student.classes?.level;
+      // Use grade_level first (new column), fall back to level
+      const level = student.classes?.grade_level ?? student.classes?.level;
       const totalMarks = results.reduce((s, r) => s + (Number(r.marks || 0)), 0);
       const avgPercentage = results.length ? (results.reduce((s, r) => s + getPercentage(r), 0) / results.length) : 0;
 
       // Use appropriate grading system based on curriculum
+      const classDataForGrading = student?.classes || {};
       const totalPoints = is844
         ? results.reduce((s, r) => s + (get844Grade(getPercentage(r)).points || 0), 0)
-        : (isPrimaryLevel(level) ? null : results.reduce((s, r) => s + (gradeFromPercentage(getPercentage(r), level).points || 0), 0));
+        : (isPrimaryLevel(classDataForGrading) ? null : results.reduce((s, r) => s + (gradeFromPercentage(getPercentage(r), classDataForGrading).points || 0), 0));
 
       // Deviation
       const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
@@ -272,7 +269,7 @@ export default function StudentReportCard() {
 
       const tableBody = results.map((r, i) => {
         const percentage = getPercentage(r);
-        const grading = is844 ? get844Grade(percentage) : gradeFromPercentage(percentage, level);
+        const grading = is844 ? get844Grade(percentage) : gradeFromPercentage(percentage, classDataForGrading);
         return [
           i + 1,
           r.subjects?.name || 'N/A',
@@ -305,7 +302,7 @@ export default function StudentReportCard() {
       doc.text(`Total Marks: ${totalMarks}`, 80, finalY + 8);
       doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 150, finalY + 8);
       doc.text(`Class Position: ${formatPosition(position, totalStudents)}`, 20, finalY + 18);
-      doc.text(`Overall Grade: ${is844 ? get844Grade(avgPercentage).grade : overallGradeLabel(avgPercentage, level)}`, 80, finalY + 18);
+      doc.text(`Overall Grade: ${is844 ? get844Grade(avgPercentage).grade : overallGradeLabel(avgPercentage, classDataForGrading)}`, 80, finalY + 18);
       if (totalPoints !== null) {
         doc.text(`Total Points: ${totalPoints}`, 150, finalY + 18);
       }

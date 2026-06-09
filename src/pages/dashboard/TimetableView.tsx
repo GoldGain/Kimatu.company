@@ -67,18 +67,23 @@ const SUBJECT_CODE_MAP: Record<string, string> = {
   'Creative Arts': 'CAS',
 };
 
+/**
+ * CORRECT BREAK ORDER:
+ * 2 lessons → FIRST BREAK (9:40–10:20) → 2 lessons → SECOND BREAK (11:40–12:20)
+ * → 2 lessons → LUNCH (13:40–14:20) → 2 lessons → ACTIVITIES (15:40–16:20)
+ */
 const DEFAULT_SLOTS: TimeSlot[] = [
-  { id: 'fallback-1', slot_order: 1, start_time: '08:20:00', end_time: '09:00:00', slot_type: 'lesson', label: 'Lesson 1' },
-  { id: 'fallback-2', slot_order: 2, start_time: '09:00:00', end_time: '09:40:00', slot_type: 'lesson', label: 'Lesson 2' },
-  { id: 'fallback-3', slot_order: 3, start_time: '09:40:00', end_time: '10:20:00', slot_type: 'lesson', label: 'Lesson 3' },
-  { id: 'fallback-4', slot_order: 4, start_time: '10:20:00', end_time: '11:00:00', slot_type: 'break', label: 'FIRST BREAK' },
-  { id: 'fallback-5', slot_order: 5, start_time: '11:00:00', end_time: '11:40:00', slot_type: 'lesson', label: 'Lesson 4' },
-  { id: 'fallback-6', slot_order: 6, start_time: '11:40:00', end_time: '12:20:00', slot_type: 'lesson', label: 'Lesson 5' },
-  { id: 'fallback-7', slot_order: 7, start_time: '12:20:00', end_time: '12:50:00', slot_type: 'break', label: 'SECOND BREAK' },
-  { id: 'fallback-8', slot_order: 8, start_time: '12:50:00', end_time: '13:30:00', slot_type: 'lunch', label: 'LUNCH' },
-  { id: 'fallback-9', slot_order: 9, start_time: '13:30:00', end_time: '14:10:00', slot_type: 'lesson', label: 'Lesson 6' },
-  { id: 'fallback-10', slot_order: 10, start_time: '14:10:00', end_time: '14:50:00', slot_type: 'lesson', label: 'Lesson 7' },
-  { id: 'fallback-11', slot_order: 11, start_time: '14:50:00', end_time: '15:20:00', slot_type: 'lesson', label: 'Lesson 8' },
+  { id: 'fallback-1',  slot_order: 1,  start_time: '08:20:00', end_time: '09:00:00', slot_type: 'lesson', label: 'Lesson 1' },
+  { id: 'fallback-2',  slot_order: 2,  start_time: '09:00:00', end_time: '09:40:00', slot_type: 'lesson', label: 'Lesson 2' },
+  { id: 'fallback-3',  slot_order: 3,  start_time: '09:40:00', end_time: '10:20:00', slot_type: 'break',  label: 'FIRST BREAK' },
+  { id: 'fallback-4',  slot_order: 4,  start_time: '10:20:00', end_time: '11:00:00', slot_type: 'lesson', label: 'Lesson 3' },
+  { id: 'fallback-5',  slot_order: 5,  start_time: '11:00:00', end_time: '11:40:00', slot_type: 'lesson', label: 'Lesson 4' },
+  { id: 'fallback-6',  slot_order: 6,  start_time: '11:40:00', end_time: '12:20:00', slot_type: 'break',  label: 'SECOND BREAK' },
+  { id: 'fallback-7',  slot_order: 7,  start_time: '12:20:00', end_time: '13:00:00', slot_type: 'lesson', label: 'Lesson 5' },
+  { id: 'fallback-8',  slot_order: 8,  start_time: '13:00:00', end_time: '13:40:00', slot_type: 'lesson', label: 'Lesson 6' },
+  { id: 'fallback-9',  slot_order: 9,  start_time: '13:40:00', end_time: '14:20:00', slot_type: 'lunch',  label: 'LUNCH' },
+  { id: 'fallback-10', slot_order: 10, start_time: '14:20:00', end_time: '15:00:00', slot_type: 'lesson', label: 'Lesson 7' },
+  { id: 'fallback-11', slot_order: 11, start_time: '15:00:00', end_time: '15:40:00', slot_type: 'lesson', label: 'Lesson 8' },
 ];
 
 const getSubjectCode = (name: string, code: string): string => {
@@ -321,7 +326,7 @@ export default function TimetableView() {
         <div>
           <h1 className="text-2xl font-black text-gray-900">School Timetable</h1>
           <p className="text-sm text-gray-500 font-medium">
-            {schoolName || 'School'} · exact blackboard layout · Math/English morning priority · MATH3 display format
+            {schoolName || 'School'} · 2 lessons → FIRST BREAK → 2 lessons → SECOND BREAK → 2 lessons → LUNCH → 2 lessons → ACTIVITIES
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -348,91 +353,110 @@ export default function TimetableView() {
         <div className="bg-gray-50 border-b-4 border-gray-200 text-gray-800 px-5 py-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-black tracking-widest uppercase">{schoolName || 'School'} Weekly Timetable</h2>
-            <p className="text-xs text-blue-600 font-bold uppercase tracking-wide">8:20 AM–3:20 PM · First Break 10:20–11:00 · Second Break 12:20–12:50 · Lunch 12:50–1:30 · Activities 3:20–4:20 PM</p>
+            <p className="text-xs text-blue-600 font-bold uppercase tracking-wide">
+              8:20 AM–3:40 PM · First Break 9:40–10:20 · Second Break 11:40–12:20 · Lunch 1:40–2:20 · Activities 3:40–4:20 PM
+            </p>
           </div>
-          <p className="text-xs text-gray-500 font-bold">Format example: <span className="text-gray-800">MATH</span><span className="text-blue-500">3</span> = Mathematics Teacher 3</p>
+          <p className="text-xs text-gray-500 font-bold">
+            {new Date().toLocaleDateString('en-KE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </p>
         </div>
 
-        <div className="overflow-x-auto bg-white p-3">
-          <table className="border-collapse w-full text-center" style={{ minWidth: `${Math.max(1180, 160 + timeSlots.length * 88)}px` }}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs" style={{ minWidth: '900px' }}>
             <thead>
-              <tr>
-                <th className="border-2 border-gray-200 bg-gray-100 text-blue-600 px-2 py-3 text-sm font-black w-16">DAY</th>
-                <th className="border-2 border-gray-200 bg-gray-100 text-blue-600 px-2 py-3 text-sm font-black w-16">CLASS</th>
-                {timeSlots.map((slot) => (
-                  <th key={slot.id} className={`border-2 border-gray-200 px-1 py-2 text-gray-800 ${slot.slot_type === 'lesson' ? 'bg-blue-100' : slot.slot_type === 'lunch' ? 'bg-yellow-100' : 'bg-indigo-100'}`}>
-                    <div className="text-[13px] font-black leading-tight">{formatTime(slot.start_time)}</div>
-                    <div className="text-[10px] text-gray-500 leading-tight">-</div>
-                    <div className="text-[13px] font-black leading-tight">{formatTime(slot.end_time)}</div>
-                    <div className="text-[9px] mt-1 uppercase tracking-wide text-blue-600">{slot.slot_type === 'lesson' ? slot.label : slot.label}</div>
+              <tr className="bg-gray-100 border-b-2 border-gray-300">
+                <th className="px-3 py-3 text-left font-black text-gray-700 border-r-2 border-gray-300 w-24">TIME</th>
+                {classes.map((cls) => (
+                  <th key={cls.id} className="px-2 py-3 text-center font-black text-gray-700 border-r border-gray-200 min-w-[60px]">
+                    {displayClassName(cls)}
+                    {cls.stream && <span className="block text-gray-400 font-normal">{cls.stream}</span>}
                   </th>
                 ))}
-                <th className="border-2 border-gray-200 bg-emerald-100 text-emerald-700 px-2 py-3 text-sm font-black w-28">3:20–4:20<br />ACTIVITY</th>
               </tr>
             </thead>
             <tbody>
-              {classes.length === 0 ? (
-                <tr>
-                  <td colSpan={timeSlots.length + 3} className="border-2 border-gray-200 text-gray-700 py-12 font-bold">No classes found for this school.</td>
-                </tr>
-              ) : (
-                DAYS.map((day, dayIndex) => (
-                  <React.Fragment key={day}>
-                    {classes.map((cls, classIndex) => (
-                      <tr key={`${day}-${cls.id}`}>
-                        {classIndex === 0 && (
-                          <td rowSpan={classes.length} className="border-2 border-gray-200 bg-blue-50 text-blue-600 px-1 py-2 font-black text-3xl tracking-[0.25em] vertical-writing">
-                            {day}
-                          </td>
-                        )}
-                        <td className="border-2 border-gray-200 bg-blue-50 text-blue-600 px-2 py-2 font-black text-lg">
-                          {displayClassName(cls)}
+              {DAYS.map((day, dayIdx) => (
+                <React.Fragment key={day}>
+                  <tr className="bg-blue-600 text-white">
+                    <td colSpan={classes.length + 1} className="px-3 py-1.5 font-black text-sm tracking-widest uppercase">
+                      {DAY_NAMES[dayIdx]}
+                    </td>
+                  </tr>
+                  {timeSlots.map((slot) => {
+                    const isBreak = slot.slot_type === 'break';
+                    const isLunch = slot.slot_type === 'lunch';
+                    const isFixed = isBreak || isLunch;
+                    return (
+                      <tr
+                        key={slot.id}
+                        className={`border-b border-gray-100 ${
+                          isBreak ? 'bg-blue-50' : isLunch ? 'bg-amber-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <td className="px-3 py-2 font-semibold text-gray-600 border-r-2 border-gray-300 whitespace-nowrap">
+                          <div>{formatTime(slot.start_time)}</div>
+                          <div className="text-gray-400">–{formatTime(slot.end_time)}</div>
+                          {isFixed && (
+                            <div className={`text-[10px] font-black mt-0.5 ${isBreak ? 'text-blue-600' : 'text-amber-600'}`}>
+                              {slot.label}
+                            </div>
+                          )}
                         </td>
-                        {timeSlots.map((slot) => {
-                          const entry = getEntry(dayIndex + 1, cls.id, slot.id);
-                          const isBreak = slot.slot_type === 'break' || slot.slot_type === 'lunch';
-                          return (
-                            <td key={slot.id} className={`border-2 border-gray-200 px-1 py-1 h-10 align-middle ${isBreak ? 'bg-gray-50' : 'bg-white'} ${slot.slot_type === 'lunch' ? 'bg-yellow-50' : ''}`}>
-                              {getCellContent(entry, slot)}
-                            </td>
-                          );
-                        })}
-                        {classIndex === 0 && (
-                          <td rowSpan={classes.length} className="border-2 border-gray-200 bg-emerald-50 text-emerald-700 px-2 py-2 font-black text-lg leading-tight">
-                            {getActivityForDay(dayIndex + 1)}
-                            <div className="text-[10px] text-emerald-600 mt-2 font-bold uppercase">{DAY_NAMES[dayIndex]}</div>
+                        {isFixed ? (
+                          <td
+                            colSpan={classes.length}
+                            className={`text-center font-black text-sm py-2 ${
+                              isBreak ? 'text-blue-600' : 'text-amber-700'
+                            }`}
+                          >
+                            {slot.label}
                           </td>
+                        ) : (
+                          classes.map((cls) => {
+                            const entry = getEntry(dayIdx + 1, cls.id, slot.id);
+                            return (
+                              <td key={cls.id} className="px-2 py-2 text-center border-r border-gray-100">
+                                {getCellContent(entry, slot)}
+                              </td>
+                            );
+                          })
                         )}
                       </tr>
-                    ))}
-                  </React.Fragment>
-                ))
-              )}
+                    );
+                  })}
+                  <tr className="bg-emerald-50 border-b-2 border-gray-200">
+                    <td className="px-3 py-2 font-semibold text-emerald-700 border-r-2 border-gray-300 whitespace-nowrap text-[10px]">
+                      <div>3:40</div>
+                      <div className="text-gray-400">–4:20</div>
+                      <div className="font-black">ACTIVITIES</div>
+                    </td>
+                    <td colSpan={classes.length} className="text-center font-black text-sm text-emerald-700 py-2">
+                      {getActivityForDay(dayIdx + 1)}
+                    </td>
+                  </tr>
+                </React.Fragment>
+              ))}
             </tbody>
           </table>
         </div>
 
-        <div className="bg-gray-50 text-gray-800 border-t-4 border-gray-200 p-5">
-          <h3 className="font-black text-sm uppercase tracking-[0.2em] text-blue-600 mb-3">Teacher Key</h3>
-          {teacherKey.length === 0 ? (
-            <p className="text-sm text-gray-500">No teachers found yet. Add teachers first, then generate the timetable.</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+        {teacherKey.length > 0 && (
+          <div className="border-t-4 border-gray-200 p-4 bg-gray-50">
+            <h3 className="font-black text-gray-700 text-xs uppercase tracking-widest mb-2">Teacher Key</h3>
+            <div className="flex flex-wrap gap-3">
               {teacherKey.map((teacher) => (
-                <div key={teacher.teacher_number} className="border-2 border-gray-300 rounded-lg bg-white px-3 py-2 text-center">
-                  <div className="text-blue-500 font-black text-2xl leading-none">T{String(teacher.teacher_number).padStart(2, '0')}</div>
-                  <div className="text-gray-700 font-bold text-xs mt-1 leading-tight">{teacher.teacher_name}</div>
-                  <div className="text-gray-500 text-[10px] mt-1 font-semibold">{teacher.subjects.join(', ') || 'Assigned subjects show here'}</div>
+                <div key={teacher.teacher_number} className="flex items-center gap-1.5 text-xs">
+                  <span className="font-black text-blue-600">T{String(teacher.teacher_number).padStart(2, '0')}</span>
+                  <span className="text-gray-600">{teacher.teacher_name}</span>
+                  {teacher.subjects.length > 0 && (
+                    <span className="text-gray-400">({teacher.subjects.join(', ')})</span>
+                  )}
                 </div>
               ))}
             </div>
-          )}
-        </div>
-
-        <div className="bg-white p-3 text-xs text-gray-600 flex flex-wrap gap-4">
-          <span><strong>Break order:</strong> First Break 10:20–11:00, Second Break 12:20–12:50 (before lunch), Lunch 12:50–1:30.</span>
-          <span><strong>After school:</strong> Monday Games, Tuesday Clubs, Wednesday Study Hall, Thursday Drama, Friday Music Club (3:20–4:20 PM).</span>
-        </div>
+          </div>
+        )}
       </section>
     </div>
   );

@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Users, Share2, Lock, CreditCard, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { calculateCompetencyGrade, getSchoolLevelBand } from '@/lib/grading';
 
 declare global {
   interface Window {
@@ -48,8 +49,10 @@ export default function ParentChildReportCard() {
 
   useEffect(() => { fetchChildren(); }, [user?.id]);
 
-  function isPrimaryLevel(level: number | null | undefined): boolean {
-    return Number(level || 0) <= 6;
+  // Use shared grading library — grade_level takes priority over level
+  function isPrimaryLevel(classData: any): boolean {
+    const gl = classData?.grade_level ?? classData?.level;
+    return Number(gl || 0) <= 6;
   }
 
   function gradeFromPercentage844(percentage: number) {
@@ -67,21 +70,10 @@ export default function ParentChildReportCard() {
     return { grade: 'E', points: 1, descriptor: 'Poor' };
   }
 
-  function gradeFromPercentageCBE(percentage: number, level: number | null | undefined) {
-    if (isPrimaryLevel(level)) {
-      if (percentage >= 75) return { grade: 'EE', points: null, descriptor: 'Exceeding Expectation' };
-      if (percentage >= 41) return { grade: 'ME', points: null, descriptor: 'Meeting Expectation' };
-      if (percentage >= 21) return { grade: 'AE', points: null, descriptor: 'Approaching Expectation' };
-      return { grade: 'BE', points: null, descriptor: 'Below Expectation' };
-    }
-    if (percentage >= 90) return { grade: 'EE1', points: 8, descriptor: 'Exceeding Expectation 1' };
-    if (percentage >= 75) return { grade: 'EE2', points: 7, descriptor: 'Exceeding Expectation 2' };
-    if (percentage >= 58) return { grade: 'ME1', points: 6, descriptor: 'Meeting Expectation 1' };
-    if (percentage >= 41) return { grade: 'ME2', points: 5, descriptor: 'Meeting Expectation 2' };
-    if (percentage >= 31) return { grade: 'AE1', points: 4, descriptor: 'Approaching Expectation 1' };
-    if (percentage >= 21) return { grade: 'AE2', points: 3, descriptor: 'Approaching Expectation 2' };
-    if (percentage >= 11) return { grade: 'BE1', points: 2, descriptor: 'Below Expectation 1' };
-    return { grade: 'BE2', points: 1, descriptor: 'Below Expectation 2' };
+  function gradeFromPercentageCBE(percentage: number, classData: any) {
+    const band = getSchoolLevelBand(classData);
+    const g = calculateCompetencyGrade(percentage, band);
+    return { grade: g.subLevel, points: g.points || null, descriptor: g.descriptor };
   }
 
   const fetchChildren = async () => {
@@ -94,7 +86,7 @@ export default function ParentChildReportCard() {
       const ids = links.map((l: any) => l.student_id);
       const { data: students } = await supabaseUntyped
         .from('students')
-        .select('*, classes(name, level)')
+        .select('*, classes(name, level, grade_level, curriculum)')
         .in('id', ids);
       setChildren(students || []);
       if (students && students.length > 0) {
@@ -193,7 +185,8 @@ export default function ParentChildReportCard() {
       const term = terms.find(t => t.id === selectedTerm);
       const displaySchoolName = schoolName || 'School';
       const is844 = studentCurriculum === '844';
-      const level = selectedChild?.classes?.level;
+      // Use grade_level first (new column), fall back to level
+      const classDataForGrading = selectedChild?.classes || {};
 
       doc.setFillColor(37, 99, 235);
       doc.rect(0, 0, 210, 35, 'F');
@@ -224,7 +217,7 @@ export default function ParentChildReportCard() {
 
       const tableBody = results.map((r, i) => {
         const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
-        const grading = is844 ? gradeFromPercentage844(pct) : gradeFromPercentageCBE(pct, level);
+        const grading = is844 ? gradeFromPercentage844(pct) : gradeFromPercentageCBE(pct, classDataForGrading);
         return [
           i + 1, r.subjects?.name || 'N/A', r.marks || '-', r.out_of || 100,
           `${pct}%`, grading.grade, grading.points ?? '—', grading.descriptor,
@@ -250,12 +243,12 @@ export default function ParentChildReportCard() {
       doc.text(`Average: ${avgPercentage}%`, 150, finalY + 8);
 
       // Overall grade
-      const overallGrading = is844 ? gradeFromPercentage844(avgPercentage) : gradeFromPercentageCBE(avgPercentage, level);
+      const overallGrading = is844 ? gradeFromPercentage844(avgPercentage) : gradeFromPercentageCBE(avgPercentage, classDataForGrading);
       doc.text(`Overall Grade: ${overallGrading.grade}`, 20, finalY + 18);
       if (overallGrading.points !== null) {
         const totalPoints = results.reduce((s: number, r: any) => {
           const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
-          return s + (is844 ? (gradeFromPercentage844(pct).points || 0) : (gradeFromPercentageCBE(pct, level).points || 0));
+          return s + (is844 ? (gradeFromPercentage844(pct).points || 0) : (gradeFromPercentageCBE(pct, classDataForGrading).points || 0));
         }, 0);
         doc.text(`Total Points: ${totalPoints}`, 80, finalY + 18);
       }

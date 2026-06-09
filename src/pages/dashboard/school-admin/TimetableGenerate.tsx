@@ -4,18 +4,33 @@ import { supabase } from '@/lib/supabase/client';
 import { Zap, AlertCircle, CheckCircle, Loader2, Eye, Settings, Users, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
+/**
+ * CORRECT SCHOOL DAY ORDER (per user requirements):
+ * 1. Lesson 1  08:20 - 09:00
+ * 2. Lesson 2  09:00 - 09:40
+ * 3. FIRST BREAK  09:40 - 10:20
+ * 4. Lesson 3  10:20 - 11:00
+ * 5. Lesson 4  11:00 - 11:40
+ * 6. SECOND BREAK  11:40 - 12:20
+ * 7. Lesson 5  12:20 - 13:00
+ * 8. Lesson 6  13:00 - 13:40
+ * 9. LUNCH  13:40 - 14:20
+ * 10. Lesson 7  14:20 - 15:00
+ * 11. Lesson 8  15:00 - 15:40
+ * 12. AFTER-SCHOOL ACTIVITIES  15:40 - 16:20
+ */
 const EXACT_SLOTS = [
-  { slot_order: 1, start_time: '08:20', end_time: '09:00', slot_type: 'lesson', label: 'Lesson 1' },
-  { slot_order: 2, start_time: '09:00', end_time: '09:40', slot_type: 'lesson', label: 'Lesson 2' },
-  { slot_order: 3, start_time: '09:40', end_time: '10:20', slot_type: 'lesson', label: 'Lesson 3' },
-  { slot_order: 4, start_time: '10:20', end_time: '11:00', slot_type: 'break', label: 'FIRST BREAK' },
-  { slot_order: 5, start_time: '11:00', end_time: '11:40', slot_type: 'lesson', label: 'Lesson 4' },
-  { slot_order: 6, start_time: '11:40', end_time: '12:20', slot_type: 'lesson', label: 'Lesson 5' },
-  { slot_order: 7, start_time: '12:20', end_time: '12:50', slot_type: 'break', label: 'SECOND BREAK' },
-  { slot_order: 8, start_time: '12:50', end_time: '13:30', slot_type: 'lunch', label: 'LUNCH' },
-  { slot_order: 9, start_time: '13:30', end_time: '14:10', slot_type: 'lesson', label: 'Lesson 6' },
-  { slot_order: 10, start_time: '14:10', end_time: '14:50', slot_type: 'lesson', label: 'Lesson 7' },
-  { slot_order: 11, start_time: '14:50', end_time: '15:20', slot_type: 'lesson', label: 'Lesson 8' },
+  { slot_order: 1,  start_time: '08:20', end_time: '09:00', slot_type: 'lesson', label: 'Lesson 1' },
+  { slot_order: 2,  start_time: '09:00', end_time: '09:40', slot_type: 'lesson', label: 'Lesson 2' },
+  { slot_order: 3,  start_time: '09:40', end_time: '10:20', slot_type: 'break',  label: 'FIRST BREAK' },
+  { slot_order: 4,  start_time: '10:20', end_time: '11:00', slot_type: 'lesson', label: 'Lesson 3' },
+  { slot_order: 5,  start_time: '11:00', end_time: '11:40', slot_type: 'lesson', label: 'Lesson 4' },
+  { slot_order: 6,  start_time: '11:40', end_time: '12:20', slot_type: 'break',  label: 'SECOND BREAK' },
+  { slot_order: 7,  start_time: '12:20', end_time: '13:00', slot_type: 'lesson', label: 'Lesson 5' },
+  { slot_order: 8,  start_time: '13:00', end_time: '13:40', slot_type: 'lesson', label: 'Lesson 6' },
+  { slot_order: 9,  start_time: '13:40', end_time: '14:20', slot_type: 'lunch',  label: 'LUNCH' },
+  { slot_order: 10, start_time: '14:20', end_time: '15:00', slot_type: 'lesson', label: 'Lesson 7' },
+  { slot_order: 11, start_time: '15:00', end_time: '15:40', slot_type: 'lesson', label: 'Lesson 8' },
 ];
 
 const ACTIVITIES = [
@@ -89,19 +104,24 @@ export default function TimetableGenerate() {
   };
 
   const ensureStandardSetup = async (schoolId: string) => {
+    // Save config with correct break order
     await supabase.from('school_timetable_config').upsert({
       school_id: schoolId,
       school_start_time: '08:20',
-      school_end_time: '15:20',
+      school_end_time: '15:40',
       lesson_duration_minutes: 40,
-      morning_break_start: '10:20',
-      morning_break_end: '11:00',
-      lunch_start: '12:50',
-      lunch_end: '13:30',
-      afternoon_break_start: '12:20',
-      afternoon_break_end: '12:50',
+      // FIRST BREAK: after 2 lessons (09:40 - 10:20)
+      morning_break_start: '09:40',
+      morning_break_end: '10:20',
+      // SECOND BREAK: after next 2 lessons (11:40 - 12:20)
+      afternoon_break_start: '11:40',
+      afternoon_break_end: '12:20',
+      // LUNCH: after next 2 lessons (13:40 - 14:20)
+      lunch_start: '13:40',
+      lunch_end: '14:20',
     } as any, { onConflict: 'school_id' });
 
+    // Rebuild time slots with correct order
     await supabase.from('timetable_time_slots').delete().eq('school_id', schoolId);
     const { data: slots, error: slotError } = await supabase
       .from('timetable_time_slots')
@@ -115,7 +135,7 @@ export default function TimetableGenerate() {
         school_id: schoolId,
         day_of_week: activity.day_of_week,
         activity_name: activity.activity_name,
-        start_time: '15:20',
+        start_time: '15:40',
         end_time: '16:20',
       }, { onConflict: 'school_id,day_of_week,activity_name' });
     }
@@ -235,7 +255,7 @@ export default function TimetableGenerate() {
       const lessonCount = entries.filter((entry) => entry.entry_type === 'lesson').length;
       setLastGenerated(new Date().toLocaleString());
       setTimetableCount(entries.length);
-      toast.success(`Timetable generated: ${lessonCount} lessons plus fixed breaks/lunch. View the blackboard timetable now.`);
+      toast.success(`Timetable generated: ${lessonCount} lessons. Order: 2 lessons → FIRST BREAK → 2 lessons → SECOND BREAK → 2 lessons → LUNCH → 2 lessons → ACTIVITIES`);
       await fetchData();
     } catch (err) {
       console.error(err);
@@ -258,8 +278,13 @@ export default function TimetableGenerate() {
       <div>
         <h1 className="text-2xl font-black text-gray-900">Generate Timetable</h1>
         <p className="text-gray-500 text-sm mt-1">
-          One-click generation using the required schedule: 8:20 AM start, Morning Break, Second Break, Lunch, and 3:20 PM after-school activities.
+          One-click generation using the required schedule.
         </p>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-900">
+        <p className="font-black mb-1">Correct Break Order (locked):</p>
+        <p>Lesson 1 &amp; 2 (8:20–9:40) → <strong>FIRST BREAK</strong> (9:40–10:20) → Lesson 3 &amp; 4 (10:20–11:40) → <strong>SECOND BREAK</strong> (11:40–12:20) → Lesson 5 &amp; 6 (12:20–13:40) → <strong>LUNCH</strong> (13:40–14:20) → Lesson 7 &amp; 8 (14:20–15:40) → <strong>AFTER-SCHOOL ACTIVITIES</strong> (15:40–16:20)</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -272,7 +297,7 @@ export default function TimetableGenerate() {
         <h2 className="font-black text-gray-900 mb-4">Pre-Generation Checklist</h2>
         <div className={`flex items-center gap-3 p-3 rounded-xl ${configReady ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
           {configReady ? <CheckCircle className="text-green-600 flex-shrink-0" size={20} /> : <Clock className="text-blue-600 flex-shrink-0" size={20} />}
-          <div className="flex-1"><p className="font-semibold text-sm text-gray-900">School Schedule</p><p className="text-xs text-gray-500">Generator enforces: 8:20–3:20 · FIRST BREAK 10:20–11:00 · SECOND BREAK 12:20–12:50 (before lunch) · LUNCH 12:50–1:30 · 40-min lessons.</p></div>
+          <div className="flex-1"><p className="font-semibold text-sm text-gray-900">School Schedule</p><p className="text-xs text-gray-500">2 lessons → FIRST BREAK (9:40–10:20) → 2 lessons → SECOND BREAK (11:40–12:20) → 2 lessons → LUNCH (13:40–14:20) → 2 lessons → ACTIVITIES (15:40–16:20)</p></div>
           <a href="/school-admin/timetable/setup" className="text-blue-600 text-xs font-semibold hover:underline">Edit setup →</a>
         </div>
         <div className={`flex items-center gap-3 p-3 rounded-xl ${assignmentsReady ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
@@ -287,29 +312,26 @@ export default function TimetableGenerate() {
         </div>
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-        <h3 className="font-black text-blue-900 text-sm mb-3 uppercase tracking-wide">Generation Rules</h3>
-        <ul className="space-y-1.5 text-sm text-blue-800">
-          <li>• Math and English are placed before noon whenever there is a free teacher/class slot.</li>
-          <li>• A teacher cannot appear in two classes at the same time.</li>
-          <li>• A class cannot have two subjects at the same time.</li>
-          <li>• Break order is fixed: Morning Break, Second Break, then Lunch.</li>
-          <li>• Timetable cells display in compact format, for example MATH3.</li>
-        </ul>
-      </div>
-
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
-        <button onClick={handleGenerateTimetable} disabled={generating || !assignmentsReady} className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white px-6 py-4 rounded-xl text-base font-black hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition">
-          {generating ? <><Loader2 className="w-5 h-5 animate-spin" />Generating Timetable...</> : <><Zap className="w-5 h-5" />Auto-Generate Blackboard Timetable</>}
+        <button
+          onClick={handleGenerateTimetable}
+          disabled={generating || !assignmentsReady}
+          className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white py-4 rounded-xl font-black text-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          {generating ? <Loader2 className="w-6 h-6 animate-spin" /> : <Zap className="w-6 h-6" />}
+          {generating ? 'Generating Timetable...' : 'Generate Timetable'}
         </button>
-        {timetableCount > 0 && <p className="text-center text-xs text-gray-500 mt-3">This replaces the existing timetable with the corrected break order and display format.</p>}
-        <div className="mt-4 flex gap-3 justify-center">
-          <a href="/timetable" className="flex items-center gap-2 text-blue-600 text-sm font-semibold hover:underline"><Eye size={16} />View Timetable</a>
-          <span className="text-gray-300">|</span>
-          <a href="/school-admin/timetable/assign" className="flex items-center gap-2 text-blue-600 text-sm font-semibold hover:underline"><Users size={16} />Manage Assignments</a>
-          <span className="text-gray-300">|</span>
-          <a href="/school-admin/timetable/setup" className="flex items-center gap-2 text-blue-600 text-sm font-semibold hover:underline"><Settings size={16} />Schedule Setup</a>
-        </div>
+        {!assignmentsReady && (
+          <p className="text-center text-sm text-red-500 mt-3">
+            You must assign teachers to subjects before generating.{' '}
+            <a href="/school-admin/timetable/assign" className="underline font-semibold">Assign now →</a>
+          </p>
+        )}
+        {timetableCount > 0 && (
+          <p className="text-center text-xs text-gray-400 mt-2">
+            Generating again will replace the existing timetable.
+          </p>
+        )}
       </div>
     </div>
   );
