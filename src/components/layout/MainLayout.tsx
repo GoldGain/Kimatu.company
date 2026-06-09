@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router';
 import { GraduationCap, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import PWAInstallButton from '@/components/PWAInstallButton';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -31,6 +32,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               <a href="#features" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">Features</a>
               <a href="#testimonials" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">Testimonials</a>
               <a href="#faq" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">FAQ</a>
+              <PWAInstallButton variant="nav" />
               {user ? (
                 <div className="flex items-center gap-3">
                   <Link 

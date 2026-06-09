@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { GraduationCap, Eye, EyeOff, Loader2, User, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import PWAInstallButton from '@/components/PWAInstallButton';
 
 interface StudentData {
   email: string;
@@ -165,6 +166,9 @@ export default function Login() {
           </Link>
           <h1 className="text-2xl font-bold text-[#111111]">Welcome Back</h1>
           <p className="text-sm text-[#666666] mt-1">Login to your school portal</p>
+          <div className="mt-3 flex justify-center">
+            <PWAInstallButton />
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl p-6 md:p-8 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)]">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import PWAInstallButton from '@/components/PWAInstallButton';
 import {
   GraduationCap,
   LayoutDashboard,
@@ -223,6 +224,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="text-base font-bold text-[#111111]">CBE-Analytics</span>
             </div>
             <div className="flex items-center gap-3">
+              <PWAInstallButton variant="icon" />
               <Link to="/" className="text-sm text-[#666666] hover:text-[#111111] flex items-center gap-1">
                 <Home className="w-4 h-4" />
                 <span className="hidden sm:inline">Home</span>
