@@ -6,6 +6,7 @@ import MainLayout from '@/components/layout/MainLayout';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
+import PWAFloatingButton from '@/components/PWAFloatingButton';
 import Home from '@/pages/Home';
 import Login from '@/pages/auth/Login';
 import Register from '@/pages/auth/Register';
@@ -200,6 +201,7 @@ export default function App() {
       <AuthProvider>
         <AppRoutes />
         <PWAInstallBanner />
+        <PWAFloatingButton />
         <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
     </ErrorBoundary>
