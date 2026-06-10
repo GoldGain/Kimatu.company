@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { ArrowRight, Sparkles, Smartphone } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePWA } from '@/hooks/usePWA';
 
 function DownloadAppButton() {
