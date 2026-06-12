@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { AlertCircle, Download, Printer, RefreshCw } from 'lucide-react';
@@ -32,7 +32,7 @@ interface TimeSlot {
   slot_order: number;
   start_time: string;
   end_time: string;
-  slot_type: 'lesson' | 'break' | 'lunch' | 'activities';
+  slot_type: 'lesson' | 'break' | 'lunch' | 'activities' | 'activity';
   label: string;
 }
 
@@ -42,27 +42,39 @@ interface TeacherKeyEntry {
   subjects: string[];
 }
 
+interface SchoolActivity {
+  id: string;
+  school_id: string;
+  day_of_week: number;
+  activity_name: string;
+  start_time: string;
+  end_time: string;
+}
+
 const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
 
-/** Extracurricular columns displayed on far right */
-const EXTRACURRICULAR_COLUMNS = ['Clubs & Societies', 'Guidance & Counselling', 'Games & Sports', 'Careers'];
-
 const SUBJECT_CODE_MAP: Record<string, string> = {
-  Mathematics: 'MATH',
-  Math: 'MATH',
-  English: 'ENG',
-  Kiswahili: 'KISW',
-  'Integrated Science': 'INTSC',
-  Science: 'SC',
-  'Social Studies': 'SST',
-  CRE: 'CRE',
-  'Christian Religious Education': 'CRE',
-  Agriculture: 'AGN',
-  'Pre-Technical': 'PRET',
-  'Pre Technical': 'PRET',
-  'Pre-technical': 'PRET',
-  'Creative Arts': 'CAS',
-  'Creative and Sports': 'CAS',
+  mathematics: 'MATH',
+  math: 'MATH',
+  english: 'ENG',
+  kiswahili: 'KISW',
+  'integrated science': 'INTSC',
+  science: 'SC',
+  'social studies': 'SST',
+  cre: 'CRE',
+  'christian religious education': 'CRE',
+  agriculture: 'AGN',
+  'pre-technical': 'PRET',
+  'pre technical': 'PRET',
+  'creative arts': 'CAS',
+  'creative and sports': 'CAS',
+  'home science': 'HSC',
+  'business studies': 'BST',
+  history: 'HIST',
+  geography: 'GEO',
+  physics: 'PHY',
+  chemistry: 'CHEM',
+  biology: 'BIO',
 };
 
 const getSubjectCode = (name: string, code: string): string => {
@@ -97,15 +109,27 @@ const displayClassName = (cls: SchoolClass): string => {
   return name.toUpperCase();
 };
 
+const fmt = (t: string): string => {
+  if (!t) return '';
+  const [h, m] = t.split(':');
+  const hour = parseInt(h, 10);
+  const min = m || '00';
+  return `${hour}:${min}`;
+};
+
 export default function TimetableView() {
   const { user } = useAuth();
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [entries, setEntries] = useState<TimetableEntry[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [activities, setActivities] = useState<SchoolActivity[]>([]);
   const [teacherKey, setTeacherKey] = useState<TeacherKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
+  const [selectedClass, setSelectedClass] = useState<string>('all');
+  const [downloadingClass, setDownloadingClass] = useState<string | null>(null);
+  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (user?.schoolId) fetchAll();
@@ -121,6 +145,7 @@ export default function TimetableView() {
         fetchTimeSlots(),
         fetchEntries(),
         fetchTeacherKey(),
+        fetchActivities(),
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load timetable');
@@ -187,6 +212,20 @@ export default function TimetableView() {
     setEntries(mapped);
   };
 
+  const fetchActivities = async () => {
+    const { data, error: err } = await supabase
+      .from('school_activities')
+      .select('*')
+      .eq('school_id', user?.schoolId)
+      .order('day_of_week');
+    if (err) {
+      console.warn('Could not fetch activities:', err);
+      setActivities([]);
+      return;
+    }
+    setActivities((data || []) as SchoolActivity[]);
+  };
+
   const fetchTeacherKey = async () => {
     const { data: teachers, error: teachersErr } = await supabase
       .from('teachers')
@@ -227,14 +266,22 @@ export default function TimetableView() {
     );
   };
 
-  /** Filter slots by type */
-  const lessonSlots = useMemo(() => timeSlots.filter((s) => s.slot_type === 'lesson'), [timeSlots]);
-  const breakSlots = useMemo(() => timeSlots.filter((s) => s.slot_type === 'break'), [timeSlots]);
-  const lunchSlots = useMemo(() => timeSlots.filter((s) => s.slot_type === 'lunch'), [timeSlots]);
-  const activitySlots = useMemo(() => timeSlots.filter((s) => s.slot_type === 'activities' || s.slot_type === 'activity'), [timeSlots]);
+  /** All slots in order, deduplicated by slot_order (take first per order) */
+  const allSlots = useMemo(() => {
+    const seen = new Set<number>();
+    const unique: TimeSlot[] = [];
+    [...timeSlots]
+      .sort((a, b) => a.slot_order - b.slot_order)
+      .forEach(s => {
+        if (!seen.has(s.slot_order)) {
+          seen.add(s.slot_order);
+          unique.push(s);
+        }
+      });
+    return unique;
+  }, [timeSlots]);
 
-  /** Get all unique slots in order */
-  const allSlots = useMemo(() => [...timeSlots].sort((a, b) => a.slot_order - b.slot_order), [timeSlots]);
+  const lessonSlots = useMemo(() => allSlots.filter(s => s.slot_type === 'lesson'), [allSlots]);
 
   const entryLookup = useMemo(() => {
     const lookup = new Map<string, TimetableEntry[]>();
@@ -267,204 +314,384 @@ export default function TimetableView() {
     return parts.join(' ') || '';
   };
 
-  const getExtracurricularText = (col: string, dayIdx: number): string => {
-    const dayEntries = entries.filter(e => e.day_of_week === dayIdx + 1 && e.entry_type === 'activity');
-    const colMap: Record<string, string> = {
-      'Clubs & Societies': 'CLUB & SOCIETIES',
-      'Guidance & Counselling': 'GUIDANCE & COUNSELLING',
-      'Games & Sports': 'GAMES & SPORTS',
-      'Careers': 'CAREERS',
-    };
-    
-    // Check if any entry activity name matches the column
-    const matched = dayEntries.find(e => e.activity_name?.toUpperCase().includes(colMap[col]?.split(' ')[0]));
-    return matched ? matched.activity_name?.toUpperCase() || '' : '';
+  /** Get activities for a given day from school_activities table */
+  const getActivitiesForDay = (dayIdx: number): string => {
+    const dayNum = dayIdx + 1;
+    const dayActivities = activities.filter(a => a.day_of_week === dayNum);
+    if (dayActivities.length === 0) return '';
+    // Return all activity names for this day, joined
+    return dayActivities.map(a => a.activity_name.trim().toUpperCase()).join(' / ');
   };
 
-  const downloadPdf = async () => {
-    const element = document.getElementById('timetable-print-area');
+  /** Classes to display (filtered if a specific class is selected) */
+  const displayClasses = useMemo(() => {
+    if (selectedClass === 'all') return classes;
+    return classes.filter(c => c.id === selectedClass);
+  }, [classes, selectedClass]);
+
+  const downloadPdf = async (classId?: string, className?: string) => {
+    const targetId = classId ? `timetable-class-${classId}` : 'timetable-print-area';
+    const element = document.getElementById(targetId);
     if (!element) return;
-    const html2pdf = (await import('html2pdf.js')).default;
-    await html2pdf()
-      .set({
-        margin: [0.1, 0.1, 0.1, 0.1],
-        filename: `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-timetable.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-      })
-      .from(element)
-      .save();
+    const key = classId || 'all';
+    setDownloadingClass(key);
+    try {
+      const html2pdf = (await import('html2pdf.js')).default;
+      const filename = classId
+        ? `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${(className || classId).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-timetable.pdf`
+        : `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-full-timetable.pdf`;
+      await html2pdf()
+        .set({
+          margin: [0.2, 0.1, 0.2, 0.1],
+          filename,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#1a1a1a' },
+          jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
+        })
+        .from(element)
+        .save();
+    } finally {
+      setDownloadingClass(null);
+    }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" /></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+    </div>
+  );
 
-  return (
-    <div className="max-w-full mx-auto space-y-4 timetable-page p-4 bg-gray-100 min-h-screen">
-      <style>{`
-        .blackboard-theme {
-          background-color: #1a1a1a;
-          color: #e0e0e0;
-          font-family: 'Courier New', Courier, monospace;
-          padding: 20px;
-          border: 10px solid #4a3728;
-          box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
-        }
-        .timetable-grid {
-          border-collapse: collapse;
-          width: 100%;
-          border: 2px solid #555;
-        }
-        .timetable-grid th, .timetable-grid td {
-          border: 1px solid #444;
-          padding: 4px;
-          text-align: center;
-          font-size: 0.75rem;
-        }
-        .day-label {
-          writing-mode: vertical-rl;
-          text-orientation: mixed;
-          transform: rotate(180deg);
-          font-weight: bold;
-          font-size: 1.2rem;
-          background-color: #222;
-          width: 40px;
-        }
-        .class-label {
-          font-weight: bold;
-          background-color: #2a2a2a;
-          width: 60px;
-        }
-        .break-cell, .lunch-cell {
-          writing-mode: vertical-rl;
-          text-orientation: upright;
-          font-weight: 900;
-          font-size: 1.5rem;
-          letter-spacing: 0.5rem;
-          background-color: #1a1a1a;
-          color: #4da6ff;
-          width: 30px;
-        }
-        .time-header {
-          background-color: #222;
-          color: #4da6ff;
-          font-weight: bold;
-        }
-        .cell-content {
-          min-width: 80px;
-          height: 30px;
-        }
-        .activity-col {
-          writing-mode: vertical-rl;
-          text-orientation: mixed;
-          transform: rotate(180deg);
-          font-weight: bold;
-          color: #33cc33;
-          width: 35px;
-          font-size: 0.7rem;
-        }
-        @media print {
-          .no-print { display: none !important; }
-          .blackboard-theme { border: none; box-shadow: none; background: white; color: black; }
-          .timetable-grid th, .timetable-grid td { border: 1px solid black; }
-        }
-      `}</style>
+  if (error) return (
+    <div className="flex items-center gap-3 p-6 bg-red-50 text-red-700 rounded-xl m-4">
+      <AlertCircle size={20} />
+      <span>{error}</span>
+      <button onClick={fetchAll} className="ml-auto text-sm underline">Retry</button>
+    </div>
+  );
 
-      <div className="flex justify-between items-center no-print mb-4">
-        <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tight">School Timetable</h1>
-        <div className="flex gap-2">
-          <button onClick={() => fetchAll()} className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm hover:bg-gray-50"><RefreshCw size={16} /> Refresh</button>
-          <button onClick={() => window.print()} className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-xl border border-gray-200 font-bold text-sm hover:bg-gray-50"><Printer size={16} /> Print</button>
-          <button onClick={downloadPdf} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-lg shadow-blue-200"><Download size={16} /> Download PDF</button>
-        </div>
+  const timetableStyles = `
+    .bb-wrap {
+      background-color: #1a1a1a;
+      color: #e0e0e0;
+      font-family: 'Courier New', Courier, monospace;
+      padding: 16px;
+      border: 8px solid #4a3728;
+      box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+    }
+    .tt-table {
+      border-collapse: collapse;
+      width: 100%;
+      table-layout: auto;
+    }
+    .tt-table th, .tt-table td {
+      border: 1px solid #555;
+      padding: 3px 4px;
+      text-align: center;
+      vertical-align: middle;
+      font-size: 0.68rem;
+      line-height: 1.2;
+    }
+    .tt-header {
+      background-color: #222;
+      color: #4da6ff;
+      font-weight: bold;
+      font-size: 0.65rem;
+      white-space: nowrap;
+    }
+    .tt-day {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      font-weight: 900;
+      font-size: 1rem;
+      background-color: #1e1e1e;
+      color: #e0e0e0;
+      width: 28px;
+      min-width: 28px;
+    }
+    .tt-class {
+      font-weight: bold;
+      background-color: #252525;
+      color: #e0e0e0;
+      width: 42px;
+      min-width: 42px;
+      font-size: 0.7rem;
+    }
+    .tt-break {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      font-weight: 900;
+      font-size: 0.85rem;
+      background-color: #1a1a1a;
+      color: #4da6ff;
+      width: 22px;
+      min-width: 22px;
+      letter-spacing: 0.05rem;
+      padding: 4px 2px;
+    }
+    .tt-lunch {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      font-weight: 900;
+      font-size: 0.85rem;
+      background-color: #1a1a1a;
+      color: #4da6ff;
+      width: 22px;
+      min-width: 22px;
+      letter-spacing: 0.05rem;
+      padding: 4px 2px;
+    }
+    .tt-cell {
+      min-width: 70px;
+      height: 28px;
+      color: #e0e0e0;
+      font-size: 0.68rem;
+    }
+    .tt-activity {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      font-weight: bold;
+      color: #33cc33;
+      width: 30px;
+      min-width: 30px;
+      font-size: 0.62rem;
+      padding: 4px 2px;
+    }
+    .tt-break-header {
+      background-color: #222;
+      color: #4da6ff;
+      font-weight: bold;
+      font-size: 0.58rem;
+      white-space: pre-line;
+      width: 22px;
+      min-width: 22px;
+    }
+    @media print {
+      .no-print { display: none !important; }
+      .bb-wrap { border: none; box-shadow: none; background: white; color: black; }
+      .tt-table th, .tt-table td { border: 1px solid black; color: black !important; }
+      .tt-day, .tt-class, .tt-break, .tt-lunch, .tt-activity, .tt-cell, .tt-header, .tt-break-header { color: black !important; background: white !important; }
+    }
+  `;
+
+  const renderTimetableTable = (classesToRender: SchoolClass[], tableId: string) => (
+    <div id={tableId} className="bb-wrap rounded-lg overflow-hidden">
+      <div className="mb-4 text-center">
+        <h2 className="text-2xl font-black tracking-tighter text-blue-400 uppercase">
+          {schoolName || 'School'} — SCHOOL TIMETABLE
+        </h2>
+        {classesToRender.length === 1 && (
+          <p className="text-green-400 font-bold text-sm mt-1">
+            Class: {displayClassName(classesToRender[0])}
+          </p>
+        )}
+        <div className="h-0.5 w-24 bg-blue-400 mx-auto mt-2"></div>
       </div>
-
-      <div id="timetable-print-area" className="blackboard-theme rounded-lg overflow-hidden">
-        <div className="mb-6 text-center">
-          <h2 className="text-3xl font-black tracking-tighter text-blue-400 uppercase">{schoolName || 'School'} Timetable</h2>
-          <div className="h-1 w-32 bg-blue-400 mx-auto mt-2"></div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="timetable-grid">
-            <thead>
-              <tr>
-                <th rowSpan={2} className="time-header">DAYS</th>
-                <th rowSpan={2} className="time-header">CLASS</th>
-                {allSlots.map(slot => (
-                  <th key={slot.id} className="time-header" style={{ width: slot.slot_type === 'lesson' ? 'auto' : '30px' }}>
-                    {slot.slot_type === 'lesson' ? `${formatTimeDisplay(slot.start_time)}-${formatTimeDisplay(slot.end_time)}` : ''}
+      <div className="overflow-x-auto">
+        <table className="tt-table">
+          <thead>
+            <tr>
+              <th rowSpan={2} className="tt-header">DAYS</th>
+              <th rowSpan={2} className="tt-header">CLASS</th>
+              {allSlots.map(slot => {
+                if (slot.slot_type === 'break') {
+                  return (
+                    <th key={slot.id} rowSpan={2} className="tt-break-header">
+                      {fmt(slot.start_time)}<br/>—<br/>{fmt(slot.end_time)}
+                    </th>
+                  );
+                }
+                if (slot.slot_type === 'lunch') {
+                  return (
+                    <th key={slot.id} rowSpan={2} className="tt-break-header">
+                      {fmt(slot.start_time)}<br/>—<br/>{fmt(slot.end_time)}
+                    </th>
+                  );
+                }
+                if (slot.slot_type === 'activities' || slot.slot_type === 'activity') {
+                  return null;
+                }
+                return (
+                  <th key={slot.id} className="tt-header">
+                    {fmt(slot.start_time)}-{fmt(slot.end_time)}
                   </th>
-                ))}
-                {EXTRACURRICULAR_COLUMNS.map(col => (
-                  <th key={col} rowSpan={2} className="time-header" style={{ width: '40px' }}>{col.toUpperCase()}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {DAYS.map((day, dayIdx) => (
-                <React.Fragment key={day}>
-                  {classes.map((cls, clsIdx) => (
-                    <tr key={`${day}-${cls.id}`}>
-                      {clsIdx === 0 && (
-                        <td rowSpan={classes.length} className="day-label">
-                          {day}
-                        </td>
-                      )}
-                      <td className="class-label">{displayClassName(cls)}</td>
-                      {allSlots.map(slot => {
-                        if (slot.slot_type === 'break' || slot.slot_type === 'lunch') {
-                          if (clsIdx === 0) {
-                            return (
-                              <td key={slot.id} rowSpan={classes.length} className={slot.slot_type === 'break' ? 'break-cell' : 'lunch-cell'}>
-                                {slot.slot_type.toUpperCase()}
-                              </td>
-                            );
-                          }
-                          return null;
-                        }
-                        
-                        const cellEntries = getEntries(dayIdx + 1, cls.id, slot.id);
-                        const display = getCellDisplay(cellEntries);
-                        return (
-                          <td key={slot.id} className="cell-content">
-                            {display}
-                          </td>
-                        );
-                      })}
-                      
-                      {EXTRACURRICULAR_COLUMNS.map((col, colIdx) => {
+                );
+              })}
+              <th rowSpan={2} className="tt-header" style={{ width: '60px', minWidth: '60px', color: '#33cc33' }}>
+                AFTER-SCHOOL ACTIVITIES
+              </th>
+            </tr>
+            <tr>
+              {allSlots.map(slot => {
+                if (slot.slot_type === 'break' || slot.slot_type === 'lunch') return null;
+                if (slot.slot_type === 'activities' || slot.slot_type === 'activity') return null;
+                return (
+                  <th key={`sub-${slot.id}`} className="tt-header" style={{ fontSize: '0.58rem', color: '#aaa' }}>
+                    {slot.label || ''}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {DAYS.map((day, dayIdx) => (
+              <React.Fragment key={day}>
+                {classesToRender.map((cls, clsIdx) => (
+                  <tr key={`${day}-${cls.id}`}>
+                    {clsIdx === 0 && (
+                      <td rowSpan={classesToRender.length} className="tt-day">
+                        {day}
+                      </td>
+                    )}
+                    <td className="tt-class">{displayClassName(cls)}</td>
+                    {allSlots.map(slot => {
+                      if (slot.slot_type === 'break') {
                         if (clsIdx === 0) {
-                          const activityText = getExtracurricularText(col, dayIdx);
                           return (
-                            <td key={col} rowSpan={classes.length} className="activity-col">
-                              {activityText || col.toUpperCase()}
+                            <td key={slot.id} rowSpan={classesToRender.length} className="tt-break">
+                              B<br/>R<br/>E<br/>A<br/>K
                             </td>
                           );
                         }
                         return null;
-                      })}
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        
-        {teacherKey.length > 0 && (
-          <div className="mt-8 pt-6 border-t border-gray-700">
-            <h3 className="text-blue-400 font-black text-sm uppercase mb-4 tracking-widest">Teacher Reference Key</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {teacherKey.map(t => (
-                <div key={t.teacher_number} className="text-[0.7rem] flex flex-col">
-                  <span className="text-blue-300 font-bold">T{t.teacher_number}: {t.teacher_name}</span>
-                  <span className="text-gray-500 italic">({t.subjects.join(', ')})</span>
-                </div>
-              ))}
-            </div>
+                      }
+                      if (slot.slot_type === 'lunch') {
+                        if (clsIdx === 0) {
+                          return (
+                            <td key={slot.id} rowSpan={classesToRender.length} className="tt-lunch">
+                              L<br/>U<br/>N<br/>C<br/>H
+                            </td>
+                          );
+                        }
+                        return null;
+                      }
+                      if (slot.slot_type === 'activities' || slot.slot_type === 'activity') {
+                        return null;
+                      }
+                      const cellEntries = getEntries(dayIdx + 1, cls.id, slot.id);
+                      const display = getCellDisplay(cellEntries);
+                      return (
+                        <td key={slot.id} className="tt-cell">
+                          {display}
+                        </td>
+                      );
+                    })}
+                    {clsIdx === 0 && (
+                      <td rowSpan={classesToRender.length} className="tt-activity">
+                        {getActivitiesForDay(dayIdx) || '—'}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {teacherKey.length > 0 && (
+        <div className="mt-6 pt-4 border-t border-gray-700">
+          <h3 className="text-blue-400 font-black text-xs uppercase mb-3 tracking-widest">Teacher Reference Key</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {teacherKey.map(t => (
+              <div key={t.teacher_number} className="text-[0.65rem] flex flex-col">
+                <span className="text-blue-300 font-bold">T{t.teacher_number}: {t.teacher_name}</span>
+                <span className="text-gray-500 italic">({t.subjects.join(', ')})</span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="max-w-full mx-auto space-y-4 p-4 bg-gray-100 min-h-screen">
+      <style>{timetableStyles}</style>
+
+      {/* Top Controls */}
+      <div className="flex flex-wrap justify-between items-center no-print mb-4 gap-3">
+        <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tight">School Timetable</h1>
+        <div className="flex flex-wrap gap-2 items-center">
+          <button
+            onClick={() => fetchAll()}
+            className="flex items-center gap-2 bg-white text-gray-700 px-3 py-2 rounded-xl border border-gray-200 font-bold text-sm hover:bg-gray-50"
+          >
+            <RefreshCw size={15} /> Refresh
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 bg-white text-gray-700 px-3 py-2 rounded-xl border border-gray-200 font-bold text-sm hover:bg-gray-50"
+          >
+            <Printer size={15} /> Print
+          </button>
+          <button
+            onClick={() => downloadPdf()}
+            disabled={downloadingClass === 'all'}
+            className="flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-lg shadow-blue-200 disabled:opacity-60"
+          >
+            <Download size={15} />
+            {downloadingClass === 'all' ? 'Downloading...' : 'Download Full PDF'}
+          </button>
+        </div>
+      </div>
+
+      {/* Per-Class Download Section */}
+      {classes.length > 0 && (
+        <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+          <h2 className="font-black text-gray-900 text-sm mb-3 uppercase tracking-wide">Download Timetable Per Class</h2>
+          <div className="flex flex-wrap gap-2">
+            {classes.map(cls => (
+              <button
+                key={cls.id}
+                onClick={() => downloadPdf(cls.id, displayClassName(cls))}
+                disabled={downloadingClass === cls.id}
+                className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-green-700 disabled:opacity-60 transition-all"
+              >
+                <Download size={12} />
+                {downloadingClass === cls.id ? 'Downloading...' : `${displayClassName(cls)} PDF`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filter by class */}
+      <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-bold text-gray-700 text-sm">View:</span>
+          <button
+            onClick={() => setSelectedClass('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedClass === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            All Classes
+          </button>
+          {classes.map(cls => (
+            <button
+              key={cls.id}
+              onClick={() => setSelectedClass(cls.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedClass === cls.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            >
+              {displayClassName(cls)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Timetable (full or filtered) */}
+      <div id="timetable-print-area">
+        {renderTimetableTable(displayClasses, 'timetable-main-view')}
+      </div>
+
+      {/* Hidden per-class timetables for PDF generation */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0, width: '1200px' }}>
+        {classes.map(cls => (
+          <div key={cls.id} id={`timetable-class-${cls.id}`} style={{ marginBottom: '40px' }}>
+            {renderTimetableTable([cls], `timetable-class-inner-${cls.id}`)}
+          </div>
+        ))}
       </div>
     </div>
   );
