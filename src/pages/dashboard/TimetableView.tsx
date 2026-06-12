@@ -105,7 +105,8 @@ const getSubjectCode = (name: string, code: string): string => {
 };
 
 const displayClassName = (cls: SchoolClass): string => {
-  const name = cls.name?.replace(/^grade\s*/i, '').trim() || String(cls.level);
+  // Keep the full stored name (e.g. "Grade 7", "Class 3", "Form 1", "PP1")
+  const name = cls.name?.trim() || String(cls.level);
   return name.toUpperCase();
 };
 
@@ -500,14 +501,20 @@ export default function TimetableView() {
                 if (slot.slot_type === 'break') {
                   return (
                     <th key={slot.id} rowSpan={2} className="tt-break-header">
-                      {fmt(slot.start_time)}<br/>—<br/>{fmt(slot.end_time)}
+                      <span style={{fontWeight:'900',color:'#4da6ff',display:'block'}}>BREAK</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>{fmt(slot.start_time)}</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>—</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
                     </th>
                   );
                 }
                 if (slot.slot_type === 'lunch') {
                   return (
                     <th key={slot.id} rowSpan={2} className="tt-break-header">
-                      {fmt(slot.start_time)}<br/>—<br/>{fmt(slot.end_time)}
+                      <span style={{fontWeight:'900',color:'#4da6ff',display:'block'}}>LUNCH</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>{fmt(slot.start_time)}</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>—</span>
+                      <span style={{fontSize:'0.5rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
                     </th>
                   );
                 }
@@ -552,7 +559,10 @@ export default function TimetableView() {
                         if (clsIdx === 0) {
                           return (
                             <td key={slot.id} rowSpan={classesToRender.length} className="tt-break">
-                              B<br/>R<br/>E<br/>A<br/>K
+                              B<br/>R<br/>E<br/>A<br/>K<br/>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block',marginTop:'2px'}}>{fmt(slot.start_time)}</span>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>—</span>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
                             </td>
                           );
                         }
@@ -562,7 +572,10 @@ export default function TimetableView() {
                         if (clsIdx === 0) {
                           return (
                             <td key={slot.id} rowSpan={classesToRender.length} className="tt-lunch">
-                              L<br/>U<br/>N<br/>C<br/>H
+                              L<br/>U<br/>N<br/>C<br/>H<br/>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block',marginTop:'2px'}}>{fmt(slot.start_time)}</span>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>—</span>
+                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
                             </td>
                           );
                         }
