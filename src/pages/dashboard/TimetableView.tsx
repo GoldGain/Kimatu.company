@@ -400,15 +400,15 @@ export default function TimetableView() {
       white-space: nowrap;
     }
     .tt-day {
-      writing-mode: vertical-rl;
+      writing-mode: vertical-lr;
       text-orientation: mixed;
-      transform: rotate(180deg);
       font-weight: 900;
       font-size: 1rem;
       background-color: #1e1e1e;
       color: #e0e0e0;
       width: 28px;
       min-width: 28px;
+      text-align: center;
     }
     .tt-class {
       font-weight: bold;
@@ -419,9 +419,8 @@ export default function TimetableView() {
       font-size: 0.7rem;
     }
     .tt-break {
-      writing-mode: vertical-rl;
+      writing-mode: vertical-lr;
       text-orientation: mixed;
-      transform: rotate(180deg);
       font-weight: 900;
       font-size: 0.85rem;
       background-color: #1a1a1a;
@@ -430,11 +429,11 @@ export default function TimetableView() {
       min-width: 22px;
       letter-spacing: 0.05rem;
       padding: 4px 2px;
+      text-align: center;
     }
     .tt-lunch {
-      writing-mode: vertical-rl;
+      writing-mode: vertical-lr;
       text-orientation: mixed;
-      transform: rotate(180deg);
       font-weight: 900;
       font-size: 0.85rem;
       background-color: #1a1a1a;
@@ -443,6 +442,7 @@ export default function TimetableView() {
       min-width: 22px;
       letter-spacing: 0.05rem;
       padding: 4px 2px;
+      text-align: center;
     }
     .tt-cell {
       min-width: 70px;
@@ -451,15 +451,15 @@ export default function TimetableView() {
       font-size: 0.68rem;
     }
     .tt-activity {
-      writing-mode: vertical-rl;
+      writing-mode: vertical-lr;
       text-orientation: mixed;
-      transform: rotate(180deg);
       font-weight: bold;
       color: #33cc33;
       width: 30px;
       min-width: 30px;
       font-size: 0.62rem;
       padding: 4px 2px;
+      text-align: center;
     }
     .tt-break-header {
       background-color: #222;
