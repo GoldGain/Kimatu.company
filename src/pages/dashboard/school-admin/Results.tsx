@@ -342,11 +342,32 @@ export default function SchoolAdminResults() {
       const allSubjects = Array.from(new Set(rawResults.map((r: any) => r.subjects?.name).filter(Boolean))) as string[];
       const totalStudents = summaries.length;
 
+      // ── Missing variable calculations (fixes "classMean is not defined" error) ──
+      const classMean = totalStudents > 0
+        ? summaries.reduce((sum, s) => sum + s.avgPct, 0) / totalStudents
+        : 0;
+
+      // Subject performance calculation
+      const subjectTotals: Record<string, { total: number; count: number }> = {};
+      summaries.forEach(s => {
+        Object.entries(s.subjects).forEach(([subject, marks]) => {
+          if (subject.endsWith('_grade') || subject.endsWith('_points')) return;
+          if (!subjectTotals[subject]) subjectTotals[subject] = { total: 0, count: 0 };
+          subjectTotals[subject].total += marks as number;
+          subjectTotals[subject].count++;
+        });
+      });
       // Fetch previous term averages for deviation analysis
       const prevAvgMap: Record<string, number | null> = {};
       for (const s of summaries) {
         prevAvgMap[s.studentId] = await fetchPreviousTermAvg(s.studentId, selectedTerm);
       }
+
+      // Students needing attention (dropped >10% from previous term)
+      const needAttention = summaries.filter(s => {
+        const prevAvg = prevAvgMap[s.studentId];
+        return prevAvg !== null && prevAvg !== undefined && (s.avgPct - prevAvg) < -10;
+      });
 
       // Subject-level analysis
       const subjectStats = allSubjects.map(sub => {
@@ -402,7 +423,6 @@ export default function SchoolAdminResults() {
         doc.text(`${classObj?.name || 'Class'} — ${termObj?.name || 'Term'} ${termObj?.academic_year || ''}`, 105, 30, { align: 'center' });
 
         // Class statistics box
-        const classMean = totalStudents ? summaries.reduce((s, v) => s + v.avgPct, 0) / totalStudents : 0;
         const classGrade = is844 ? overallGrade844(classMean) : overallGradeWithBand(classMean, band);
         const statsY = 42;
 
@@ -544,13 +564,12 @@ export default function SchoolAdminResults() {
         doc.setTextColor(0, 0, 0);
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
-        const needAttention = summaries
-          .filter(s => prevAvgMap[s.studentId] !== null && prevAvgMap[s.studentId] !== undefined)
-          .map(s => ({ ...s, dev: s.avgPct - (prevAvgMap[s.studentId] as number) }))
-          .filter((s: any) => s.dev < -10)
-          .sort((a: any, b: any) => a.dev - b.dev);
-        if (needAttention.length > 0) {
-          needAttention.forEach((s: any, i: number) => {
+        const needAttentionWithDev = needAttention.map(s => ({
+          ...s,
+          dev: s.avgPct - (prevAvgMap[s.studentId] as number)
+        })).sort((a: any, b: any) => a.dev - b.dev);
+        if (needAttentionWithDev.length > 0) {
+          needAttentionWithDev.forEach((s: any, i: number) => {
             doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name}: Dropped by ${s.dev.toFixed(1)}%`, 20, attentionY + 7 + i * 6);
           });
         } else {
