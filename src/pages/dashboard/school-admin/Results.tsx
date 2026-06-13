@@ -7,22 +7,35 @@ import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 
 // ── Grade helpers ──────────────────────────────────────────────────────────────
-import { calculateCompetencyGrade, getSchoolLevelBand } from '@/lib/grading';
+import { calculateCompetencyGrade, getSchoolLevelBand, calculate844Grade } from '@/lib/grading';
+import type { SchoolLevelBand } from '@/lib/grading';
 
-function calculateCBEGrade(pct: number, classData?: { curriculum?: string | null; level?: number | string | null; name?: string | null }) {
+function calculateCBEGrade(pct: number, classData?: { curriculum?: string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }) {
   const band = getSchoolLevelBand(classData);
   const g = calculateCompetencyGrade(pct, band === '844' ? 'junior' : band);
   return { subLevel: g.subLevel, grade: g.grade, points: g.points };
 }
 
-function overallGradeLabel(avgPct: number) {
+/** Overall 4-letter grade for CBE (EE/ME/AE/BE) — used in class summary */
+function overallGradeLabelCBC(avgPct: number): string {
   if (avgPct >= 75) return 'EE';
-  if (avgPct >= 58) return 'ME';
-  if (avgPct >= 31) return 'AE';
+  if (avgPct >= 41) return 'ME';
+  if (avgPct >= 21) return 'AE';
   return 'BE';
 }
 
-// ── AI comment generator ───────────────────────────────────────────────────────
+/** Get overall sublevel + points for CBC based on average percentage and band */
+function overallGradeWithBand(avgPct: number, band: SchoolLevelBand) {
+  const g = calculateCompetencyGrade(avgPct, band);
+  return { subLevel: g.subLevel, grade: g.grade, points: g.points, descriptor: g.descriptor };
+}
+
+/** Get grade for 844 system */
+function overallGrade844(avgPct: number) {
+  return calculate844Grade(avgPct);
+}
+
+/** Generate personalized AI teacher comment based on student performance */
 function generateAIComment(
   avgPct: number,
   deviation: number | null,
@@ -30,30 +43,53 @@ function generateAIComment(
   weakestSubject: string,
   position: number,
   totalStudents: number,
-  isNew: boolean
+  isNew: boolean,
+  band?: SchoolLevelBand
 ): string {
-  if (position <= 3 && totalStudents >= 3) {
-    const rank = position === 1 ? '1st' : position === 2 ? '2nd' : '3rd';
-    return `Outstanding! You are among the top performers (${rank} in class). Your mastery of ${bestSubject} is impressive. Remember, the sky is not the limit!`;
+  const grade = overallGradeWithBand(avgPct, band || 'junior');
+  const gradeLabel = band === '844' ? overallGrade844(avgPct).grade : grade.subLevel;
+  const descriptor = band === '844' ? overallGrade844(avgPct).descriptor : grade.descriptor;
+
+  // Top performers
+  if (position === 1 && totalStudents >= 3) {
+    return `Exceptional performance! You ranked 1st out of ${totalStudents} students. Your mastery of ${bestSubject} is remarkable. With your ${gradeLabel} grade (${descriptor}), you are a role model. Continue aiming higher — the sky is not the limit!`;
   }
+  if (position === 2 && totalStudents >= 3) {
+    return `Outstanding work! You ranked 2nd out of ${totalStudents} students. Your strength in ${bestSubject} is impressive. Keep pushing to reach the top. Your ${gradeLabel} grade reflects excellence!`;
+  }
+  if (position === 3 && totalStudents >= 3) {
+    return `Excellent effort! You ranked 3rd out of ${totalStudents} students. Your dedication to ${bestSubject} is paying off. With consistent effort, you can climb even higher!`;
+  }
+  if (position <= 5 && totalStudents >= 5) {
+    return `Great work! You are among the top 5 performers in a class of ${totalStudents}. Your ${gradeLabel} grade in ${bestSubject} shows great potential. Keep up the good work!`;
+  }
+
+  // New student
   if (isNew || deviation === null) {
-    const grade = overallGradeLabel(avgPct);
-    return `Welcome! You have shown ${grade} performance. Strong in ${bestSubject}. Keep working hard!`;
+    return `Welcome! You have achieved a ${gradeLabel} grade overall (${descriptor}). Your performance in ${bestSubject} is commendable. Focus on improving ${weakestSubject} next term. Keep working hard — we believe in your potential!`;
   }
+
+  // Deviation-based comments
   const dev = Math.abs(deviation);
-  if (deviation > 5) {
-    return `Excellent improvement! You rose by ${dev.toFixed(1)}%. Your hard work in ${bestSubject} paid off. The sky is not the limit!`;
+  if (deviation > 10) {
+    return `Remarkable improvement! You rose by ${dev.toFixed(1)}% from last term. Your hard work and determination in ${bestSubject} have truly paid off. This ${gradeLabel} grade is well deserved. Maintain this momentum!`;
   }
-  if (deviation > 1) {
-    return `Good progress! You improved by ${dev.toFixed(1)}%. Keep working on ${weakestSubject}.`;
+  if (deviation > 5) {
+    return `Excellent progress! You improved by ${dev.toFixed(1)}% from last term. Your dedication to ${bestSubject} is evident. To reach even greater heights, please give more attention to ${weakestSubject}. Keep soaring!`;
+  }
+  if (deviation > 2) {
+    return `Good improvement! You rose by ${dev.toFixed(1)}% from last term. Your ${gradeLabel} grade shows positive growth. Continue building on your strength in ${bestSubject} while working on ${weakestSubject}.`;
   }
   if (deviation >= -1) {
-    return `Consistent performance. You are strong in ${bestSubject}. Let's improve ${weakestSubject}.`;
+    return `Consistent performance this term with a ${gradeLabel} grade (${descriptor}). You are strong in ${bestSubject}. Let's set goals to improve ${weakestSubject} next term. steady progress leads to success!`;
   }
   if (deviation >= -5) {
-    return `Your performance dropped slightly by ${dev.toFixed(1)}%. Focus on ${weakestSubject} next term.`;
+    return `Your performance dropped by ${dev.toFixed(1)}% from last term. Don't be discouraged — every great achiever faces setbacks. Focus more on ${weakestSubject} and seek help from your teacher. We believe you will bounce back!`;
   }
-  return `Your performance dropped by ${dev.toFixed(1)}%. Let's identify challenges. We believe you will bounce back.`;
+  if (deviation >= -10) {
+    return `Your performance dropped by ${dev.toFixed(1)}% from last term. This is a concern. Please dedicate more time to ${weakestSubject} and revise your study habits. Your teachers and parents are here to support you.`;
+  }
+  return `Your performance dropped significantly by ${dev.toFixed(1)}% from last term. Urgent attention is needed, especially in ${weakestSubject}. Please meet with your class teacher to create an improvement plan. We believe in your ability to recover!`;
 }
 
 const SUBJECT_SHORT: Record<string, string> = {
@@ -235,17 +271,21 @@ export default function SchoolAdminResults() {
     return totalPct / data.length;
   };
 
-  const buildStudentSummary = (rawResults: any[]) => {
+  const buildStudentSummary = (rawResults: any[], classData?: any) => {
+    const band = getSchoolLevelBand(classData);
     const byStudent: Record<string, any> = {};
     rawResults.forEach((r: any) => {
       const sid = r.students?.id || r.student_id;
       if (!byStudent[sid]) {
-        byStudent[sid] = { student: r.students, subjects: {}, totalPct: 0, count: 0 };
+        byStudent[sid] = { student: r.students, subjects: {}, totalPct: 0, totalPoints: 0, count: 0 };
       }
-      const pct = r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0);
+      const pct = r.percentage !== undefined && r.percentage !== null ? Number(r.percentage) : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0);
       const subName = r.subjects?.name || 'Unknown';
       byStudent[sid].subjects[subName] = pct;
+      byStudent[sid].subjects[subName + '_grade'] = band === '844' ? (r.grade_844 || '') : (r.cbc_sublevel || '');
+      byStudent[sid].subjects[subName + '_points'] = band === '844' ? (r.points_844 || 0) : (r.cbc_points || 0);
       byStudent[sid].totalPct += pct;
+      byStudent[sid].totalPoints += band === '844' ? (r.points_844 || 0) : (r.cbc_points || 0);
       byStudent[sid].count += 1;
     });
     const summaries = Object.entries(byStudent).map(([sid, v]: [string, any]) => ({
@@ -254,15 +294,33 @@ export default function SchoolAdminResults() {
       subjects: v.subjects,
       avgPct: v.count > 0 ? v.totalPct / v.count : 0,
       totalPct: v.totalPct,
+      totalPoints: v.totalPoints,
       subjectCount: v.count,
       position: 0,
     }));
-    summaries.sort((a, b) => b.avgPct - a.avgPct);
+    // Rank by TOTAL MARKS (totalPct), then by totalPoints as tiebreaker for Junior/844
+    summaries.sort((a, b) => {
+      if (b.totalPct !== a.totalPct) return b.totalPct - a.totalPct;
+      return b.totalPoints - a.totalPoints;
+    });
     summaries.forEach((s, i) => { s.position = i + 1; });
     return summaries;
   };
 
-  // ── FEATURE 1: Class Results PDF with DEV column ────────────────────────────
+  // ── Helper: draw horizontal bar for grade distribution ──────────────────────
+  const drawBar = (doc: jsPDF, x: number, y: number, width: number, filledPct: number, color: [number, number, number]) => {
+    doc.setDrawColor(220, 220, 220);
+    doc.setFillColor(240, 240, 240);
+    doc.rect(x, y, width, 5, 'FD');
+    if (filledPct > 0) {
+      doc.setFillColor(color[0], color[1], color[2]);
+      doc.rect(x, y, width * filledPct, 5, 'F');
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // FEATURE: Complete 5-Section Class Results PDF
+  // ═══════════════════════════════════════════════════════════════════════════════
   const downloadClassResultsPDF = async () => {
     if (!selectedClass || !selectedTerm) { toast.error('Please select a class and term'); return; }
     setGeneratingPDF(true);
@@ -273,130 +331,617 @@ export default function SchoolAdminResults() {
         setGeneratingPDF(false);
         return;
       }
-      const summaries = buildStudentSummary(rawResults);
       const classObj = classes.find(c => c.id === selectedClass);
       const termObj = terms.find(t => t.id === selectedTerm);
-      const allSubjects = Array.from(new Set(rawResults.map((r: any) => r.subjects?.name).filter(Boolean))) as string[];
+      const band = getSchoolLevelBand(classObj);
+      const isPrimary = band === 'primary';
+      const is844 = band === '844';
+      const maxPossible = is844 ? 12 : (isPrimary ? 0 : 8); // max points per subject
 
+      const summaries = buildStudentSummary(rawResults, classObj);
+      const allSubjects = Array.from(new Set(rawResults.map((r: any) => r.subjects?.name).filter(Boolean))) as string[];
+      const totalStudents = summaries.length;
+
+      // Fetch previous term averages for deviation analysis
       const prevAvgMap: Record<string, number | null> = {};
       for (const s of summaries) {
         prevAvgMap[s.studentId] = await fetchPreviousTermAvg(s.studentId, selectedTerm);
       }
 
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-
-      // Header
-      doc.setFillColor(37, 99, 235);
-      doc.rect(0, 0, 297, 22, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text(schoolName, 148.5, 9, { align: 'center' });
-      doc.setFontSize(10);
-      doc.text(`${classObj?.name || 'Class'} Results - ${termObj?.name || 'Term'} ${termObj?.academic_year || ''}`, 148.5, 17, { align: 'center' });
-
-      const subjectCols = allSubjects.map(s => shortName(s));
-      const headers = ['POS', 'STUDENT NAME', ...subjectCols, 'TOTAL', 'AVG%', 'DEV', 'GRADE'];
-      const devColIdx = headers.indexOf('DEV');
-
-      const rows = summaries.map((s: any) => {
-        const prevAvg = prevAvgMap[s.studentId];
-        const deviation = prevAvg !== null && prevAvg !== undefined ? s.avgPct - prevAvg : null;
-        let devStr = 'NEW';
-        if (deviation !== null) {
-          devStr = deviation >= 0 ? `+${deviation.toFixed(1)}%` : `${deviation.toFixed(1)}%`;
-        }
-        const subjectMarks = allSubjects.map(sub => {
-          const pct = s.subjects[sub];
-          return pct !== undefined ? `${pct.toFixed(0)}%` : '-';
-        });
-        return [
-          String(s.position),
-          `${s.student?.first_name || ''} ${s.student?.last_name || ''}`,
-          ...subjectMarks,
-          `${s.totalPct.toFixed(0)}`,
-          `${s.avgPct.toFixed(1)}%`,
-          devStr,
-          overallGradeLabel(s.avgPct),
-        ];
-      });
-
-      const classMean = summaries.length ? summaries.reduce((s, v) => s + v.avgPct, 0) / summaries.length : 0;
-      const subjectMeans = allSubjects.map(sub => {
+      // Subject-level analysis
+      const subjectStats = allSubjects.map(sub => {
         const vals = summaries.map(s => s.subjects[sub]).filter(v => v !== undefined);
         const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-        return `${mean.toFixed(1)}%`;
+        const grade = is844 ? overallGrade844(mean) : overallGradeWithBand(mean, band);
+        return { name: sub, mean, grade, vals };
       });
-      rows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', `${classMean.toFixed(1)}%`, '', '']);
+      subjectStats.sort((a, b) => b.mean - a.mean);
 
-      autoTable(doc, {
-        startY: 26,
-        head: [headers],
-        body: rows,
-        styles: { fontSize: 7, cellPadding: 1.5 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7, fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [245, 247, 255] },
-        didParseCell: (data: any) => {
-          if (data.section === 'body' && data.column.index === devColIdx) {
-            const cellText = String(data.cell.raw || '');
-            if (cellText.startsWith('+')) {
-              data.cell.styles.textColor = [22, 163, 74];
-              data.cell.styles.fontStyle = 'bold';
-            } else if (cellText.startsWith('-')) {
-              data.cell.styles.textColor = [220, 38, 38];
-              data.cell.styles.fontStyle = 'bold';
-            } else {
-              data.cell.styles.textColor = [100, 100, 100];
-            }
-          }
-        },
-      });
-
-      const finalY = (doc as any).lastAutoTable.finalY + 10;
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.text('CLASS ANALYSIS', 14, finalY);
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Class Mean Grade: ${classMean.toFixed(1)}% (${overallGradeLabel(classMean)})  |  Total Students: ${summaries.length}`, 14, finalY + 8);
-
-      const top5 = summaries.slice(0, 5);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Top 5 Performers:', 14, finalY + 18);
-      doc.setFont('helvetica', 'normal');
-      top5.forEach((s: any, i: number) => {
-        doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name} - ${s.avgPct.toFixed(1)}%`, 20, finalY + 25 + i * 6);
-      });
-
-      const improved = summaries
-        .filter(s => prevAvgMap[s.studentId] !== null && prevAvgMap[s.studentId] !== undefined)
-        .map(s => ({ ...s, dev: s.avgPct - (prevAvgMap[s.studentId] as number) }))
-        .sort((a: any, b: any) => b.dev - a.dev)
-        .slice(0, 3);
-      if (improved.length > 0) {
-        doc.setFont('helvetica', 'bold');
-        doc.text('Most Improved:', 110, finalY + 18);
-        doc.setFont('helvetica', 'normal');
-        improved.forEach((s: any, i: number) => {
-          doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name} (+${s.dev.toFixed(1)}%)`, 116, finalY + 25 + i * 6);
-        });
+      // Previous term subject stats for improvement analysis
+      const prevTerm = getPreviousTerm(selectedTerm);
+      let prevSubjectStats: Record<string, number> = {};
+      if (prevTerm) {
+        const { data: prevResults } = await supabaseUntyped
+          .from('results')
+          .select('*, subjects(name)')
+          .eq('class_id', selectedClass)
+          .eq('term_id', prevTerm.id)
+          .eq('school_id', user?.schoolId);
+        if (prevResults) {
+          allSubjects.forEach(sub => {
+            const subResults = (prevResults as any[]).filter((r: any) => r.subjects?.name === sub);
+            const pcts = subResults.map((r: any) => r.percentage !== undefined ? Number(r.percentage) : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0));
+            if (pcts.length > 0) prevSubjectStats[sub] = pcts.reduce((a, b) => a + b, 0) / pcts.length;
+          });
+        }
       }
 
-      const needAttention = [...summaries].reverse().slice(0, 3);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Students Needing Attention:', 200, finalY + 18);
-      doc.setFont('helvetica', 'normal');
-      needAttention.forEach((s: any, i: number) => {
-        doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name} - ${s.avgPct.toFixed(1)}%`, 206, finalY + 25 + i * 6);
+      // Subject improvement data
+      const subjectImprovement = subjectStats.map(s => {
+        const prev = prevSubjectStats[s.name];
+        const change = prev !== undefined ? s.mean - prev : null;
+        return { ...s, prevMean: prev, change };
       });
+      const mostImprovedSubjects = subjectImprovement.filter(s => s.change !== null && s.change > 0).sort((a, b) => (b.change || 0) - (a.change || 0));
+      const weakestSubjects = subjectImprovement.filter(s => s.change !== null && s.change < 0).sort((a, b) => (a.change || 0) - (b.change || 0));
 
-      doc.setFontSize(7);
-      doc.setTextColor(150, 150, 150);
-      doc.text('Generated by CBE-Analytics School Management System', 148.5, 200, { align: 'center' });
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      // ── SECTION 1: CLASS SUMMARY PAGE ───────────────────────────────────────
+      {
+        // Blue header
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 0, 210, 35, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text(schoolName, 105, 13, { align: 'center' });
+        doc.setFontSize(11);
+        doc.text('CLASS RESULTS SUMMARY', 105, 22, { align: 'center' });
+        doc.setFontSize(9);
+        doc.text(`${classObj?.name || 'Class'} — ${termObj?.name || 'Term'} ${termObj?.academic_year || ''}`, 105, 30, { align: 'center' });
+
+        // Class statistics box
+        const classMean = totalStudents ? summaries.reduce((s, v) => s + v.avgPct, 0) / totalStudents : 0;
+        const classGrade = is844 ? overallGrade844(classMean) : overallGradeWithBand(classMean, band);
+        const statsY = 42;
+
+        doc.setFillColor(245, 247, 255);
+        doc.rect(14, statsY, 182, 30, 'F');
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Total Students: ${totalStudents}`, 20, statsY + 8);
+        doc.text(`Class Average: ${classMean.toFixed(1)}%`, 75, statsY + 8);
+        doc.text(`Class Mean Grade: ${is844 ? classGrade.grade : classGrade.subLevel}${!isPrimary ? ` (${(classGrade as any).points} ${is844 ? 'pts' : 'points'})` : ''}`, 130, statsY + 8);
+        doc.text(`Grading System: ${is844 ? '8-4-4' : isPrimary ? 'Primary CBE (Marks Only)' : 'Junior CBE (With Points)'}`, 20, statsY + 18);
+        doc.text(`Subjects: ${allSubjects.length}`, 130, statsY + 18);
+
+        // Grade Distribution Chart
+        const gradeDistY = statsY + 38;
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('GRADE DISTRIBUTION', 14, gradeDistY);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+
+        if (is844) {
+          // 8-4-4 grade distribution (A, A-, B+, B, B-, C+, C, C-, D+, D, D-, E)
+          const grades844 = [
+            { label: 'A (12pts)', min: 80, color: [22, 163, 74] },
+            { label: 'A- (11pts)', min: 75, color: [34, 197, 94] },
+            { label: 'B+ (10pts)', min: 70, color: [56, 189, 114] },
+            { label: 'B (9pts)', min: 65, color: [74, 222, 128] },
+            { label: 'B- (8pts)', min: 60, color: [96, 220, 140] },
+            { label: 'C+ (7pts)', min: 55, color: [250, 204, 21] },
+            { label: 'C (6pts)', min: 50, color: [253, 224, 71] },
+            { label: 'C- (5pts)', min: 45, color: [253, 186, 116] },
+            { label: 'D+ (4pts)', min: 40, color: [253, 164, 100] },
+            { label: 'D (3pts)', min: 35, color: [251, 146, 60] },
+            { label: 'D- (2pts)', min: 30, color: [249, 115, 22] },
+            { label: 'E (1pt)', min: 0, color: [220, 38, 38] },
+          ];
+          let row = 0;
+          for (const g of grades844) {
+            const count = summaries.filter(s => {
+              const gr = overallGrade844(s.avgPct);
+              return gr.grade === g.label.split(' ')[0];
+            }).length;
+            const pct = totalStudents > 0 ? count / totalStudents : 0;
+            const y = gradeDistY + 10 + row * 8;
+            doc.text(`${g.label}: ${count} student${count !== 1 ? 's' : ''} (${(pct * 100).toFixed(1)}%)`, 20, y);
+            drawBar(doc, 90, y - 3, 80, pct, g.color as [number, number, number]);
+            row++;
+          }
+        } else if (isPrimary) {
+          // Primary: EE, ME, AE, BE (no points)
+          const gradesP = [
+            { label: 'EE (Exceeding)', min: 75, color: [22, 163, 74] },
+            { label: 'ME (Meeting)', min: 41, color: [37, 99, 235] },
+            { label: 'AE (Approaching)', min: 21, color: [249, 115, 22] },
+            { label: 'BE (Below)', min: 0, color: [220, 38, 38] },
+          ];
+          let row = 0;
+          for (const g of gradesP) {
+            const count = summaries.filter(s => {
+              const p = s.avgPct;
+              if (g.label.startsWith('EE')) return p >= 75;
+              if (g.label.startsWith('ME')) return p >= 41 && p < 75;
+              if (g.label.startsWith('AE')) return p >= 21 && p < 41;
+              return p < 21;
+            }).length;
+            const pct = totalStudents > 0 ? count / totalStudents : 0;
+            const y = gradeDistY + 10 + row * 10;
+            doc.text(`${g.label}: ${count} student${count !== 1 ? 's' : ''} (${(pct * 100).toFixed(1)}%)`, 20, y);
+            drawBar(doc, 90, y - 3, 80, pct, g.color as [number, number, number]);
+            row++;
+          }
+        } else {
+          // Junior: EE1-EE2-ME1-ME2-AE1-AE2-BE1-BE2
+          const gradesJ = [
+            { label: 'EE1 (8pts)', min: 90, color: [22, 163, 74] },
+            { label: 'EE2 (7pts)', min: 75, color: [34, 197, 94] },
+            { label: 'ME1 (6pts)', min: 58, color: [37, 99, 235] },
+            { label: 'ME2 (5pts)', min: 41, color: [96, 165, 250] },
+            { label: 'AE1 (4pts)', min: 31, color: [250, 204, 21] },
+            { label: 'AE2 (3pts)', min: 21, color: [253, 186, 116] },
+            { label: 'BE1 (2pts)', min: 11, color: [251, 146, 60] },
+            { label: 'BE2 (1pt)', min: 0, color: [220, 38, 38] },
+          ];
+          let row = 0;
+          for (const g of gradesJ) {
+            const count = summaries.filter(s => {
+              const gr = overallGradeWithBand(s.avgPct, 'junior');
+              return gr.subLevel === g.label.split(' ')[0];
+            }).length;
+            const pct = totalStudents > 0 ? count / totalStudents : 0;
+            const y = gradeDistY + 10 + row * 8;
+            doc.text(`${g.label}: ${count} student${count !== 1 ? 's' : ''} (${(pct * 100).toFixed(1)}%)`, 20, y);
+            drawBar(doc, 90, y - 3, 80, pct, g.color as [number, number, number]);
+            row++;
+          }
+        }
+
+        // Top 5 Performers
+        const top5Y = gradeDistY + (is844 ? 108 : isPrimary ? 52 : 72);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TOP 5 PERFORMERS', 14, top5Y);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        const top5 = summaries.slice(0, 5);
+        top5.forEach((s: any, i: number) => {
+          const gr = is844 ? overallGrade844(s.avgPct) : overallGradeWithBand(s.avgPct, band);
+          doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name} — ${s.avgPct.toFixed(1)}% — ${is844 ? gr.grade : gr.subLevel}${!isPrimary ? ` (${(gr as any).points}pts)` : ''}`, 20, top5Y + 7 + i * 6);
+        });
+
+        // Most Improved Students
+        const improved = summaries
+          .filter(s => prevAvgMap[s.studentId] !== null && prevAvgMap[s.studentId] !== undefined)
+          .map(s => ({ ...s, dev: s.avgPct - (prevAvgMap[s.studentId] as number) }))
+          .sort((a: any, b: any) => b.dev - a.dev)
+          .slice(0, 3);
+        const improvedY = top5Y + 42;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('MOST IMPROVED STUDENTS', 14, improvedY);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        if (improved.length > 0) {
+          improved.forEach((s: any, i: number) => {
+            doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name}: Improved by +${s.dev.toFixed(1)}%`, 20, improvedY + 7 + i * 6);
+          });
+        } else {
+          doc.text('No previous term data available for comparison.', 20, improvedY + 7);
+        }
+
+        // Students Needing Attention (dropped >10%)
+        const attentionY = improvedY + 30;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 38, 38);
+        doc.text('STUDENTS NEEDING ATTENTION (>10% drop)', 14, attentionY);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        const needAttention = summaries
+          .filter(s => prevAvgMap[s.studentId] !== null && prevAvgMap[s.studentId] !== undefined)
+          .map(s => ({ ...s, dev: s.avgPct - (prevAvgMap[s.studentId] as number) }))
+          .filter((s: any) => s.dev < -10)
+          .sort((a: any, b: any) => a.dev - b.dev);
+        if (needAttention.length > 0) {
+          needAttention.forEach((s: any, i: number) => {
+            doc.text(`${i + 1}. ${s.student?.first_name} ${s.student?.last_name}: Dropped by ${s.dev.toFixed(1)}%`, 20, attentionY + 7 + i * 6);
+          });
+        } else {
+          doc.text('No students dropped by more than 10%. Great job class!', 20, attentionY + 7);
+        }
+
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Generated by CBE-Analytics School Management System', 105, 290, { align: 'center' });
+      }
+
+      // ── SECTION 2: SUBJECT PERFORMANCE ANALYSIS ─────────────────────────────
+      doc.addPage();
+      {
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 0, 210, 20, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(schoolName, 105, 8, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text('SUBJECT PERFORMANCE ANALYSIS', 105, 16, { align: 'center' });
+
+        const subRows = subjectStats.map((s, i) => {
+          const gr = is844 ? s.grade.grade : (s.grade as any).subLevel;
+          let status = '→ AVERAGE';
+          if (i === 0) status = '↑ STRONG';
+          else if (i === 1 && subjectStats.length > 3) status = '↑ GOOD';
+          else if (i >= subjectStats.length - 2) status = '↓ NEEDS WORK';
+          if (i === subjectStats.length - 1) status = '↓ WEAK';
+          return [String(i + 1), s.name, `${s.mean.toFixed(1)}%`, gr, status];
+        });
+
+        autoTable(doc, {
+          startY: 26,
+          head: [['Rank', 'Subject', 'Average', 'Grade', 'Status']],
+          body: subRows,
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 247, 255] },
+        });
+
+        const afterY = (doc as any).lastAutoTable.finalY + 12;
+
+        // Most Improved Subjects
+        if (mostImprovedSubjects.length > 0) {
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(22, 163, 74);
+          doc.text('MOST IMPROVED SUBJECTS (vs previous term):', 14, afterY);
+          doc.setTextColor(0, 0, 0);
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          mostImprovedSubjects.slice(0, 3).forEach((s, i) => {
+            doc.text(`↑ ${s.name}: +${(s.change || 0).toFixed(1)}%`, 20, afterY + 8 + i * 6);
+          });
+        }
+
+        // Subjects Needing Attention
+        if (weakestSubjects.length > 0) {
+          const weakY = afterY + (mostImprovedSubjects.length > 0 ? 30 : 5);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(220, 38, 38);
+          doc.text('SUBJECTS NEEDING ATTENTION:', 14, weakY);
+          doc.setTextColor(0, 0, 0);
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          weakestSubjects.slice(0, 3).forEach((s, i) => {
+            doc.text(`↓ ${s.name}: ${(s.change || 0).toFixed(1)}%`, 20, weakY + 8 + i * 6);
+          });
+        }
+
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Generated by CBE-Analytics School Management System', 105, 290, { align: 'center' });
+      }
+
+      // ── SECTION 3: STUDENT RESULTS TABLE ────────────────────────────────────
+      doc.addPage();
+      {
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 0, 210, 20, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(schoolName, 105, 8, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text(`STUDENT RESULTS TABLE — ${classObj?.name || ''} — ${termObj?.name || ''} ${termObj?.academic_year || ''}`, 105, 16, { align: 'center' });
+
+        const subjectShorts = allSubjects.map(s => shortName(s));
+        // Build headers based on school level
+        let tableHeaders: string[];
+        if (isPrimary) {
+          tableHeaders = ['POS', 'Student', ...subjectShorts, 'Total', 'Avg%', 'Grade'];
+        } else {
+          tableHeaders = ['POS', 'Student', ...subjectShorts, 'Total', 'Pts', 'Grade'];
+        }
+
+        const tableRows = summaries.map((s: any) => {
+          const gr = is844 ? overallGrade844(s.avgPct) : overallGradeWithBand(s.avgPct, band);
+          const subjectCells = allSubjects.map(sub => {
+            const pct = s.subjects[sub];
+            if (pct === undefined) return '-';
+            const subGrade = is844 ? overallGrade844(pct) : overallGradeWithBand(pct, band);
+            if (isPrimary) return `${pct.toFixed(0)}% ${(subGrade as any).grade || (subGrade as any).subLevel}`;
+            return `${pct.toFixed(0)}% ${(subGrade as any).subLevel || (subGrade as any).grade}`;
+          });
+          if (isPrimary) {
+            return [
+              `${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`,
+              `${s.student?.first_name || ''} ${s.student?.last_name || ''}`,
+              ...subjectCells,
+              `${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`,
+              `${s.avgPct.toFixed(1)}%`,
+              (gr as any).grade || (gr as any).subLevel,
+            ];
+          } else {
+            return [
+              `${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`,
+              `${s.student?.first_name || ''} ${s.student?.last_name || ''}`,
+              ...subjectCells,
+              `${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`,
+              String(s.totalPoints),
+              (gr as any).subLevel || (gr as any).grade,
+            ];
+          }
+        });
+
+        // Subject mean row
+        const subjectMeans = allSubjects.map(sub => {
+          const vals = summaries.map(s => s.subjects[sub]).filter(v => v !== undefined);
+          return vals.length ? `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)}%` : '-';
+        });
+        if (isPrimary) {
+          tableRows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', `${classMean.toFixed(1)}%`, overallGradeWithBand(classMean, band).grade]);
+        } else {
+          tableRows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', '', is844 ? overallGrade844(classMean).grade : overallGradeWithBand(classMean, band).subLevel]);
+        }
+
+        autoTable(doc, {
+          startY: 24,
+          head: [tableHeaders],
+          body: tableRows,
+          styles: { fontSize: 6.5, cellPadding: 1 },
+          headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 6.5, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 247, 255] },
+          didParseCell: (data: any) => {
+            if (data.section === 'body' && data.row.index === tableRows.length - 1) {
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.fillColor = [230, 240, 255];
+            }
+          },
+        });
+
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Ranking by Total Marks. ${isPrimary ? 'No points — marks only.' : 'Points shown for Junior CBE grading.'} | Generated by CBE-Analytics`, 105, 290, { align: 'center' });
+      }
+
+      // ── SECTION 4: INDIVIDUAL STUDENT REPORT PAGES ──────────────────────────
+      for (const s of summaries) {
+        doc.addPage();
+        const prevAvg = prevAvgMap[s.studentId];
+        const deviation = prevAvg !== null && prevAvg !== undefined ? s.avgPct - prevAvg : null;
+        const isNew = deviation === null;
+
+        const subjectEntries = Object.entries(s.subjects).filter(([k]) => !k.endsWith('_grade') && !k.endsWith('_points')) as [string, number][];
+        const sortedBest = [...subjectEntries].sort((a, b) => b[1] - a[1]);
+        const bestSubject = sortedBest[0]?.[0] || 'all subjects';
+        const weakestSubject = sortedBest[sortedBest.length - 1]?.[0] || 'some subjects';
+
+        const aiComment = generateAIComment(s.avgPct, deviation, bestSubject, weakestSubject, s.position, totalStudents, isNew, band);
+
+        // Header
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 0, 210, 30, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text(schoolName, 105, 11, { align: 'center' });
+        doc.setFontSize(11);
+        doc.text('STUDENT REPORT CARD', 105, 20, { align: 'center' });
+
+        // Student Info
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        const y = 38;
+        doc.text(`Student: ${s.student?.first_name || ''} ${s.student?.last_name || ''}`, 14, y);
+        doc.text(`Adm No: ${s.student?.admission_number || 'N/A'}`, 14, y + 7);
+        doc.text(`Class: ${classObj?.name || 'N/A'}`, 14, y + 14);
+        doc.text(`Term: ${termObj?.name || ''} ${termObj?.academic_year || ''}`, 120, y);
+        doc.text(`Position: ${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'} out of ${totalStudents}`, 120, y + 7);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 14);
+
+        doc.setDrawColor(37, 99, 235);
+        doc.line(14, y + 20, 196, y + 20);
+
+        // Subject rows — different columns for Primary vs Junior vs 844
+        const subjectRows = subjectEntries.map(([subName, pct]) => {
+          let gradeLabel: string;
+          let pointsVal: string;
+          let descriptor: string;
+          if (is844) {
+            const g = overallGrade844(pct);
+            gradeLabel = g.grade;
+            pointsVal = String(g.points);
+            descriptor = g.descriptor;
+          } else {
+            const g = overallGradeWithBand(pct, band);
+            gradeLabel = g.subLevel;
+            pointsVal = isPrimary ? '—' : String(g.points);
+            descriptor = g.descriptor;
+          }
+          return isPrimary
+            ? [subName, `${pct.toFixed(0)}%`, gradeLabel, descriptor]
+            : [subName, `${pct.toFixed(0)}%`, gradeLabel, pointsVal, descriptor];
+        });
+
+        autoTable(doc, {
+          startY: y + 25,
+          head: [isPrimary
+            ? ['Subject', 'Percentage', is844 ? '8-4-4 Grade' : 'CBE Grade', 'Descriptor']
+            : ['Subject', 'Percentage', is844 ? '8-4-4 Grade' : 'CBE Grade', 'Points', 'Descriptor']
+          ],
+          body: subjectRows,
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 247, 255] },
+        });
+
+        const tableEnd = (doc as any).lastAutoTable.finalY + 8;
+
+        // Summary box
+        doc.setFillColor(245, 247, 255);
+        doc.rect(14, tableEnd, 182, 22, 'F');
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        const gr = is844 ? overallGrade844(s.avgPct) : overallGradeWithBand(s.avgPct, band);
+        doc.text(`Average: ${s.avgPct.toFixed(1)}%`, 20, tableEnd + 8);
+        doc.text(`Grade: ${is844 ? (gr as any).grade : (gr as any).subLevel}`, 70, tableEnd + 8);
+        doc.text(`Position: ${s.position}/${totalStudents}`, 120, tableEnd + 8);
+        if (!isPrimary) {
+          doc.text(`Total Points: ${s.totalPoints}`, 160, tableEnd + 8);
+        }
+        doc.text(`Total Marks: ${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`, 20, tableEnd + 17);
+        if (!isPrimary) {
+          doc.text(`Overall: ${is844 ? (gr as any).descriptor : (gr as any).descriptor}`, 70, tableEnd + 17);
+        }
+
+        // Deviation
+        let devText = 'First Term — No previous data';
+        if (deviation !== null) {
+          const arrow = deviation >= 0 ? '\u25B2' : '\u25BC';
+          const sign = deviation >= 0 ? '+' : '';
+          devText = `${arrow} ${sign}${deviation.toFixed(1)}% vs previous term`;
+        }
+        doc.setFont('helvetica', 'normal');
+        if (deviation !== null && deviation >= 0) doc.setTextColor(22, 163, 74);
+        else if (deviation !== null && deviation < 0) doc.setTextColor(220, 38, 38);
+        else doc.setTextColor(100, 100, 100);
+        doc.text(devText, 120, tableEnd + 17);
+        doc.setTextColor(0, 0, 0);
+
+        // AI Comment
+        const commentY = tableEnd + 30;
+        doc.setFillColor(254, 252, 232);
+        doc.rect(14, commentY, 182, 30, 'F');
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Class Teacher\'s Comment:', 18, commentY + 7);
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        const commentLines = doc.splitTextToSize(aiComment, 170);
+        doc.text(commentLines, 18, commentY + 14);
+
+        // Signatures
+        const sigY = commentY + 40;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(0, 0, 0);
+        doc.text('Class Teacher Signature: ___________________________', 14, sigY);
+        doc.text('Principal Signature: ___________________________', 120, sigY);
+        doc.text('Date: ___________________', 14, sigY + 10);
+        doc.text('School Stamp:', 120, sigY + 10);
+
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Student Report | ${s.student?.first_name} ${s.student?.last_name} | Generated by CBE-Analytics`, 105, 290, { align: 'center' });
+      }
+
+      // ── SECTION 5: PERFORMANCE TRENDS ───────────────────────────────────────
+      doc.addPage();
+      {
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 0, 210, 20, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(schoolName, 105, 8, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text('PERFORMANCE TRENDS & ANALYSIS', 105, 16, { align: 'center' });
+
+        const trendY = 28;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0, 0, 0);
+        doc.text('CLASS PERFORMANCE SUMMARY', 14, trendY);
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Class Average: ${classMean.toFixed(1)}%`, 14, trendY + 10);
+        doc.text(`Class Grade: ${is844 ? overallGrade844(classMean).grade : overallGradeWithBand(classMean, band).subLevel}`, 75, trendY + 10);
+        doc.text(`Students Above Average: ${summaries.filter(s => s.avgPct >= classMean).length} of ${totalStudents}`, 130, trendY + 10);
+
+        // Top performer vs class average
+        const topPerformer = summaries[0];
+        if (topPerformer) {
+          doc.text(`Best Performer: ${topPerformer.student?.first_name} ${topPerformer.student?.last_name} (${topPerformer.avgPct.toFixed(1)}%)`, 14, trendY + 20);
+          doc.text(`Gap from Class Avg: +${(topPerformer.avgPct - classMean).toFixed(1)}%`, 130, trendY + 20);
+        }
+
+        // Deviation summary
+        const devY = trendY + 35;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('IMPROVEMENT ANALYSIS', 14, devY);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+
+        const improvedCount = summaries.filter(s => {
+          const prev = prevAvgMap[s.studentId];
+          return prev !== null && prev !== undefined && s.avgPct > prev;
+        }).length;
+        const declinedCount = summaries.filter(s => {
+          const prev = prevAvgMap[s.studentId];
+          return prev !== null && prev !== undefined && s.avgPct < prev;
+        }).length;
+        const sameCount = summaries.filter(s => {
+          const prev = prevAvgMap[s.studentId];
+          return prev !== null && prev !== undefined && Math.abs(s.avgPct - prev) <= 1;
+        }).length;
+
+        doc.text(`Students who improved: ${improvedCount}`, 14, devY + 10);
+        doc.text(`Students who declined: ${declinedCount}`, 75, devY + 10);
+        doc.text(`Students with consistent performance: ${sameCount}`, 130, devY + 10);
+
+        // Class position distribution
+        const distY = devY + 25;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('POSITION DISTRIBUTION', 14, distY);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+
+        const third = Math.ceil(totalStudents / 3);
+        const topThird = summaries.filter(s => s.position <= third).length;
+        const midThird = summaries.filter(s => s.position > third && s.position <= third * 2).length;
+        const botThird = summaries.filter(s => s.position > third * 2).length;
+
+        doc.text(`Top Third (positions 1-${third}): ${topThird} students`, 14, distY + 10);
+        drawBar(doc, 90, distY + 6, 80, totalStudents > 0 ? topThird / totalStudents : 0, [22, 163, 74]);
+        doc.text(`Middle Third (positions ${third + 1}-${third * 2}): ${midThird} students`, 14, distY + 20);
+        drawBar(doc, 90, distY + 16, 80, totalStudents > 0 ? midThird / totalStudents : 0, [37, 99, 235]);
+        doc.text(`Bottom Third (positions ${third * 2 + 1}-${totalStudents}): ${botThird} students`, 14, distY + 30);
+        drawBar(doc, 90, distY + 26, 80, totalStudents > 0 ? botThird / totalStudents : 0, [249, 115, 22]);
+
+        // Key recommendations
+        const recY = distY + 45;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('KEY RECOMMENDATIONS', 14, recY);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        const recs: string[] = [];
+        if (weakestSubjects.length > 0) recs.push(`Focus on improving ${weakestSubjects[0].name} (lowest average at ${weakestSubjects[0].mean.toFixed(1)}%).`);
+        if (needAttention.length > 0) recs.push(`${needAttention.length} student${needAttention.length > 1 ? 's' : ''} need${needAttention.length === 1 ? 's' : ''} immediate intervention (dropped >10%).`);
+        if (mostImprovedSubjects.length > 0) recs.push(`Maintain the great progress in ${mostImprovedSubjects[0].name} (improved by +${(mostImprovedSubjects[0].change || 0).toFixed(1)}%).`);
+        recs.push(`Class target for next term: Improve class average from ${classMean.toFixed(1)}% to ${(classMean + 5).toFixed(1)}%.`);
+        recs.forEach((r, i) => {
+          doc.text(`${i + 1}. ${r}`, 20, recY + 10 + i * 6);
+        });
+
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Generated by CBE-Analytics School Management System | Page 5 of 5', 105, 290, { align: 'center' });
+      }
 
       doc.save(`class_results_${classObj?.name}_${termObj?.name}_${termObj?.academic_year}.pdf`);
-      toast.success('Class Results PDF downloaded! Check the DEV column for deviation arrows.');
+      toast.success('Complete Class Results PDF downloaded with all 5 sections!');
     } catch (err: any) {
       toast.error('Failed to generate PDF: ' + err.message);
       console.error(err);
@@ -405,6 +950,19 @@ export default function SchoolAdminResults() {
   };
 
   // ── FEATURE 3: Bulk Report Cards ────────────────────────────────────────────
+  /** Get previous term object from the terms list */
+  const getPreviousTerm = (currentTermId: string) => {
+    if (!terms.length) return null;
+    const sortedTerms = [...terms].sort((a, b) => {
+      if (a.academic_year !== b.academic_year) return Number(a.academic_year) - Number(b.academic_year);
+      const termNum = (n: string) => n.includes('1') ? 1 : n.includes('2') ? 2 : 3;
+      return termNum(a.name) - termNum(b.name);
+    });
+    const currentIdx = sortedTerms.findIndex(t => t.id === currentTermId);
+    if (currentIdx <= 0) return null;
+    return sortedTerms[currentIdx - 1];
+  };
+
   const downloadBulkReportCards = async () => {
     if (!selectedClass || !selectedTerm) { toast.error('Please select a class and term'); return; }
     setGeneratingBulk(true);
@@ -415,8 +973,12 @@ export default function SchoolAdminResults() {
         setGeneratingBulk(false);
         return;
       }
-      const summaries = buildStudentSummary(rawResults);
       const classObj = classes.find(c => c.id === selectedClass);
+      const band = getSchoolLevelBand(classObj);
+      const isPrimary = band === 'primary';
+      const is844 = band === '844';
+      const allSubjects = Array.from(new Set(rawResults.map((r: any) => r.subjects?.name).filter(Boolean))) as string[];
+      const summaries = buildStudentSummary(rawResults, classObj);
       const termObj = terms.find(t => t.id === selectedTerm);
       const totalStudents = summaries.length;
 
@@ -434,12 +996,12 @@ export default function SchoolAdminResults() {
         const deviation = prevAvg !== null && prevAvg !== undefined ? s.avgPct - prevAvg : null;
         const isNew = deviation === null;
 
-        const subjectEntries = Object.entries(s.subjects) as [string, number][];
+        const subjectEntries = Object.entries(s.subjects).filter(([k]) => !k.endsWith('_grade') && !k.endsWith('_points')) as [string, number][];
         const sortedBest = [...subjectEntries].sort((a, b) => b[1] - a[1]);
         const bestSubject = sortedBest[0]?.[0] || 'all subjects';
         const weakestSubject = sortedBest[sortedBest.length - 1]?.[0] || 'some subjects';
 
-        const aiComment = generateAIComment(s.avgPct, deviation, bestSubject, weakestSubject, s.position, totalStudents, isNew);
+        const aiComment = generateAIComment(s.avgPct, deviation, bestSubject, weakestSubject, s.position, totalStudents, isNew, band);
 
         // Header
         doc.setFillColor(37, 99, 235);
@@ -459,20 +1021,39 @@ export default function SchoolAdminResults() {
         doc.text(`Adm No: ${s.student?.admission_number || 'N/A'}`, 14, y + 7);
         doc.text(`Class: ${classObj?.name || 'N/A'}`, 14, y + 14);
         doc.text(`Term: ${termObj?.name || ''} ${termObj?.academic_year || ''}`, 120, y);
-        doc.text(`Position: ${s.position} / ${totalStudents}`, 120, y + 7);
+        doc.text(`Position: ${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'} out of ${totalStudents}`, 120, y + 7);
         doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 14);
 
         doc.setDrawColor(37, 99, 235);
         doc.line(14, y + 20, 196, y + 20);
 
+        // Subject rows adapted for school level
         const subjectRows = subjectEntries.map(([subName, pct]) => {
-          const cbcG = calculateCBEGrade(pct, classObj);
-          return [subName, `${pct.toFixed(0)}%`, cbcG.subLevel, String(cbcG.points)];
+          let gradeLabel: string;
+          let pointsVal: string;
+          let descriptor: string;
+          if (is844) {
+            const g = overallGrade844(pct);
+            gradeLabel = g.grade;
+            pointsVal = String(g.points);
+            descriptor = g.descriptor;
+          } else {
+            const g = overallGradeWithBand(pct, band);
+            gradeLabel = g.subLevel;
+            pointsVal = isPrimary ? '—' : String(g.points);
+            descriptor = g.descriptor;
+          }
+          return isPrimary
+            ? [subName, `${pct.toFixed(0)}%`, gradeLabel, descriptor]
+            : [subName, `${pct.toFixed(0)}%`, gradeLabel, pointsVal, descriptor];
         });
 
         autoTable(doc, {
           startY: y + 25,
-          head: [['Subject', 'Percentage', 'CBE Grade', 'Points']],
+          head: [isPrimary
+            ? ['Subject', 'Percentage', is844 ? '8-4-4 Grade' : 'CBE Grade', 'Descriptor']
+            : ['Subject', 'Percentage', is844 ? '8-4-4 Grade' : 'CBE Grade', 'Points', 'Descriptor']
+          ],
           body: subjectRows,
           styles: { fontSize: 9 },
           headStyles: { fillColor: [37, 99, 235], textColor: 255 },
@@ -482,32 +1063,40 @@ export default function SchoolAdminResults() {
         const tableEnd = (doc as any).lastAutoTable.finalY + 8;
 
         // Summary box
+        const gr = is844 ? overallGrade844(s.avgPct) : overallGradeWithBand(s.avgPct, band);
         doc.setFillColor(245, 247, 255);
-        doc.rect(14, tableEnd, 182, 22, 'F');
+        doc.rect(14, tableEnd, 182, 25, 'F');
         doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
         doc.text(`Average: ${s.avgPct.toFixed(1)}%`, 20, tableEnd + 8);
-        doc.text(`Grade: ${overallGradeLabel(s.avgPct)}`, 70, tableEnd + 8);
+        doc.text(`Grade: ${is844 ? (gr as any).grade : (gr as any).subLevel}`, 70, tableEnd + 8);
         doc.text(`Position: ${s.position}/${totalStudents}`, 120, tableEnd + 8);
+        if (!isPrimary) {
+          doc.text(`Points: ${s.totalPoints}`, 160, tableEnd + 8);
+        }
+        doc.text(`Total: ${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`, 20, tableEnd + 17);
+        if (!isPrimary) {
+          doc.text(`${(gr as any).descriptor}`, 70, tableEnd + 17);
+        }
 
         // Deviation
-        let devText = 'First Term - No previous data';
+        let devText = 'First Term — No previous data';
         if (deviation !== null) {
           const arrow = deviation >= 0 ? '\u25B2' : '\u25BC';
           const sign = deviation >= 0 ? '+' : '';
-          devText = `${arrow} ${sign}${deviation.toFixed(1)}% vs previous term (Prev avg: ${prevAvg?.toFixed(1)}%)`;
+          devText = `${arrow} ${sign}${deviation.toFixed(1)}% vs previous term`;
         }
         doc.setFont('helvetica', 'normal');
         if (deviation !== null && deviation >= 0) doc.setTextColor(22, 163, 74);
         else if (deviation !== null && deviation < 0) doc.setTextColor(220, 38, 38);
         else doc.setTextColor(100, 100, 100);
-        doc.text(`Deviation: ${devText}`, 20, tableEnd + 17);
+        doc.text(devText, 120, tableEnd + 17);
         doc.setTextColor(0, 0, 0);
 
-        // AI Comment
-        const commentY = tableEnd + 30;
+        // AI Comment (enhanced)
+        const commentY = tableEnd + 32;
         doc.setFillColor(254, 252, 232);
-        doc.rect(14, commentY, 182, 22, 'F');
+        doc.rect(14, commentY, 182, 32, 'F');
         doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
         doc.text('Class Teacher\'s Comment:', 18, commentY + 7);
@@ -517,7 +1106,7 @@ export default function SchoolAdminResults() {
         doc.text(commentLines, 18, commentY + 14);
 
         // Signatures
-        const sigY = commentY + 32;
+        const sigY = commentY + 42;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.setTextColor(0, 0, 0);
@@ -604,7 +1193,7 @@ export default function SchoolAdminResults() {
           </button>
         </div>
           <p className="text-xs text-[#999] mt-2">
-          Class Results PDF includes DEV column (green +% = improved, red -% = dropped). Bulk Report Cards include personalised comments per student.
+          Class Results PDF includes all 5 sections: Class Summary, Subject Analysis, Student Results Table, Individual Report Cards &amp; Performance Trends. Bulk Report Cards include personalised AI comments per student.
         </p>
       </div>
 
