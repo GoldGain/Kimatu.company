@@ -33,6 +33,7 @@ import {
   Building2,
   Calendar,
   Zap,
+  Brain,
 } from 'lucide-react';
 
 interface NavItem {
@@ -90,6 +91,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/analytics' },
     { label: 'My Students', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
     { label: 'Lesson Plans', icon: <Sparkles className="w-5 h-5" />, path: '/teacher/lesson-plan' },
+    { label: 'Curriculum Navigator', icon: <Brain className="w-5 h-5" />, path: '/teacher/curriculum' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/teacher/change-password' },
   ],
   'student': [

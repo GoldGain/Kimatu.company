@@ -69,6 +69,7 @@ import SchoolAdminChangePassword from '@/pages/dashboard/school-admin/ChangePass
 import TeacherChangePassword from '@/pages/dashboard/teacher/ChangePassword';
 import ParentChangePassword from '@/pages/dashboard/parent/ChangePassword';
 import TimetableView from '@/pages/dashboard/TimetableView';
+import TeacherCurriculumNavigator from '@/pages/dashboard/teacher/CurriculumNavigator';
 
 function LoadingSpinner() {
   return (
@@ -165,6 +166,7 @@ function AppRoutes() {
       <Route path="/teacher/timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TimetableView /></ProtectedRoute>} />
       <Route path="/teacher/exam-timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherExamTimetable /></ProtectedRoute>} />
       <Route path="/teacher/change-password" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherChangePassword /></ProtectedRoute>} />
+      <Route path="/teacher/curriculum" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCurriculumNavigator /></ProtectedRoute>} />
 
       {/* Student routes */}
       <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><StudentDashboard /></ProtectedRoute>} />
