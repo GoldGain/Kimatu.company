@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { Link } from 'react-router';
-import { Upload, ClipboardList, BookOpen, Users, Clock } from 'lucide-react';
+import { Upload, ClipboardList, BookOpen, Users, Clock, Trophy } from 'lucide-react';
+import { computeBestPerSubject } from '@/lib/bestPerSubject';
+import type { BestInSubject } from '@/lib/bestPerSubject';
 
 interface TimetableEntry {
   id: string;
@@ -13,33 +15,124 @@ interface TimetableEntry {
   classes: { name: string } | null;
 }
 
+interface SubjectBestMap {
+  className: string;
+  classId: string;
+  classData: any;
+  subjectName: string;
+  termName: string;
+  bests: BestInSubject[];
+}
+
 export default function TeacherDashboard() {
   const { user } = useAuth();
   const [todayClasses, setTodayClasses] = useState<TimetableEntry[]>([]);
   const [studentCount, setStudentCount] = useState(0);
   const [homeworkCount, setHomeworkCount] = useState(0);
+  const [subjectBests, setSubjectBests] = useState<SubjectBestMap[]>([]);
+  const [loadingBests, setLoadingBests] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     const teacherId = user?.id;
     const schoolId = user?.schoolId;
-    
-    const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', teacherId).single();
-    
+
+    const { data: teacherData } = await supabaseUntyped
+      .from('teachers')
+      .select('id')
+      .eq('profile_id', teacherId)
+      .single();
+
     if (teacherData) {
       const tId = teacherData.id;
       const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-      const { data: classes } = await supabaseUntyped.from('timetable').select('*, subjects(name), classes(name)')
-        .eq('teacher_id', tId).eq('day_of_week', today.charAt(0).toUpperCase() + today.slice(1));
+      const { data: classes } = await supabaseUntyped
+        .from('timetable')
+        .select('*, subjects(name), classes(name)')
+        .eq('teacher_id', tId)
+        .eq('day_of_week', today.charAt(0).toUpperCase() + today.slice(1));
       setTodayClasses((classes || []) as unknown as TimetableEntry[]);
-      
-      const { count: sCount } = await supabaseUntyped.from('students').select('*', { count: 'exact', head: true }).eq('school_id', schoolId);
+
+      const { count: sCount } = await supabaseUntyped
+        .from('students')
+        .select('*', { count: 'exact', head: true })
+        .eq('school_id', schoolId);
       setStudentCount(sCount || 0);
-      
-      const { count: hCount } = await supabaseUntyped.from('homework').select('*', { count: 'exact', head: true }).eq('teacher_id', tId);
+
+      const { count: hCount } = await supabaseUntyped
+        .from('homework')
+        .select('*', { count: 'exact', head: true })
+        .eq('teacher_id', tId);
       setHomeworkCount(hCount || 0);
+
+      // ── Fetch best student per subject for each class this teacher teaches ──
+      await fetchBestPerSubject(tId, schoolId);
     }
+  };
+
+  const fetchBestPerSubject = async (teacherId: string, schoolId: string) => {
+    setLoadingBests(true);
+    try {
+      // Get all subject-class assignments for this teacher
+      const { data: assignments } = await supabaseUntyped
+        .from('teacher_subjects')
+        .select('*, subjects(name), classes(id, name, level, grade_level, curriculum)')
+        .eq('teacher_id', teacherId);
+
+      if (!assignments || assignments.length === 0) {
+        setLoadingBests(false);
+        return;
+      }
+
+      // Get the latest term for this school
+      const { data: terms } = await supabaseUntyped
+        .from('terms')
+        .select('*')
+        .eq('school_id', schoolId)
+        .order('academic_year', { ascending: false })
+        .limit(3);
+
+      const latestTerm = terms?.[0];
+      if (!latestTerm) { setLoadingBests(false); return; }
+
+      const bests: SubjectBestMap[] = [];
+
+      for (const assignment of assignments) {
+        const classId = assignment.classes?.id || assignment.class_id;
+        const subjectId = assignment.subject_id;
+        const classData = assignment.classes;
+
+        if (!classId || !subjectId) continue;
+
+        const { data: results } = await supabaseUntyped
+          .from('results')
+          .select('*, students(id, first_name, last_name), subjects(name)')
+          .eq('class_id', classId)
+          .eq('subject_id', subjectId)
+          .eq('term_id', latestTerm.id)
+          .eq('school_id', schoolId);
+
+        if (!results || results.length === 0) continue;
+
+        const computed = computeBestPerSubject(results, classData);
+        if (computed.length > 0) {
+          bests.push({
+            className: classData?.name || 'Class',
+            classId,
+            classData,
+            subjectName: assignment.subjects?.name || 'Subject',
+            termName: `${latestTerm.name} ${latestTerm.academic_year}`,
+            bests: computed,
+          });
+        }
+      }
+
+      setSubjectBests(bests);
+    } catch (err) {
+      console.error('Failed to fetch best per subject:', err);
+    }
+    setLoadingBests(false);
   };
 
   const quickActions = [
@@ -112,6 +205,44 @@ export default function TeacherDashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Best Student Per Subject Section ── */}
+      <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+        <div className="flex items-center gap-2 mb-4">
+          <Trophy className="w-5 h-5 text-yellow-500" />
+          <h3 className="font-semibold text-[#111111]">Best Student Per Subject (Latest Term)</h3>
+        </div>
+        {loadingBests ? (
+          <p className="text-sm text-[#666666] py-4 text-center">Loading top performers...</p>
+        ) : subjectBests.length === 0 ? (
+          <p className="text-sm text-[#666666] py-4 text-center">No results uploaded yet for your subjects.</p>
+        ) : (
+          <div className="space-y-3">
+            {subjectBests.map((item, idx) => (
+              <div key={idx} className="p-3 bg-yellow-50 border border-yellow-100 rounded-xl">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-yellow-700 uppercase tracking-wide">
+                    {item.className} — {item.subjectName}
+                  </span>
+                  <span className="text-xs text-gray-400">{item.termName}</span>
+                </div>
+                {item.bests.map((b, bi) => (
+                  <div key={bi} className="flex items-center gap-2 mt-1">
+                    <span className="text-base">🏆</span>
+                    <span className="text-sm font-medium text-[#111111]">
+                      Best in {b.subjectName}: <span className="text-blue-700">{b.studentName}</span>
+                    </span>
+                    <span className="ml-auto text-xs font-bold text-green-700">
+                      {b.percentage}% — {b.gradeLabel}
+                      {b.points !== null ? ` (${b.points} pts)` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

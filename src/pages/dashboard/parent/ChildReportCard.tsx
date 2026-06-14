@@ -6,6 +6,8 @@ import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Users, Share2, Lock, CreditCard, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { calculateCompetencyGrade, getSchoolLevelBand } from '@/lib/grading';
+import { computeBestPerSubject } from '@/lib/bestPerSubject';
+import type { BestInSubject } from '@/lib/bestPerSubject';
 
 declare global {
   interface Window {
@@ -46,6 +48,7 @@ export default function ParentChildReportCard() {
   const [pdfPaid, setPdfPaid] = useState<Record<string, boolean>>({});
   const [paying, setPaying] = useState(false);
   const [schoolName, setSchoolName] = useState('');
+  const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
 
   useEffect(() => { fetchChildren(); }, [user?.id]);
 
@@ -175,6 +178,17 @@ export default function ParentChildReportCard() {
       .eq('student_id', selectedChild.id)
       .eq('term_id', selectedTerm);
     setResults(data || []);
+    // Fetch class-wide results to compute best per subject
+    const { data: classResults } = await supabaseUntyped
+      .from('results')
+      .select('*, students(id, first_name, last_name), subjects(name)')
+      .eq('class_id', selectedChild.class_id)
+      .eq('term_id', selectedTerm);
+    if (classResults && classResults.length > 0) {
+      setClassBestList(computeBestPerSubject(classResults, selectedChild?.classes || {}));
+    } else {
+      setClassBestList([]);
+    }
   };
 
   const doGeneratePDF = async () => {
@@ -253,9 +267,28 @@ export default function ParentChildReportCard() {
         doc.text(`Total Points: ${totalPoints}`, 80, finalY + 18);
       }
 
+      // Best in Subject Achievement for this child
+      const childBestSubjects = classBestList.filter(b => b.studentId === selectedChild.id);
+      let parentAchievementY = finalY + 30;
+      if (childBestSubjects.length > 0) {
+        doc.setFillColor(254, 249, 195);
+        doc.rect(14, parentAchievementY, 182, 6 + childBestSubjects.length * 6, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(202, 138, 4);
+        doc.text('ACHIEVEMENT:', 18, parentAchievementY + 5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        childBestSubjects.forEach((b, bi) => {
+          const pts = b.points !== null ? ` (${b.points} pts)` : '';
+          doc.text(`🏆 Your child scored highest in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, parentAchievementY + 11 + bi * 6);
+        });
+        parentAchievementY += 6 + childBestSubjects.length * 6 + 8;
+      }
+
       doc.setFont('helvetica', 'normal');
-      doc.text('Class Teacher Signature: ___________________', 14, finalY + 35);
-      doc.text('Principal Signature: ___________________', 120, finalY + 35);
+      doc.text('Class Teacher Signature: ___________________', 14, parentAchievementY);
+      doc.text('Principal Signature: ___________________', 120, parentAchievementY);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       doc.text('CBE-Analytics | Support: support@cbe-analytics.com', 105, 285, { align: 'center' });
@@ -463,6 +496,19 @@ export default function ParentChildReportCard() {
                     })}
                   </tbody>
                 </table>
+              {classBestList.filter(b => b.studentId === selectedChild?.id).length > 0 && (
+                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🏆</span>
+                    <span className="text-sm font-bold text-yellow-800">{selectedChild?.first_name}&apos;s Achievements This Term</span>
+                  </div>
+                  {classBestList.filter(b => b.studentId === selectedChild?.id).map((b, i) => (
+                    <div key={i} className="text-sm text-yellow-900">
+                      Your child scored highest in <strong>{b.subjectName}</strong>: {b.percentage}% — {b.gradeLabel}{b.points !== null ? ` (${b.points} pts)` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
               </div>
             </div>
           ) : (

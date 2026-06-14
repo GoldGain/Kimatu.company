@@ -6,6 +6,7 @@ import FAQ from '@/sections/FAQ';
 import CTA from '@/sections/CTA';
 import { usePWA } from '@/hooks/usePWA';
 import { Smartphone } from 'lucide-react';
+import SEO from '@/components/SEO';
 
 export default function Home() {
   const { isInstallable, isInstalled, install } = usePWA();
@@ -20,6 +21,24 @@ export default function Home() {
 
   return (
     <>
+      <SEO
+        title="CBE-Analytics — Kenya's #1 CBC School Management Platform"
+        description="CBE-Analytics is Kenya's leading Competency-Based Education (CBC) school management system. Manage student results, generate report cards, track performance for Grades 1-12 and 8-4-4 curricula. Trusted by schools across Kenya."
+        path="/"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebApplication',
+          name: 'CBE-Analytics',
+          url: 'https://cbe-analytics.com',
+          description: 'Kenya\'s leading CBC/CBE school management system for student results, report cards, and performance tracking.',
+          applicationCategory: 'EducationApplication',
+          operatingSystem: 'Web',
+          inLanguage: 'en-KE',
+          offers: { '@type': 'Offer', price: '0', priceCurrency: 'KES' },
+          author: { '@type': 'Organization', name: 'CBE-Analytics', url: 'https://cbe-analytics.com' },
+          keywords: 'CBE Analytics, CBC grading Kenya, school management system Kenya, competency based education, student results portal, CBC report card',
+        }}
+      />
       {isInstallable && (
         <button
           onClick={handleInstallClick}

@@ -6,6 +6,8 @@ import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSchoolLevelBand, gradeDisplayLabel, calculateCompetencyGrade, calculate844Grade } from '@/lib/grading';
+import { computeBestPerSubject } from '@/lib/bestPerSubject';
+import type { BestInSubject } from '@/lib/bestPerSubject';
 
 function getPercentage(result: any): number {
   if (result.percentage !== undefined && result.percentage !== null) return Number(result.percentage);
@@ -163,6 +165,22 @@ export default function StudentReportCard() {
     setResults(data || []);
     // Fetch previous term average
     await fetchPreviousAvg();
+    // Fetch class-wide results to compute best per subject
+    await fetchClassBestPerSubject();
+  };
+
+  const fetchClassBestPerSubject = async () => {
+    if (!student || !selectedTerm) return;
+    const { data: classResults } = await supabaseUntyped
+      .from('results')
+      .select('*, students(id, first_name, last_name), subjects(name)')
+      .eq('class_id', student.class_id)
+      .eq('term_id', selectedTerm);
+    if (classResults && classResults.length > 0) {
+      setClassBestList(computeBestPerSubject(classResults, student?.classes || {}));
+    } else {
+      setClassBestList([]);
+    }
   };
 
   const fetchPreviousAvg = async () => {
@@ -186,6 +204,7 @@ export default function StudentReportCard() {
   };
 
   const [schoolName, setSchoolName] = useState('');
+  const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
 
   useEffect(() => {
     if (student?.school_id) {
@@ -324,8 +343,27 @@ export default function StudentReportCard() {
         doc.setTextColor(0, 0, 0);
       }
 
+      // Best in Subject Achievement for this student
+      const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
+      let studentAchievementY = devY + 10;
+      if (myBestSubjects.length > 0) {
+        doc.setFillColor(254, 249, 195);
+        doc.rect(14, studentAchievementY, 182, 6 + myBestSubjects.length * 6, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(202, 138, 4);
+        doc.text('YOUR ACHIEVEMENT:', 18, studentAchievementY + 5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        myBestSubjects.forEach((b, bi) => {
+          const pts = b.points !== null ? ` (${b.points} pts)` : '';
+          doc.text(`🏆 You were the best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, studentAchievementY + 11 + bi * 6);
+        });
+        studentAchievementY += 6 + myBestSubjects.length * 6 + 4;
+      }
+
       // AI Comment
-      const commentY = devY + 12;
+      const commentY = studentAchievementY + 2;
       doc.setFillColor(254, 252, 232);
       doc.rect(14, commentY, 182, 22, 'F');
       doc.setFontSize(9);
@@ -465,6 +503,19 @@ export default function StudentReportCard() {
               </tbody>
             </table>
           </div>
+          {classBestList.filter(b => b.studentId === student?.id).length > 0 && (
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🏆</span>
+                <span className="text-sm font-bold text-yellow-800">Your Achievements This Term</span>
+              </div>
+              {classBestList.filter(b => b.studentId === student?.id).map((b, i) => (
+                <div key={i} className="text-sm text-yellow-900">
+                  You were the best in <strong>{b.subjectName}</strong>: {b.percentage}% — {b.gradeLabel}{b.points !== null ? ` (${b.points} pts)` : ''}
+                </div>
+              ))}
+            </div>
+          )}
           {previousAvg !== null && (
             <div className="mt-4 p-3 bg-blue-50 rounded-xl text-sm text-blue-700">
               <strong>Deviation from previous term:</strong> {

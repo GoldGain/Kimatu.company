@@ -5,6 +5,7 @@ import { GraduationCap, Eye, EyeOff, Loader2, User, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
+import SEO from '@/components/SEO';
 
 interface StudentData {
   email: string;
@@ -156,6 +157,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#F5F3EF] flex items-center justify-center px-4">
+      <SEO
+        title="Login — CBE-Analytics School Portal"
+        description="Login to CBE-Analytics, Kenya's school management portal for teachers, students, parents, and administrators. Access CBC results, report cards, and more."
+        path="/login"
+      />
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 mb-6">
