@@ -434,6 +434,8 @@ export default function SchoolAdminResults() {
       const weakestSubjects = subjectImprovement.filter(s => s.change !== null && s.change < 0).sort((a, b) => (a.change || 0) - (b.change || 0));
 
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      // Compute best per subject for the whole class (used in Sections 1 and 4)
+      const bestPerSubjectData = computeBestPerSubject(rawResults, classObj);
 
       // ── SECTION 1: CLASS SUMMARY PAGE ───────────────────────────────────────
       {
@@ -604,7 +606,6 @@ export default function SchoolAdminResults() {
         }
 
         // Best Student Per Subject
-        const bestPerSubjectData = computeBestPerSubject(rawResults, classObj);
         const bestSubjY = attentionY + (needAttentionWithDev.length > 0 ? needAttentionWithDev.length * 6 + 14 : 14);
         if (bestPerSubjectData.length > 0) {
           doc.setFontSize(10);
