@@ -1,11 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Users, Share2, Lock, CreditCard, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateCompetencyGrade, getSchoolLevelBand } from '@/lib/grading';
+import {
+  generateUniqueAIComment,
+  drawTrendGraph,
+  addSignaturesToPDF,
+  drawReportHeader,
+  drawStudentInfo,
+  drawResultsTable,
+  drawSummaryBox,
+  drawDeviation,
+  drawAchievements,
+  drawAIComment,
+  getPercentage,
+  formatPosition,
+  type SchoolInfo,
+  type SignatureInfo,
+} from '@/lib/reportCardPdf';
+import { getSchoolLevelBand } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
 
@@ -47,37 +61,14 @@ export default function ParentChildReportCard() {
   const [schoolPayConfig, setSchoolPayConfig] = useState<any>(null);
   const [pdfPaid, setPdfPaid] = useState<Record<string, boolean>>({});
   const [paying, setPaying] = useState(false);
-  const [schoolName, setSchoolName] = useState('');
+  const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: '' });
+  const [signatures, setSignatures] = useState<SignatureInfo>({});
   const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
+  const [previousAvg, setPreviousAvg] = useState<number | null>(null);
+  const [trendData, setTrendData] = useState<{ term: string; avg: number }[]>([]);
+  const [totalStudents, setTotalStudents] = useState(0);
 
   useEffect(() => { fetchChildren(); }, [user?.id]);
-
-  // Use shared grading library — grade_level takes priority over level
-  function isPrimaryLevel(classData: any): boolean {
-    const gl = classData?.grade_level ?? classData?.level;
-    return Number(gl || 0) <= 6;
-  }
-
-  function gradeFromPercentage844(percentage: number) {
-    if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
-    if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
-    if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };
-    if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good' };
-    if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good' };
-    if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average' };
-    if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average' };
-    if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average' };
-    if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average' };
-    if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average' };
-    if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average' };
-    return { grade: 'E', points: 1, descriptor: 'Poor' };
-  }
-
-  function gradeFromPercentageCBE(percentage: number, classData: any) {
-    const band = getSchoolLevelBand(classData);
-    const g = calculateCompetencyGrade(percentage, band);
-    return { grade: g.subLevel, points: g.points || null, descriptor: g.descriptor };
-  }
 
   const fetchChildren = async () => {
     setLoading(true);
@@ -89,26 +80,69 @@ export default function ParentChildReportCard() {
       const ids = links.map((l: any) => l.student_id);
       const { data: students } = await supabaseUntyped
         .from('students')
-        .select('*, classes(name, level, grade_level, curriculum)')
+        .select('*, classes(name, level, grade_level, curriculum, class_teacher_id)')
         .in('id', ids);
       setChildren(students || []);
       if (students && students.length > 0) {
         const firstChild = students[0] as any;
         setSelectedChild(firstChild);
-        setStudentCurriculum(firstChild?.curriculum === '844' ? '844' : 'CBE');
         fetchTerms(firstChild.school_id);
         fetchSchoolPayConfig(firstChild.school_id);
-        fetchSchoolName(firstChild.school_id);
+        fetchSchoolInfo(firstChild.school_id);
+        fetchSignatures(firstChild.school_id, firstChild.classes?.class_teacher_id);
+        fetchTotalStudents(firstChild.class_id, firstChild.school_id);
       }
     }
     setLoading(false);
   };
 
-  const [studentCurriculum, setStudentCurriculum] = useState<'CBE' | '844'>('CBE');
+  const fetchTotalStudents = async (classId: string, schoolId: string) => {
+    const { count } = await supabaseUntyped
+      .from('students')
+      .select('id', { count: 'exact', head: true })
+      .eq('class_id', classId)
+      .eq('school_id', schoolId);
+    setTotalStudents(count || 0);
+  };
 
-  const fetchSchoolName = async (schoolId: string) => {
-    const { data } = await supabaseUntyped.from('schools').select('name').eq('id', schoolId).maybeSingle();
-    if (data?.name) setSchoolName(data.name);
+  const fetchSchoolInfo = async (schoolId: string) => {
+    const { data } = await supabaseUntyped
+      .from('schools')
+      .select('name, motto, logo_url, principal_name, address, phone, email')
+      .eq('id', schoolId)
+      .maybeSingle();
+    if (data) {
+      setSchoolInfo({
+        name: data.name || 'School',
+        motto: data.motto || '',
+        logo_url: data.logo_url || null,
+        principal_name: data.principal_name || '',
+        address: data.address || '',
+        phone: data.phone || '',
+        email: data.email || '',
+      });
+    }
+  };
+
+  const fetchSignatures = async (schoolId: string, classTeacherId?: string) => {
+    const { data: schoolSig } = await supabaseUntyped
+      .from('schools')
+      .select('principal_signature_url')
+      .eq('id', schoolId)
+      .maybeSingle();
+    let teacherSigUrl: string | null = null;
+    if (classTeacherId) {
+      const { data: teacherSig } = await supabaseUntyped
+        .from('teachers')
+        .select('signature_url')
+        .eq('id', classTeacherId)
+        .maybeSingle();
+      teacherSigUrl = teacherSig?.signature_url || null;
+    }
+    setSignatures({
+      principal_signature_url: schoolSig?.principal_signature_url || null,
+      teacher_signature_url: teacherSigUrl,
+    });
   };
 
   const fetchSchoolPayConfig = async (schoolId: string) => {
@@ -118,7 +152,6 @@ export default function ParentChildReportCard() {
       .eq('id', schoolId)
       .maybeSingle();
     if (!school) return;
-
     let resellerPaystackKey: string | null = null;
     if (school.reseller_id) {
       const { data: reseller } = await supabaseUntyped
@@ -130,7 +163,6 @@ export default function ParentChildReportCard() {
         resellerPaystackKey = reseller.paystack_public_key;
       }
     }
-
     setSchoolPayConfig({
       parent_pay_enabled: school.parent_pay_enabled && !!resellerPaystackKey,
       view_results_fee: school.view_results_fee || 50,
@@ -167,7 +199,10 @@ export default function ParentChildReportCard() {
   };
 
   useEffect(() => {
-    if (selectedChild && selectedTerm) fetchResults();
+    if (selectedChild && selectedTerm) {
+      fetchResults();
+      fetchTrendData();
+    }
   }, [selectedChild, selectedTerm]);
 
   const fetchResults = async () => {
@@ -178,7 +213,7 @@ export default function ParentChildReportCard() {
       .eq('student_id', selectedChild.id)
       .eq('term_id', selectedTerm);
     setResults(data || []);
-    // Fetch class-wide results to compute best per subject
+    await fetchPreviousAvg();
     const { data: classResults } = await supabaseUntyped
       .from('results')
       .select('*, students(id, first_name, last_name), subjects(name)')
@@ -191,104 +226,110 @@ export default function ParentChildReportCard() {
     }
   };
 
+  const fetchTrendData = async () => {
+    if (!selectedChild) return;
+    const { data: allResults } = await supabaseUntyped
+      .from('results')
+      .select('percentage, marks, out_of, term_id, terms(name, academic_year)')
+      .eq('student_id', selectedChild.id)
+      .order('terms(academic_year)', { ascending: true })
+      .order('terms(name)', { ascending: true });
+    if (!allResults) return;
+    const termMap: Record<string, { term: string; total: number; count: number }> = {};
+    allResults.forEach((r: any) => {
+      const tname = r.terms?.name || '';
+      const year = r.terms?.academic_year || '';
+      const key = `${year}-${tname}`;
+      const pct = r.percentage !== undefined && r.percentage !== null ? Number(r.percentage) : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0);
+      if (!termMap[key]) termMap[key] = { term: `${tname} ${year}`, total: 0, count: 0 };
+      termMap[key].total += pct;
+      termMap[key].count++;
+    });
+    setTrendData(Object.values(termMap).map(t => ({ term: t.term, avg: t.count > 0 ? t.total / t.count : 0 })));
+  };
+
+  const fetchPreviousAvg = async () => {
+    if (!selectedChild || !selectedTerm || terms.length === 0) { setPreviousAvg(null); return; }
+    const sortedTerms = [...terms].sort((a, b) => {
+      if (a.academic_year !== b.academic_year) return Number(a.academic_year) - Number(b.academic_year);
+      const termNum = (n: string) => n.includes('1') ? 1 : n.includes('2') ? 2 : 3;
+      return termNum(a.name) - termNum(b.name);
+    });
+    const currentIdx = sortedTerms.findIndex(t => t.id === selectedTerm);
+    if (currentIdx <= 0) { setPreviousAvg(null); return; }
+    const prevTerm = sortedTerms[currentIdx - 1];
+    const { data: prevResults } = await supabaseUntyped
+      .from('results')
+      .select('marks, out_of, percentage')
+      .eq('student_id', selectedChild.id)
+      .eq('term_id', prevTerm.id);
+    if (!prevResults || prevResults.length === 0) { setPreviousAvg(null); return; }
+    const totalPct = prevResults.reduce((s: number, r: any) => s + (r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
+    setPreviousAvg(totalPct / prevResults.length);
+  };
+
+  const isPrimaryLevel = (classData: any): boolean => {
+    const gl = classData?.grade_level ?? classData?.level;
+    return Number(gl || 0) <= 6;
+  };
+
+  const classDataForGrading = selectedChild?.classes || {};
+  const is844 = (classDataForGrading?.curriculum || 'CBE') === '844';
+  const band = getSchoolLevelBand(classDataForGrading);
+  const isPrimary = band === 'primary';
+
   const doGeneratePDF = async () => {
     if (!results.length) { toast.error('No results found for this term'); return; }
     setGenerating(true);
     try {
+      const { jsPDF } = await import('jspdf');
       const doc = new jsPDF();
       const term = terms.find(t => t.id === selectedTerm);
-      const displaySchoolName = schoolName || 'School';
-      const is844 = studentCurriculum === '844';
-      // Use grade_level first (new column), fall back to level
-      const classDataForGrading = selectedChild?.classes || {};
+      const avgPercentage = results.length
+        ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
+        : 0;
+      const totalPoints = is844
+        ? results.reduce((s, r) => {
+            const pct = getPercentage(r);
+            if (pct >= 80) return s + 12; if (pct >= 75) return s + 11; if (pct >= 70) return s + 10;
+            if (pct >= 65) return s + 9; if (pct >= 60) return s + 8; if (pct >= 55) return s + 7;
+            if (pct >= 50) return s + 6; if (pct >= 45) return s + 5; if (pct >= 40) return s + 4;
+            if (pct >= 35) return s + 3; if (pct >= 30) return s + 2; return s + 1;
+          }, 0)
+        : isPrimary ? null : results.reduce((s, r) => {
+            const pct = getPercentage(r);
+            if (pct >= 90) return s + 8; if (pct >= 75) return s + 7; if (pct >= 58) return s + 6;
+            if (pct >= 41) return s + 5; if (pct >= 31) return s + 4; if (pct >= 21) return s + 3;
+            if (pct >= 11) return s + 2; return s + 1;
+          }, 0);
+      const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
+      const isNew = deviation === null;
+      const position = results[0]?.class_position || results[0]?.position || null;
+      const positionStr = formatPosition(position, totalStudents || 0);
+      const subjectScores = results.map(r => ({ name: r.subjects?.name || 'Unknown', pct: getPercentage(r) }));
+      const sortedBest = [...subjectScores].sort((a, b) => b.pct - a.pct);
+      const bestSubject = sortedBest[0]?.name || 'all subjects';
+      const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
+      const studentFullName = `${selectedChild.first_name} ${selectedChild.last_name}`;
+      const aiComment = generateUniqueAIComment(
+        studentFullName, avgPercentage, deviation, bestSubject, weakestSubject,
+        position, totalStudents || 0, isNew, classDataForGrading
+      );
 
-      doc.setFillColor(37, 99, 235);
-      doc.rect(0, 0, 210, 35, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(18);
-      doc.setFont('helvetica', 'bold');
-      doc.text(displaySchoolName, 105, 15, { align: 'center' });
-      doc.setFontSize(12);
-      doc.text('STUDENT REPORT CARD', 105, 25, { align: 'center' });
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'normal');
-      const y = 45;
-      doc.text(`Student Name: ${selectedChild.first_name} ${selectedChild.last_name}`, 14, y);
-      doc.text(`Admission No: ${selectedChild.admission_number}`, 14, y + 7);
-      doc.text(`Class: ${selectedChild.classes?.name || 'N/A'}`, 14, y + 14);
-      doc.text(`Term: ${term?.name || ''} ${term?.academic_year || ''}`, 120, y);
-      doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 7);
-      doc.setDrawColor(37, 99, 235);
-      doc.line(14, y + 20, 196, y + 20);
-
-      const totalMarks = results.reduce((s, r) => s + (Number(r.marks || 0)), 0);
-      const avgPercentage = results.length ? Math.round(results.reduce((s, r) => s + (r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100)), 0) / results.length) : 0;
-
-      const tableHead = is844
-        ? ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', '8-4-4 Grade', 'Points', 'Descriptor']
-        : ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', 'CBE Grade', 'Points', 'Descriptor'];
-
-      const tableBody = results.map((r, i) => {
-        const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
-        const grading = is844 ? gradeFromPercentage844(pct) : gradeFromPercentageCBE(pct, classDataForGrading);
-        return [
-          i + 1, r.subjects?.name || 'N/A', r.marks || '-', r.out_of || 100,
-          `${pct}%`, grading.grade, grading.points ?? '—', grading.descriptor,
-        ];
-      });
-
-      autoTable(doc, {
-        startY: y + 25,
-        head: [tableHead],
-        body: tableBody,
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 247, 255] },
-      });
-
-      const finalY = (doc as any).lastAutoTable.finalY + 10;
-      doc.setFillColor(245, 247, 255);
-      doc.rect(14, finalY, 182, 25, 'F');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`Total Subjects: ${results.length}`, 20, finalY + 8);
-      doc.text(`Total Marks: ${totalMarks}`, 80, finalY + 8);
-      doc.text(`Average: ${avgPercentage}%`, 150, finalY + 8);
-
-      // Overall grade
-      const overallGrading = is844 ? gradeFromPercentage844(avgPercentage) : gradeFromPercentageCBE(avgPercentage, classDataForGrading);
-      doc.text(`Overall Grade: ${overallGrading.grade}`, 20, finalY + 18);
-      if (overallGrading.points !== null) {
-        const totalPoints = results.reduce((s: number, r: any) => {
-          const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
-          return s + (is844 ? (gradeFromPercentage844(pct).points || 0) : (gradeFromPercentageCBE(pct, classDataForGrading).points || 0));
-        }, 0);
-        doc.text(`Total Points: ${totalPoints}`, 80, finalY + 18);
+      await drawReportHeader(doc, schoolInfo);
+      drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', classDataForGrading.name || 'N/A', term?.name || '', term?.academic_year || '', positionStr);
+      const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
+      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
+      const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
+      let trendEndY = devEndY;
+      if (trendData.length >= 2) {
+        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is844);
+        trendEndY = devEndY + 55;
       }
-
-      // Best in Subject Achievement for this child
-      const childBestSubjects = classBestList.filter(b => b.studentId === selectedChild.id);
-      let parentAchievementY = finalY + 30;
-      if (childBestSubjects.length > 0) {
-        doc.setFillColor(254, 249, 195);
-        doc.rect(14, parentAchievementY, 182, 6 + childBestSubjects.length * 6, 'F');
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(202, 138, 4);
-        doc.text('ACHIEVEMENT:', 18, parentAchievementY + 5);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
-        childBestSubjects.forEach((b, bi) => {
-          const pts = b.points !== null ? ` (${b.points} pts)` : '';
-          doc.text(`🏆 Your child scored highest in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, parentAchievementY + 11 + bi * 6);
-        });
-        parentAchievementY += 6 + childBestSubjects.length * 6 + 8;
-      }
-
-      doc.setFont('helvetica', 'normal');
-      doc.text('Class Teacher Signature: ___________________', 14, parentAchievementY);
-      doc.text('Principal Signature: ___________________', 120, parentAchievementY);
+      const myBestSubjects = classBestList.filter(b => b.studentId === selectedChild.id);
+      const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
+      const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
+      addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       doc.text('CBE-Analytics | Support: support@cbe-analytics.com', 105, 285, { align: 'center' });
@@ -296,32 +337,22 @@ export default function ParentChildReportCard() {
       toast.success('Report card downloaded!');
     } catch (err: any) {
       toast.error('Failed: ' + err.message);
+      console.error(err);
     }
     setGenerating(false);
   };
 
   const handleDownloadPDF = useCallback(async () => {
-    if (!selectedChild || !results.length) {
-      toast.error('No results found for this term');
-      return;
-    }
-
-    // Check if payment required
+    if (!selectedChild || !results.length) { toast.error('No results found'); return; }
     if (schoolPayConfig?.parent_pay_enabled) {
       const paid = await checkPdfPaid(selectedChild.id);
-      if (paid) {
-        await doGeneratePDF();
-        return;
-      }
-      // Need to pay
+      if (paid) { await doGeneratePDF(); return; }
       setPaying(true);
       try {
         await loadPaystackScript();
         if (!window.PaystackPop) throw new Error('Paystack not loaded');
-
         const amount = schoolPayConfig.pdf_report_fee;
         const reference = `pdf_${selectedChild.id}_${Date.now()}`;
-
         const handler = window.PaystackPop.setup({
           key: schoolPayConfig.reseller_paystack_public_key!,
           email: user!.email,
@@ -347,30 +378,20 @@ export default function ParentChildReportCard() {
               status: 'success',
               paystack_reference: response.reference || reference,
             });
-            if (error) {
-              toast.error('Payment saved but failed to record: ' + error.message);
-            } else {
+            if (error) { toast.error('Payment saved but failed to record: ' + error.message); }
+            else {
               toast.success(`Payment of KES ${amount} successful! Generating PDF...`);
               setPdfPaid(prev => ({ ...prev, [selectedChild.id]: true }));
               await doGeneratePDF();
             }
             setPaying(false);
           },
-          onClose: () => {
-            toast.info('Payment cancelled');
-            setPaying(false);
-          },
+          onClose: () => { toast.info('Payment cancelled'); setPaying(false); },
         });
         handler.openIframe();
-      } catch (err: any) {
-        toast.error(err.message || 'Payment failed');
-        setPaying(false);
-      }
-    } else {
-      // Free download
-      await doGeneratePDF();
-    }
-  }, [selectedChild, results, schoolPayConfig, user, pdfPaid, selectedTerm, terms, schoolName]);
+      } catch (err: any) { toast.error(err.message || 'Payment failed'); setPaying(false); }
+    } else { await doGeneratePDF(); }
+  }, [selectedChild, results, schoolPayConfig, user, pdfPaid, selectedTerm, terms, schoolInfo, signatures, classBestList, previousAvg, trendData, totalStudents]);
 
   const isPdfPaid = selectedChild ? !!pdfPaid[selectedChild.id] : false;
   const requiresPayment = !!(schoolPayConfig?.parent_pay_enabled && !isPdfPaid);
@@ -381,8 +402,19 @@ export default function ParentChildReportCard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#111111]">Child Report Card</h1>
-        <p className="text-sm text-[#666666]">Download your child&apos;s academic report card</p>
+        <p className="text-sm text-[#666666]">Download your child's academic report card</p>
       </div>
+
+      {schoolInfo.logo_url && (
+        <div className="bg-white rounded-2xl p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] flex items-center gap-4">
+          <img src={schoolInfo.logo_url} alt="School Logo" className="h-12 w-auto object-contain" />
+          <div>
+            <p className="font-semibold text-[#111111]">{schoolInfo.name}</p>
+            {schoolInfo.motto && <p className="text-xs text-[#666666] italic">"{schoolInfo.motto}"</p>}
+          </div>
+        </div>
+      )}
+
       {children.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -401,10 +433,11 @@ export default function ParentChildReportCard() {
                     const child = children.find(c => c.id === e.target.value);
                     setSelectedChild(child);
                     if (child) {
-                      setStudentCurriculum((child as any)?.curriculum === '844' ? '844' : 'CBE');
                       fetchTerms(child.school_id);
                       fetchSchoolPayConfig(child.school_id);
-                      fetchSchoolName(child.school_id);
+                      fetchSchoolInfo(child.school_id);
+                      fetchSignatures(child.school_id, child.classes?.class_teacher_id);
+                      fetchTotalStudents(child.class_id, child.school_id);
                     }
                   }}
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
@@ -426,25 +459,18 @@ export default function ParentChildReportCard() {
                 <h3 className="font-semibold text-[#111111]">{selectedChild?.first_name}&apos;s Results ({results.length} subjects)</h3>
                 <div className="flex gap-2 items-center">
                   {isPdfPaid && <span className="flex items-center gap-1 text-xs text-green-600 font-medium"><CheckCircle className="w-3.5 h-3.5" /> Paid</span>}
-                  <button
-                    onClick={handleDownloadPDF}
-                    disabled={generating || paying}
-                    className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
-                  >
+                  <button onClick={handleDownloadPDF} disabled={generating || paying}
+                    className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50">
                     {generating || paying ? <Loader2 className="w-4 h-4 animate-spin" /> : requiresPayment ? <Lock className="w-4 h-4" /> : <Download className="w-4 h-4" />}
                     {generating ? 'Generating...' : paying ? 'Processing...' : requiresPayment ? `Pay KES ${schoolPayConfig?.pdf_report_fee || 50} & Download PDF` : 'Download PDF'}
                   </button>
-                  <button
-                    onClick={() => {
-                      const term = terms.find((t: any) => t.id === selectedTerm);
-                      const avg = results.length ? Math.round(results.reduce((s: number, r: any) => s + (r.percentage || r.marks || 0), 0) / results.length) : 0;
-                      const text = encodeURIComponent(`${selectedChild?.first_name}'s CBE-Analytics Report Card\nTerm: ${term?.name || ''} ${term?.academic_year || ''}\nAverage: ${avg}%\nView at: ${window.location.origin}`);
-                      window.open(`https://wa.me/?text=${text}`, '_blank');
-                    }}
-                    className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-green-700"
-                  >
-                    <Share2 className="w-4 h-4" />
-                    WhatsApp
+                  <button onClick={() => {
+                    const term = terms.find((t: any) => t.id === selectedTerm);
+                    const avg = results.length ? Math.round(results.reduce((s: number, r: any) => s + (r.percentage || r.marks || 0), 0) / results.length) : 0;
+                    const text = encodeURIComponent(`${selectedChild?.first_name}'s CBE-Analytics Report Card\nTerm: ${term?.name || ''} ${term?.academic_year || ''}\nAverage: ${avg}%\nView at: ${window.location.origin}`);
+                    window.open(`https://wa.me/?text=${text}`, '_blank');
+                  }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-green-700">
+                    <Share2 className="w-4 h-4" /> WhatsApp
                   </button>
                 </div>
               </div>
@@ -454,6 +480,25 @@ export default function ParentChildReportCard() {
                   <span>A one-time payment of <strong>KES {schoolPayConfig?.pdf_report_fee || 50}</strong> is required to download the PDF report card.</span>
                 </div>
               )}
+
+              {trendData.length >= 2 && (
+                <div className="mb-4 p-4 bg-gray-50 rounded-xl">
+                  <p className="text-xs font-semibold text-gray-600 mb-2">Performance Trend</p>
+                  <div className="flex items-end gap-3 h-24">
+                    {trendData.map((t, i) => {
+                      const height = Math.max(10, (t.avg / 100) * 80);
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                          <span className="text-xs font-bold text-blue-600">{t.avg.toFixed(0)}%</span>
+                          <div className="w-full bg-blue-200 rounded-t" style={{ height: `${height}px` }} />
+                          <span className="text-xs text-gray-500 truncate max-w-full">{t.term}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -461,17 +506,48 @@ export default function ParentChildReportCard() {
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Subject</th>
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{studentCurriculum === '844' ? '8-4-4 Grade' : 'CBE Grade'}</th>
-                      {!isPrimaryLevel(selectedChild?.classes?.level) && (
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>
-                      )}
+                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844 ? '8-4-4 Grade' : 'CBE Grade'}</th>
+                      {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                     </tr>
                   </thead>
                   <tbody>
                     {results.map((r, i) => {
                       const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
-                      const grading = studentCurriculum === '844' ? gradeFromPercentage844(pct) : gradeFromPercentageCBE(pct, selectedChild?.classes?.level);
+                      const grading = (() => {
+                        if (is844) {
+                          if (pct >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
+                          if (pct >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
+                          if (pct >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };
+                          if (pct >= 65) return { grade: 'B', points: 9, descriptor: 'Good' };
+                          if (pct >= 60) return { grade: 'B-', points: 8, descriptor: 'Good' };
+                          if (pct >= 55) return { grade: 'C+', points: 7, descriptor: 'Average' };
+                          if (pct >= 50) return { grade: 'C', points: 6, descriptor: 'Average' };
+                          if (pct >= 45) return { grade: 'C-', points: 5, descriptor: 'Average' };
+                          if (pct >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average' };
+                          if (pct >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average' };
+                          if (pct >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average' };
+                          return { grade: 'E', points: 1, descriptor: 'Poor' };
+                        }
+                        const b = getSchoolLevelBand(classDataForGrading);
+                        const g = (() => {
+                          if (b === 'junior' || b === 'senior') {
+                            if (pct >= 90) return { subLevel: 'EE1', grade: 'EE', points: 8 };
+                            if (pct >= 75) return { subLevel: 'EE2', grade: 'EE', points: 7 };
+                            if (pct >= 58) return { subLevel: 'ME1', grade: 'ME', points: 6 };
+                            if (pct >= 41) return { subLevel: 'ME2', grade: 'ME', points: 5 };
+                            if (pct >= 31) return { subLevel: 'AE1', grade: 'AE', points: 4 };
+                            if (pct >= 21) return { subLevel: 'AE2', grade: 'AE', points: 3 };
+                            if (pct >= 11) return { subLevel: 'BE1', grade: 'BE', points: 2 };
+                            return { subLevel: 'BE2', grade: 'BE', points: 1 };
+                          }
+                          if (pct >= 75) return { subLevel: 'EE', grade: 'EE', points: 0 };
+                          if (pct >= 41) return { subLevel: 'ME', grade: 'ME', points: 0 };
+                          if (pct >= 21) return { subLevel: 'AE', grade: 'AE', points: 0 };
+                          return { subLevel: 'BE', grade: 'BE', points: 0 };
+                        })();
+                        return { grade: g.subLevel, points: g.points, descriptor: g.grade === 'EE' ? 'Exceeding Expectation' : g.grade === 'ME' ? 'Meeting Expectation' : g.grade === 'AE' ? 'Approaching Expectation' : 'Below Expectation' };
+                      })();
                       return (
                         <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                           <td className="py-2 px-3 font-medium">{r.subjects?.name}</td>
@@ -483,13 +559,9 @@ export default function ParentChildReportCard() {
                               grading.grade.startsWith('ME') || grading.grade.startsWith('B') || grading.grade.startsWith('C') ? 'bg-blue-100 text-blue-700' :
                               grading.grade.startsWith('AE') || grading.grade.startsWith('D') ? 'bg-orange-100 text-orange-700' :
                               'bg-red-100 text-red-700'
-                            }`}>
-                              {grading.grade}
-                            </span>
+                            }`}>{grading.grade}</span>
                           </td>
-                          {!isPrimaryLevel(selectedChild?.classes?.level) && (
-                            <td className="py-2 px-3">{grading.points ?? '—'}</td>
-                          )}
+                          {!isPrimary && <td className="py-2 px-3">{grading.points ?? '—'}</td>}
                           <td className="py-2 px-3 text-xs text-gray-600">{grading.descriptor}</td>
                         </tr>
                       );

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { supabaseUntyped } from '@/lib/supabase/client';
+import { supabaseUntyped } from "@/lib/supabase/client";
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, Save, Palette, School, Bell } from 'lucide-react';
+import { Loader2, Save, Palette, School, Bell, Signature, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { subscribeToPush } from '@/hooks/usePWA';
+import DigitalSignature from '@/components/DigitalSignature';
 
 export default function SchoolBranding() {
   const { user } = useAuth();
@@ -11,6 +12,7 @@ export default function SchoolBranding() {
   const [saving, setSaving] = useState(false);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const [activeTab, setActiveTab] = useState<'branding' | 'signatures'>('branding');
   const [form, setForm] = useState({
     name: '',
     motto: '',
@@ -23,11 +25,12 @@ export default function SchoolBranding() {
     website: '',
     principal_name: '',
   });
+  // Signature states
+  const [principalSig, setPrincipalSig] = useState<{ url: string | null; type: string | null }>({ url: null, type: null });
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [teacherSigs, setTeacherSigs] = useState<Record<string, { url: string | null; type: string | null }>>({});
 
-  useEffect(() => {
-    fetchSchool();
-    checkNotifPermission();
-  }, []);
+  useEffect(() => { fetchSchool(); checkNotifPermission(); }, []);
 
   const checkNotifPermission = () => {
     if ('Notification' in window) {
@@ -55,6 +58,25 @@ export default function SchoolBranding() {
         website: data.website || '',
         principal_name: data.principal_name || '',
       });
+      setPrincipalSig({
+        url: data.principal_signature_url || null,
+        type: data.principal_signature_type || null,
+      });
+    }
+    // Fetch teachers with signatures
+    const { data: teachersData } = await supabaseUntyped
+      .from('teachers')
+      .select('id, first_name, last_name, signature_url, signature_type')
+      .eq('school_id', user?.schoolId)
+      .eq('is_active', true)
+      .order('first_name');
+    if (teachersData) {
+      setTeachers(teachersData);
+      const sigs: Record<string, { url: string | null; type: string | null }> = {};
+      teachersData.forEach((t: any) => {
+        sigs[t.id] = { url: t.signature_url || null, type: t.signature_type || null };
+      });
+      setTeacherSigs(sigs);
     }
     setLoading(false);
   };
@@ -85,6 +107,62 @@ export default function SchoolBranding() {
     setSaving(false);
   };
 
+  const savePrincipalSignature = async (signatureUrl: string, signatureType: 'drawn' | 'uploaded') => {
+    const { error } = await supabaseUntyped
+      .from('schools')
+      .update({
+        principal_signature_url: signatureUrl,
+        principal_signature_type: signatureType,
+      })
+      .eq('id', user?.schoolId);
+    if (error) throw error;
+    setPrincipalSig({ url: signatureUrl, type: signatureType });
+  };
+
+  const clearPrincipalSignature = async () => {
+    const { error } = await supabaseUntyped
+      .from('schools')
+      .update({
+        principal_signature_url: null,
+        principal_signature_type: null,
+      })
+      .eq('id', user?.schoolId);
+    if (error) throw error;
+    setPrincipalSig({ url: null, type: null });
+  };
+
+  const saveTeacherSignature = async (teacherId: string, signatureUrl: string, signatureType: 'drawn' | 'uploaded') => {
+    const { error } = await supabaseUntyped
+      .from('teachers')
+      .update({
+        signature_url: signatureUrl,
+        signature_type: signatureType,
+      })
+      .eq('id', teacherId)
+      .eq('school_id', user?.schoolId);
+    if (error) throw error;
+    setTeacherSigs(prev => ({
+      ...prev,
+      [teacherId]: { url: signatureUrl, type: signatureType },
+    }));
+  };
+
+  const clearTeacherSignature = async (teacherId: string) => {
+    const { error } = await supabaseUntyped
+      .from('teachers')
+      .update({
+        signature_url: null,
+        signature_type: null,
+      })
+      .eq('id', teacherId)
+      .eq('school_id', user?.schoolId);
+    if (error) throw error;
+    setTeacherSigs(prev => ({
+      ...prev,
+      [teacherId]: { url: null, type: null },
+    }));
+  };
+
   const enableNotifications = async () => {
     setNotifLoading(true);
     try {
@@ -107,7 +185,7 @@ export default function SchoolBranding() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#111111]">School Settings & Branding</h1>
-        <p className="text-sm text-[#666666]">Customise your school's appearance and notification settings</p>
+        <p className="text-sm text-[#666666]">Customise your school's appearance, signatures and notification settings</p>
       </div>
 
       {/* Push Notifications */}
@@ -136,124 +214,148 @@ export default function SchoolBranding() {
         </div>
       </div>
 
-      {/* Branding Form */}
-      <form onSubmit={handleSave} className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <h3 className="font-semibold text-[#111111] mb-4 flex items-center gap-2">
-          <Palette className="w-5 h-5 text-purple-500" />
-          School Branding
-        </h3>
+      {/* Tabs */}
+      <div className="flex gap-2 border-b">
+        <button
+          onClick={() => setActiveTab('branding')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${activeTab === 'branding' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          <span className="flex items-center gap-1.5"><Palette className="w-4 h-4" /> Branding</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('signatures')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${activeTab === 'signatures' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          <span className="flex items-center gap-1.5"><Signature className="w-4 h-4" /> Digital Signatures</span>
+        </button>
+      </div>
 
-        {/* Color Preview */}
-        <div className="mb-6 p-4 rounded-xl border border-gray-100">
-          <p className="text-xs text-gray-500 mb-3">Brand Preview</p>
-          <div className="flex gap-3 items-center">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg" style={{ backgroundColor: form.primary_color }}>
-              {form.name?.[0] || 'S'}
+      {activeTab === 'branding' && (
+        <form onSubmit={handleSave} className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+          <h3 className="font-semibold text-[#111111] mb-4 flex items-center gap-2">
+            <Palette className="w-5 h-5 text-purple-500" />
+            School Branding
+          </h3>
+
+          {/* Color Preview */}
+          <div className="mb-6 p-4 rounded-xl border border-gray-100">
+            <p className="text-xs text-gray-500 mb-3">Brand Preview</p>
+            <div className="flex gap-3 items-center">
+              {form.logo_url ? (
+                <img src={form.logo_url} alt="School Logo" className="w-12 h-12 rounded-xl object-contain border border-gray-200" />
+              ) : (
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg" style={{ backgroundColor: form.primary_color }}>
+                  {form.name?.[0] || 'S'}
+                </div>
+              )}
+              <div>
+                <p className="font-bold text-sm" style={{ color: form.primary_color }}>{form.name || 'School Name'}</p>
+                <p className="text-xs text-gray-500 italic">{form.motto || 'School motto'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">School Name</label>
+              <input value={form.name} disabled className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 text-gray-400" />
             </div>
             <div>
-              <p className="font-bold text-sm" style={{ color: form.primary_color }}>{form.name || 'School Name'}</p>
-              <p className="text-xs text-gray-500 italic">{form.motto || 'School motto'}</p>
+              <label className="block text-xs text-gray-500 mb-1">School Motto</label>
+              <input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} placeholder="e.g. Excellence in Education" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
             </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Primary Colour</label>
+              <div className="flex gap-2 items-center">
+                <input type="color" value={form.primary_color} onChange={e => setForm({ ...form, primary_color: e.target.value })} className="w-12 h-10 rounded-lg border border-gray-200 cursor-pointer" />
+                <input value={form.primary_color} onChange={e => setForm({ ...form, primary_color: e.target.value })} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Secondary Colour</label>
+              <div className="flex gap-2 items-center">
+                <input type="color" value={form.secondary_color} onChange={e => setForm({ ...form, secondary_color: e.target.value })} className="w-12 h-10 rounded-lg border border-gray-200 cursor-pointer" />
+                <input value={form.secondary_color} onChange={e => setForm({ ...form, secondary_color: e.target.value })} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Logo URL</label>
+              <input value={form.logo_url} onChange={e => setForm({ ...form, logo_url: e.target.value })} placeholder="https://example.com/logo.png" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+              <p className="text-xs text-gray-400 mt-1">Logo appears on all PDF report cards and portal headers</p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Principal Name</label>
+              <input value={form.principal_name} onChange={e => setForm({ ...form, principal_name: e.target.value })} placeholder="Principal's full name" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Address</label>
+              <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="School physical address" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Website</label>
+              <input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} placeholder="https://yourschool.ac.ke" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+            </div>
+          </div>
+
+          <button type="submit" disabled={saving} className="mt-6 flex items-center gap-2 bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </form>
+      )}
+
+      {activeTab === 'signatures' && (
+        <div className="space-y-6">
+          {/* Principal Signature */}
+          <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+            <h3 className="font-semibold text-[#111111] mb-4 flex items-center gap-2">
+              <Signature className="w-5 h-5 text-blue-600" />
+              Principal / Headteacher Signature
+            </h3>
+            <p className="text-xs text-[#666666] mb-4">
+              This signature will appear on all student report cards as the Principal's approval.
+            </p>
+            <DigitalSignature
+              title="Principal Signature"
+              subtitle="Appears on all student report cards"
+              existingSignatureUrl={principalSig.url}
+              existingSignatureType={principalSig.type}
+              onSave={savePrincipalSignature}
+              onClear={clearPrincipalSignature}
+            />
+          </div>
+
+          {/* Teacher Signatures */}
+          <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+            <h3 className="font-semibold text-[#111111] mb-4 flex items-center gap-2">
+              <Upload className="w-5 h-5 text-green-600" />
+              Class Teacher Signatures
+            </h3>
+            <p className="text-xs text-[#666666] mb-4">
+              Each teacher's signature will appear on their class report cards. Teachers can also set their own signatures from their profile.
+            </p>
+            {teachers.length === 0 ? (
+              <div className="text-center py-8 text-sm text-gray-500 bg-gray-50 rounded-xl">
+                No active teachers found. Add teachers first.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {teachers.map((teacher) => (
+                  <DigitalSignature
+                    key={teacher.id}
+                    title={`${teacher.first_name} ${teacher.last_name}`}
+                    subtitle="Class Teacher"
+                    existingSignatureUrl={teacherSigs[teacher.id]?.url || null}
+                    existingSignatureType={teacherSigs[teacher.id]?.type || null}
+                    onSave={(url, type) => saveTeacherSignature(teacher.id, url, type)}
+                    onClear={() => clearTeacherSignature(teacher.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">School Name</label>
-            <input
-              value={form.name}
-              disabled
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 text-gray-400"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">School Motto</label>
-            <input
-              value={form.motto}
-              onChange={e => setForm({ ...form, motto: e.target.value })}
-              placeholder="e.g. Excellence in Education"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Primary Colour</label>
-            <div className="flex gap-2 items-center">
-              <input
-                type="color"
-                value={form.primary_color}
-                onChange={e => setForm({ ...form, primary_color: e.target.value })}
-                className="w-12 h-10 rounded-lg border border-gray-200 cursor-pointer"
-              />
-              <input
-                value={form.primary_color}
-                onChange={e => setForm({ ...form, primary_color: e.target.value })}
-                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Secondary Colour</label>
-            <div className="flex gap-2 items-center">
-              <input
-                type="color"
-                value={form.secondary_color}
-                onChange={e => setForm({ ...form, secondary_color: e.target.value })}
-                className="w-12 h-10 rounded-lg border border-gray-200 cursor-pointer"
-              />
-              <input
-                value={form.secondary_color}
-                onChange={e => setForm({ ...form, secondary_color: e.target.value })}
-                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Logo URL</label>
-            <input
-              value={form.logo_url}
-              onChange={e => setForm({ ...form, logo_url: e.target.value })}
-              placeholder="https://example.com/logo.png"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Principal Name</label>
-            <input
-              value={form.principal_name}
-              onChange={e => setForm({ ...form, principal_name: e.target.value })}
-              placeholder="Principal's full name"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Address</label>
-            <input
-              value={form.address}
-              onChange={e => setForm({ ...form, address: e.target.value })}
-              placeholder="School physical address"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Website</label>
-            <input
-              value={form.website}
-              onChange={e => setForm({ ...form, website: e.target.value })}
-              placeholder="https://yourschool.ac.ke"
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-            />
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          disabled={saving}
-          className="mt-6 flex items-center gap-2 bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
-      </form>
+      )}
     </div>
   );
 }

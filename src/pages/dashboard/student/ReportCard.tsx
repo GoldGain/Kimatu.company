@@ -1,104 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Download, FileText, Loader2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getSchoolLevelBand, gradeDisplayLabel, calculateCompetencyGrade, calculate844Grade } from '@/lib/grading';
+import {
+  generateUniqueAIComment,
+  drawTrendGraph,
+  addSignaturesToPDF,
+  drawReportHeader,
+  drawStudentInfo,
+  drawResultsTable,
+  drawSummaryBox,
+  drawDeviation,
+  drawAchievements,
+  drawAIComment,
+  getPercentage,
+  formatPosition,
+  type SchoolInfo,
+  type SignatureInfo,
+} from '@/lib/reportCardPdf';
+import { getSchoolLevelBand } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
-
-function getPercentage(result: any): number {
-  if (result.percentage !== undefined && result.percentage !== null) return Number(result.percentage);
-  const outOf = Number(result.out_of || 100);
-  return outOf > 0 ? Math.round((Number(result.marks || 0) / outOf) * 100) : 0;
-}
-
-// Use shared grading library — grade_level takes priority over level
-function isPrimaryLevel(classData: any): boolean {
-  const gl = classData?.grade_level ?? classData?.level;
-  return Number(gl || 0) <= 6;
-}
-
-function gradeFromPercentage(percentage: number, classData: any) {
-  const curriculum = String(classData?.curriculum || 'CBE').toUpperCase();
-  if (curriculum === '844' || curriculum === '8-4-4') {
-    const g = calculate844Grade(percentage);
-    return { grade: g.grade, points: g.points, descriptor: g.descriptor, is844: true };
-  }
-  const band = getSchoolLevelBand(classData);
-  const g = calculateCompetencyGrade(percentage, band);
-  return { grade: g.subLevel, points: g.points || null, descriptor: g.descriptor, is844: false };
-}
-
-function overallGradeLabel(avgPct: number, classData?: any) {
-  return gradeFromPercentage(avgPct, classData).grade;
-}
-
-function get844Grade(percentage: number) {
-  if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
-  if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
-  if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };
-  if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good' };
-  if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good' };
-  if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average' };
-  if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average' };
-  if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average' };
-  if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average' };
-  if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average' };
-  if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average' };
-  return { grade: 'E', points: 1, descriptor: 'Poor' };
-}
-
-function ordinal(n: number): string {
-  const v = n % 100;
-  if (v >= 11 && v <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1: return `${n}st`;
-    case 2: return `${n}nd`;
-    case 3: return `${n}rd`;
-    default: return `${n}th`;
-  }
-}
-
-function formatPosition(position: number | null, totalStudents: number): string {
-  if (!position) return 'N/A';
-  return `${ordinal(position)} out of ${totalStudents || '—'}`;
-}
-
-function generateAIComment(
-  avgPct: number,
-  deviation: number | null,
-  bestSubject: string,
-  weakestSubject: string,
-  position: number | null,
-  totalStudents: number,
-  isNew: boolean
-): string {
-  if (position !== null && position <= 3 && totalStudents >= 3) {
-    const rank = position === 1 ? '1st' : position === 2 ? '2nd' : '3rd';
-    return `Outstanding! You are among the top performers (${rank} in class). Your mastery of ${bestSubject} is impressive. Remember, the sky is not the limit!`;
-  }
-  if (isNew || deviation === null) {
-    const grade = overallGradeLabel(avgPct);
-    return `Welcome! You have shown ${grade} performance. Strong in ${bestSubject}. Keep working hard!`;
-  }
-  const dev = Math.abs(deviation);
-  if (deviation > 5) {
-    return `Excellent improvement! You rose by ${dev.toFixed(1)}%. Your hard work in ${bestSubject} paid off. The sky is not the limit!`;
-  }
-  if (deviation > 1) {
-    return `Good progress! You improved by ${dev.toFixed(1)}%. Keep working on ${weakestSubject}.`;
-  }
-  if (deviation >= -1) {
-    return `Consistent performance. You are strong in ${bestSubject}. Let's improve ${weakestSubject}.`;
-  }
-  if (deviation >= -5) {
-    return `Your performance dropped slightly by ${dev.toFixed(1)}%. Focus on ${weakestSubject} next term.`;
-  }
-  return `Your performance dropped by ${dev.toFixed(1)}%. Let's identify challenges. We believe you will bounce back.`;
-}
 
 export default function StudentReportCard() {
   const { user } = useAuth();
@@ -110,17 +33,19 @@ export default function StudentReportCard() {
   const [generating, setGenerating] = useState(false);
   const [previousAvg, setPreviousAvg] = useState<number | null>(null);
   const [totalStudents, setTotalStudents] = useState(0);
+  const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: '' });
+  const [signatures, setSignatures] = useState<SignatureInfo>({});
+  const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
+  const [trendData, setTrendData] = useState<{ term: string; avg: number }[]>([]);
 
-  useEffect(() => {
-    fetchData();
-  }, [user?.id]);
+  useEffect(() => { fetchData(); }, [user?.id]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const { data: studentData } = await supabaseUntyped
         .from('students')
-        .select('*, classes(name, level, grade_level, curriculum)')
+        .select('*, classes(name, level, grade_level, curriculum, class_teacher_id)')
         .eq('profile_id', user?.id)
         .single();
       setStudent(studentData);
@@ -141,6 +66,11 @@ export default function StudentReportCard() {
         if (termsData && termsData.length > 0) {
           setSelectedTerm(termsData[0].id);
         }
+
+        // Fetch school info (logo, principal, etc.)
+        await fetchSchoolInfo(studentData.school_id);
+        // Fetch signatures
+        await fetchSignatures(studentData.school_id, studentData.classes?.class_teacher_id);
       }
     } catch (err) {
       console.error(err);
@@ -148,9 +78,53 @@ export default function StudentReportCard() {
     setLoading(false);
   };
 
+  const fetchSchoolInfo = async (schoolId: string) => {
+    const { data } = await supabaseUntyped
+      .from('schools')
+      .select('name, motto, logo_url, principal_name, address, phone, email')
+      .eq('id', schoolId)
+      .maybeSingle();
+    if (data) {
+      setSchoolInfo({
+        name: data.name || 'School',
+        motto: data.motto || '',
+        logo_url: data.logo_url || null,
+        principal_name: data.principal_name || '',
+        address: data.address || '',
+        phone: data.phone || '',
+        email: data.email || '',
+      });
+    }
+  };
+
+  const fetchSignatures = async (schoolId: string, classTeacherId?: string) => {
+    // Principal signature
+    const { data: schoolSig } = await supabaseUntyped
+      .from('schools')
+      .select('principal_signature_url')
+      .eq('id', schoolId)
+      .maybeSingle();
+
+    let teacherSigUrl: string | null = null;
+    if (classTeacherId) {
+      const { data: teacherSig } = await supabaseUntyped
+        .from('teachers')
+        .select('signature_url')
+        .eq('id', classTeacherId)
+        .maybeSingle();
+      teacherSigUrl = teacherSig?.signature_url || null;
+    }
+
+    setSignatures({
+      principal_signature_url: schoolSig?.principal_signature_url || null,
+      teacher_signature_url: teacherSigUrl,
+    });
+  };
+
   useEffect(() => {
     if (selectedTerm && student) {
       fetchResults();
+      fetchTrendData();
     }
   }, [selectedTerm, student]);
 
@@ -163,14 +137,8 @@ export default function StudentReportCard() {
       .eq('term_id', selectedTerm)
       .order('subjects(name)');
     setResults(data || []);
-    // Fetch previous term average
     await fetchPreviousAvg();
-    // Fetch class-wide results to compute best per subject
-    await fetchClassBestPerSubject();
-  };
-
-  const fetchClassBestPerSubject = async () => {
-    if (!student || !selectedTerm) return;
+    // Fetch class-wide best per subject
     const { data: classResults } = await supabaseUntyped
       .from('results')
       .select('*, students(id, first_name, last_name), subjects(name)')
@@ -181,6 +149,35 @@ export default function StudentReportCard() {
     } else {
       setClassBestList([]);
     }
+  };
+
+  const fetchTrendData = async () => {
+    if (!student) return;
+    const { data: allResults } = await supabaseUntyped
+      .from('results')
+      .select('percentage, marks, out_of, term_id, terms(name, academic_year)')
+      .eq('student_id', student.id)
+      .order('terms(academic_year)', { ascending: true })
+      .order('terms(name)', { ascending: true });
+    if (!allResults) return;
+
+    const termMap: Record<string, { term: string; total: number; count: number }> = {};
+    allResults.forEach((r: any) => {
+      const tid = r.term_id;
+      const tname = r.terms?.name || '';
+      const year = r.terms?.academic_year || '';
+      const key = `${year}-${tname}`;
+      const pct = r.percentage !== undefined && r.percentage !== null ? Number(r.percentage) : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0);
+      if (!termMap[key]) termMap[key] = { term: `${tname} ${year}`, total: 0, count: 0 };
+      termMap[key].total += pct;
+      termMap[key].count++;
+    });
+
+    const trend = Object.values(termMap).map(t => ({
+      term: t.term,
+      avg: t.count > 0 ? t.total / t.count : 0,
+    }));
+    setTrendData(trend);
   };
 
   const fetchPreviousAvg = async () => {
@@ -203,191 +200,94 @@ export default function StudentReportCard() {
     setPreviousAvg(totalPct / prevResults.length);
   };
 
-  const [schoolName, setSchoolName] = useState('');
-  const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
-
-  useEffect(() => {
-    if (student?.school_id) {
-      fetchSchoolName(student.school_id);
-    }
-  }, [student?.school_id]);
-
-  const fetchSchoolName = async (schoolId: string) => {
-    const { data } = await supabaseUntyped.from('schools').select('name, curriculum').eq('id', schoolId).maybeSingle();
-    if (data?.name) setSchoolName(data.name);
-  };
-
-  // Determine curriculum: 'CBE' or '844'
-  const curriculum = (student?.curriculum || 'CBE') as 'CBE' | '844';
-  const is844 = curriculum === '844';
+  const classDataForGrading = student?.classes || {};
+  const is844 = (classDataForGrading?.curriculum || 'CBE') === '844';
+  const band = getSchoolLevelBand(classDataForGrading);
+  const isPrimary = band === 'primary';
 
   const generatePDF = async () => {
     if (!results.length) { toast.error('No results found for this term'); return; }
     setGenerating(true);
     try {
+      const { jsPDF } = await import('jspdf');
       const doc = new jsPDF();
       const term = terms.find(t => t.id === selectedTerm);
-      const displaySchoolName = schoolName || 'School';
 
-      // Use grade_level first (new column), fall back to level
-      const level = student.classes?.grade_level ?? student.classes?.level;
-      const totalMarks = results.reduce((s, r) => s + (Number(r.marks || 0)), 0);
-      const avgPercentage = results.length ? (results.reduce((s, r) => s + getPercentage(r), 0) / results.length) : 0;
-
-      // Use appropriate grading system based on curriculum
-      const classDataForGrading = student?.classes || {};
+      const avgPercentage = results.length
+        ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
+        : 0;
       const totalPoints = is844
-        ? results.reduce((s, r) => s + (get844Grade(getPercentage(r)).points || 0), 0)
-        : (isPrimaryLevel(classDataForGrading) ? null : results.reduce((s, r) => s + (gradeFromPercentage(getPercentage(r), classDataForGrading).points || 0), 0));
+        ? results.reduce((s, r) => {
+            const pct = getPercentage(r);
+            if (pct >= 80) return s + 12; if (pct >= 75) return s + 11; if (pct >= 70) return s + 10;
+            if (pct >= 65) return s + 9; if (pct >= 60) return s + 8; if (pct >= 55) return s + 7;
+            if (pct >= 50) return s + 6; if (pct >= 45) return s + 5; if (pct >= 40) return s + 4;
+            if (pct >= 35) return s + 3; if (pct >= 30) return s + 2; return s + 1;
+          }, 0)
+        : isPrimary
+          ? null
+          : results.reduce((s, r) => {
+              const pct = getPercentage(r);
+              if (pct >= 90) return s + 8; if (pct >= 75) return s + 7; if (pct >= 58) return s + 6;
+              if (pct >= 41) return s + 5; if (pct >= 31) return s + 4; if (pct >= 21) return s + 3;
+              if (pct >= 11) return s + 2; return s + 1;
+            }, 0);
 
-      // Deviation
       const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
       const isNew = deviation === null;
+      const position = results[0]?.class_position || results[0]?.position || null;
+      const positionStr = formatPosition(position, totalStudents || 0);
 
-      // Best and weakest subjects
+      // AI comment
       const subjectScores = results.map(r => ({ name: r.subjects?.name || 'Unknown', pct: getPercentage(r) }));
       const sortedBest = [...subjectScores].sort((a, b) => b.pct - a.pct);
       const bestSubject = sortedBest[0]?.name || 'all subjects';
       const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
+      const studentFullName = `${student.first_name} ${student.last_name}`;
+      const aiComment = generateUniqueAIComment(
+        studentFullName, avgPercentage, deviation, bestSubject, weakestSubject,
+        position, totalStudents || 0, isNew, classDataForGrading
+      );
 
-      // Class position
-      const position = results[0]?.class_position || results[0]?.position || null;
+      // Header with logo
+      await drawReportHeader(doc, schoolInfo);
 
-      // AI comment
-      const aiComment = generateAIComment(avgPercentage, deviation, bestSubject, weakestSubject, position, totalStudents || 0, isNew);
+      // Student info
+      drawStudentInfo(
+        doc,
+        studentFullName,
+        student.admission_number || 'N/A',
+        classDataForGrading.name || 'N/A',
+        term?.name || '',
+        term?.academic_year || '',
+        positionStr,
+      );
 
-      // Header
-      doc.setFillColor(37, 99, 235);
-      doc.rect(0, 0, 210, 35, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(18);
-      doc.setFont('helvetica', 'bold');
-      doc.text(displaySchoolName, 105, 15, { align: 'center' });
-      doc.setFontSize(12);
-      doc.text('STUDENT REPORT CARD', 105, 25, { align: 'center' });
-
-      // Student Info
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'normal');
-      const y = 45;
-      doc.text(`Student Name: ${student.first_name} ${student.last_name}`, 14, y);
-      doc.text(`Admission No: ${student.admission_number}`, 14, y + 7);
-      doc.text(`Class: ${student.classes?.name || 'N/A'}`, 14, y + 14);
-      doc.text(`Term: ${term?.name || ''} ${term?.academic_year || ''}`, 120, y);
-      doc.text(`Academic Year: ${term?.academic_year || ''}`, 120, y + 7);
-      doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 14);
-
-      doc.setDrawColor(37, 99, 235);
-      doc.line(14, y + 20, 196, y + 20);
-
-      // Results Table - Use ONLY the curriculum's grading system
-      const tableHead = is844
-        ? ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', '8-4-4 Grade', 'Points', 'Descriptor']
-        : ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', 'CBE Grade', 'Points', 'Descriptor'];
-
-      const tableBody = results.map((r, i) => {
-        const percentage = getPercentage(r);
-        const grading = is844 ? get844Grade(percentage) : gradeFromPercentage(percentage, classDataForGrading);
-        return [
-          i + 1,
-          r.subjects?.name || 'N/A',
-          r.marks || '0',
-          r.out_of || 100,
-          `${percentage}%`,
-          grading.grade,
-          grading.points ?? '—',
-          grading.descriptor,
-        ];
-      });
-
-      autoTable(doc, {
-        startY: y + 25,
-        head: [tableHead],
-        body: tableBody,
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 247, 255] },
-      });
-
-      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      // Results table
+      const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
 
       // Summary
-      doc.setFillColor(245, 247, 255);
-      doc.rect(14, finalY, 182, 25, 'F');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`Total Subjects: ${results.length}`, 20, finalY + 8);
-      doc.text(`Total Marks: ${totalMarks}`, 80, finalY + 8);
-      doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 150, finalY + 8);
-      doc.text(`Class Position: ${formatPosition(position, totalStudents)}`, 20, finalY + 18);
-      doc.text(`Overall Grade: ${is844 ? get844Grade(avgPercentage).grade : overallGradeLabel(avgPercentage, classDataForGrading)}`, 80, finalY + 18);
-      if (totalPoints !== null) {
-        doc.text(`Total Points: ${totalPoints}`, 150, finalY + 18);
-      }
+      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
 
       // Deviation
-      const devY = finalY + 32;
-      if (deviation !== null) {
-        const arrow = deviation >= 0 ? '\u25B2' : '\u25BC';
-        const sign = deviation >= 0 ? '+' : '';
-        if (deviation >= 0) doc.setTextColor(22, 163, 74);
-        else doc.setTextColor(220, 38, 38);
-        doc.setFont('helvetica', 'bold');
-        doc.text(`${arrow} ${sign}${deviation.toFixed(1)}% vs previous term (Prev: ${previousAvg?.toFixed(1)}%)`, 14, devY);
-        doc.setTextColor(0, 0, 0);
-      } else {
-        doc.setTextColor(100, 100, 100);
-        doc.setFont('helvetica', 'normal');
-        doc.text('First Term — No previous data for comparison', 14, devY);
-        doc.setTextColor(0, 0, 0);
+      const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
+
+      // Performance trend graph
+      let trendEndY = devEndY;
+      if (trendData.length >= 2) {
+        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is844);
+        trendEndY = devEndY + 55;
       }
 
-      // Best in Subject Achievement for this student
+      // Achievements
       const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
-      let studentAchievementY = devY + 10;
-      if (myBestSubjects.length > 0) {
-        doc.setFillColor(254, 249, 195);
-        doc.rect(14, studentAchievementY, 182, 6 + myBestSubjects.length * 6, 'F');
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(202, 138, 4);
-        doc.text('YOUR ACHIEVEMENT:', 18, studentAchievementY + 5);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
-        myBestSubjects.forEach((b, bi) => {
-          const pts = b.points !== null ? ` (${b.points} pts)` : '';
-          doc.text(`🏆 You were the best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, studentAchievementY + 11 + bi * 6);
-        });
-        studentAchievementY += 6 + myBestSubjects.length * 6 + 4;
-      }
+      const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
 
       // AI Comment
-      const commentY = studentAchievementY + 2;
-      doc.setFillColor(254, 252, 232);
-      doc.rect(14, commentY, 182, 22, 'F');
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(0, 0, 0);
-      doc.text('Class Teacher\'s Comment:', 18, commentY + 7);
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      const commentLines = doc.splitTextToSize(aiComment, 170);
-      doc.text(commentLines, 18, commentY + 14);
+      const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
 
-      // Signature Lines
-      const sigY = commentY + 30;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(0, 0, 0);
-      doc.text('Class Teacher Comments:', 14, sigY);
-      doc.setDrawColor(200, 200, 200);
-      doc.line(14, sigY + 10, 196, sigY + 10);
-      doc.line(14, sigY + 20, 196, sigY + 20);
-      doc.text('Class Teacher Signature: ___________________', 14, sigY + 35);
-      doc.text('Principal Signature: ___________________', 120, sigY + 35);
-      doc.text('Date: ___________________', 14, sigY + 45);
-      doc.text('School Stamp:', 120, sigY + 45);
+      // Signatures
+      addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
 
       // Footer
       doc.setFontSize(8);
@@ -398,6 +298,7 @@ export default function StudentReportCard() {
       toast.success('Report card downloaded!');
     } catch (err: any) {
       toast.error('Failed to generate PDF: ' + err.message);
+      console.error(err);
     }
     setGenerating(false);
   };
@@ -410,6 +311,17 @@ export default function StudentReportCard() {
         <h1 className="text-2xl font-bold text-[#111111]">Report Card</h1>
         <p className="text-sm text-[#666666]">Download your official academic report card</p>
       </div>
+
+      {schoolInfo.logo_url && (
+        <div className="bg-white rounded-2xl p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] flex items-center gap-4">
+          <img src={schoolInfo.logo_url} alt="School Logo" className="h-12 w-auto object-contain" />
+          <div>
+            <p className="font-semibold text-[#111111]">{schoolInfo.name}</p>
+            {schoolInfo.motto && <p className="text-xs text-[#666666] italic">"{schoolInfo.motto}"</p>}
+          </div>
+        </div>
+      )}
+
       {student && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <div className="flex items-start justify-between">
@@ -424,6 +336,7 @@ export default function StudentReportCard() {
           </div>
         </div>
       )}
+
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <h3 className="font-semibold text-[#111111] mb-4">Select Term</h3>
         <select
@@ -435,6 +348,7 @@ export default function StudentReportCard() {
           {terms.map(t => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
         </select>
       </div>
+
       {results.length > 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <div className="flex items-center justify-between mb-4">
@@ -462,6 +376,26 @@ export default function StudentReportCard() {
               </button>
             </div>
           </div>
+
+          {/* Trend Graph */}
+          {trendData.length >= 2 && (
+            <div className="mb-4 p-4 bg-gray-50 rounded-xl">
+              <p className="text-xs font-semibold text-gray-600 mb-2">Performance Trend</p>
+              <div className="flex items-end gap-3 h-24">
+                {trendData.map((t, i) => {
+                  const height = Math.max(10, (t.avg / 100) * 80);
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                      <span className="text-xs font-bold text-blue-600">{t.avg.toFixed(0)}%</span>
+                      <div className="w-full bg-blue-200 rounded-t" style={{ height: `${height}px` }} />
+                      <span className="text-xs text-gray-500 truncate max-w-full">{t.term}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -470,16 +404,47 @@ export default function StudentReportCard() {
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844 ? '8-4-4 Grade' : 'CBE Grade'}</th>
-                  {!isPrimaryLevel(student?.classes?.level) && (
-                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>
-                  )}
+                  {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                 </tr>
               </thead>
               <tbody>
                 {results.map((r, i) => {
                   const percentage = getPercentage(r);
-                  const grading = is844 ? get844Grade(percentage) : gradeFromPercentage(percentage, student?.classes?.level);
+                  const grading = (() => {
+                    if (is844) {
+                      if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
+                      if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
+                      if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };
+                      if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good' };
+                      if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good' };
+                      if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average' };
+                      if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average' };
+                      if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average' };
+                      if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average' };
+                      if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average' };
+                      if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average' };
+                      return { grade: 'E', points: 1, descriptor: 'Poor' };
+                    }
+                    const band = getSchoolLevelBand(classDataForGrading);
+                    const g = (() => {
+                      if (band === 'junior' || band === 'senior') {
+                        if (percentage >= 90) return { subLevel: 'EE1', grade: 'EE', points: 8 };
+                        if (percentage >= 75) return { subLevel: 'EE2', grade: 'EE', points: 7 };
+                        if (percentage >= 58) return { subLevel: 'ME1', grade: 'ME', points: 6 };
+                        if (percentage >= 41) return { subLevel: 'ME2', grade: 'ME', points: 5 };
+                        if (percentage >= 31) return { subLevel: 'AE1', grade: 'AE', points: 4 };
+                        if (percentage >= 21) return { subLevel: 'AE2', grade: 'AE', points: 3 };
+                        if (percentage >= 11) return { subLevel: 'BE1', grade: 'BE', points: 2 };
+                        return { subLevel: 'BE2', grade: 'BE', points: 1 };
+                      }
+                      if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0 };
+                      if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0 };
+                      if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0 };
+                      return { subLevel: 'BE', grade: 'BE', points: 0 };
+                    })();
+                    return { grade: g.subLevel, points: g.points, descriptor: g.grade === 'EE' ? 'Exceeding Expectation' : g.grade === 'ME' ? 'Meeting Expectation' : g.grade === 'AE' ? 'Approaching Expectation' : 'Below Expectation' };
+                  })();
                   return (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2 px-3 font-medium">{r.subjects?.name}</td>
@@ -493,9 +458,7 @@ export default function StudentReportCard() {
                           'bg-red-100 text-red-700'
                         }`}>{grading.grade}</span>
                       </td>
-                      {!isPrimaryLevel(student?.classes?.level) && (
-                        <td className="py-2 px-3">{grading.points ?? '—'}</td>
-                      )}
+                      {!isPrimary && <td className="py-2 px-3">{grading.points ?? '—'}</td>}
                       <td className="py-2 px-3 text-xs text-gray-600">{grading.descriptor}</td>
                     </tr>
                   );
@@ -503,6 +466,7 @@ export default function StudentReportCard() {
               </tbody>
             </table>
           </div>
+
           {classBestList.filter(b => b.studentId === student?.id).length > 0 && (
             <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
               <div className="flex items-center gap-2 mb-2">
@@ -516,6 +480,7 @@ export default function StudentReportCard() {
               ))}
             </div>
           )}
+
           {previousAvg !== null && (
             <div className="mt-4 p-3 bg-blue-50 rounded-xl text-sm text-blue-700">
               <strong>Deviation from previous term:</strong> {
@@ -523,9 +488,7 @@ export default function StudentReportCard() {
                   const totalPct = results.reduce((s, r) => s + getPercentage(r), 0);
                   const avg = results.length ? totalPct / results.length : 0;
                   const dev = avg - previousAvg;
-                  return dev >= 0
-                    ? `▲ +${dev.toFixed(1)}% improvement`
-                    : `▼ ${dev.toFixed(1)}% drop`;
+                  return dev >= 0 ? `▲ +${dev.toFixed(1)}% improvement` : `▼ ${dev.toFixed(1)}% drop`;
                 })()
               } (Previous term avg: {previousAvg.toFixed(1)}%)
             </div>
