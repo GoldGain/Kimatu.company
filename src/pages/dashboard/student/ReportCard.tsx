@@ -16,6 +16,7 @@ import {
   drawAIComment,
   getPercentage,
   formatPosition,
+  addStudentPhotoToPDF,
   type SchoolInfo,
   type SignatureInfo,
 } from '@/lib/reportCardPdf';
@@ -238,19 +239,31 @@ export default function StudentReportCard() {
       const position = results[0]?.class_position || results[0]?.position || null;
       const positionStr = formatPosition(position, totalStudents || 0);
 
-      // AI comment
-      const subjectScores = results.map(r => ({ name: r.subjects?.name || 'Unknown', pct: getPercentage(r) }));
-      const sortedBest = [...subjectScores].sort((a, b) => b.pct - a.pct);
+      // AI comment — subject-specific with all scores
+      const subjectScores = results.map(r => ({
+        name: r.subjects?.name || 'Unknown',
+        percentage: getPercentage(r),
+        previousPercentage: null,
+      }));
+      const sortedBest = [...subjectScores].sort((a, b) => b.percentage - a.percentage);
       const bestSubject = sortedBest[0]?.name || 'all subjects';
       const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
       const studentFullName = `${student.first_name} ${student.last_name}`;
       const aiComment = generateUniqueAIComment(
         studentFullName, avgPercentage, deviation, bestSubject, weakestSubject,
-        position, totalStudents || 0, isNew, classDataForGrading
+        position, totalStudents || 0, isNew, classDataForGrading, subjectScores
       );
 
       // Header with logo
       await drawReportHeader(doc, schoolInfo);
+
+      // Student photo (top-right corner)
+      const photoUrl = student.photo_url || null;
+      if (photoUrl) {
+        try {
+          await addStudentPhotoToPDF(doc, photoUrl, 174, 34, 22);
+        } catch {}
+      }
 
       // Student info
       drawStudentInfo(

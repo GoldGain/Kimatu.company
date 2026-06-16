@@ -34,6 +34,7 @@ import {
   Calendar,
   Zap,
   Brain,
+  User,
 } from 'lucide-react';
 
 interface NavItem {
@@ -79,6 +80,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Results', icon: <FileText className="w-5 h-5" />, path: '/school-admin/results' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
     { label: 'Branding & Notifications', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
+    { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/school-admin/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/school-admin/change-password' },
   ],
   'teacher': [
@@ -92,6 +94,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'My Students', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
     { label: 'Lesson Plans', icon: <Sparkles className="w-5 h-5" />, path: '/teacher/lesson-plan' },
     { label: 'Curriculum Navigator', icon: <Brain className="w-5 h-5" />, path: '/teacher/curriculum' },
+    { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/teacher/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/teacher/change-password' },
   ],
   'student': [
@@ -112,6 +115,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Conferences', icon: <MessageSquare className="w-5 h-5" />, path: '/parent/conferences' },
     { label: 'AI Assistant', icon: <Bot className="w-5 h-5" />, path: '/parent/chatbot' },
     { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/parent/report-card' },
+    { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/parent/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/parent/change-password' },
   ],
 };
@@ -162,8 +166,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="p-4 flex flex-col h-[calc(100%-65px)]">
           <div className="flex items-center gap-3 mb-6 px-2 py-3 bg-gray-800/50 rounded-xl">
-            <div className="w-10 h-10 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold">
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
+            <div className="w-10 h-10 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden">
+              {user?.avatarUrl ? <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" /> : <>{user?.firstName?.[0]}{user?.lastName?.[0]}</>}
             </div>
             <div>
               <p className="text-sm font-medium">{user?.firstName} {user?.lastName}</p>

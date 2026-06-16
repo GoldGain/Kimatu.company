@@ -70,6 +70,9 @@ import TeacherChangePassword from '@/pages/dashboard/teacher/ChangePassword';
 import ParentChangePassword from '@/pages/dashboard/parent/ChangePassword';
 import TimetableView from '@/pages/dashboard/TimetableView';
 import TeacherCurriculumNavigator from '@/pages/dashboard/teacher/CurriculumNavigator';
+import TeacherProfile from '@/pages/dashboard/teacher/Profile';
+import SchoolAdminProfile from '@/pages/dashboard/school-admin/Profile';
+import ParentProfile from '@/pages/dashboard/parent/Profile';
 
 function LoadingSpinner() {
   return (
@@ -152,6 +155,7 @@ function AppRoutes() {
       <Route path="/school-admin/timetable/generate" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTimetableGenerate /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/assign" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignTeachers /></ProtectedRoute>} />
       <Route path="/school-admin/change-password" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminChangePassword /></ProtectedRoute>} />
+      <Route path="/school-admin/profile" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminProfile /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/view" element={<ProtectedRoute allowedRoles={['school_admin']}><TimetableView /></ProtectedRoute>} />
 
       {/* Teacher routes */}
@@ -166,6 +170,7 @@ function AppRoutes() {
       <Route path="/teacher/timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TimetableView /></ProtectedRoute>} />
       <Route path="/teacher/exam-timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherExamTimetable /></ProtectedRoute>} />
       <Route path="/teacher/change-password" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherChangePassword /></ProtectedRoute>} />
+      <Route path="/teacher/profile" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherProfile /></ProtectedRoute>} />
       <Route path="/teacher/curriculum" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCurriculumNavigator /></ProtectedRoute>} />
 
       {/* Student routes */}
@@ -186,6 +191,7 @@ function AppRoutes() {
       <Route path="/parent/chatbot" element={<ProtectedRoute allowedRoles={['parent']}><ParentChatbot /></ProtectedRoute>} />
       <Route path="/parent/report-card" element={<ProtectedRoute allowedRoles={['parent']}><ParentChildReportCard /></ProtectedRoute>} />
       <Route path="/parent/change-password" element={<ProtectedRoute allowedRoles={['parent']}><ParentChangePassword /></ProtectedRoute>} />
+      <Route path="/parent/profile" element={<ProtectedRoute allowedRoles={['parent']}><ParentProfile /></ProtectedRoute>} />
       <Route path="/parent/timetable" element={<ProtectedRoute allowedRoles={['parent']}><TimetableView /></ProtectedRoute>} />
 
       {/* General routes */}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useClasses } from '@/hooks/useSupabaseData';
-import { Plus, Loader2, School, Search } from 'lucide-react';
+import { Plus, Loader2, School, Search, ArrowRight, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 type CurriculumType = 'CBE' | '844';
@@ -79,6 +79,27 @@ export default function SchoolAdminClasses() {
     acc[key].push(c);
     return acc;
   }, {} as Record<string, any[]>);
+
+  const [bulkPromoteClass, setBulkPromoteClass] = useState<any | null>(null);
+  const [bulkDestClassId, setBulkDestClassId] = useState('');
+  const [bulkPromoting, setBulkPromoting] = useState(false);
+
+  const handleBulkPromote = async () => {
+    if (!bulkPromoteClass || !bulkDestClassId) { toast.error('Please select a destination class'); return; }
+    setBulkPromoting(true);
+    try {
+      const { data: students, error: fetchErr } = await supabaseUntyped.from('students').select('id').eq('class_id', bulkPromoteClass.id).eq('is_active', true);
+      if (fetchErr) throw fetchErr;
+      if (!students || students.length === 0) { toast.error('No active students in this class'); setBulkPromoting(false); return; }
+      const { error: updateErr } = await supabaseUntyped.from('students').update({ class_id: bulkDestClassId, previous_class_id: bulkPromoteClass.id, promoted_at: new Date().toISOString() }).eq('class_id', bulkPromoteClass.id).eq('is_active', true);
+      if (updateErr) throw updateErr;
+      toast.success(`${students.length} students promoted successfully!`);
+      setBulkPromoteClass(null);
+      setBulkDestClassId('');
+      refetch();
+    } catch (err: any) { toast.error('Bulk promotion failed: ' + err.message); }
+    setBulkPromoting(false);
+  };
 
   const getLevelBadgeColor = (gradeLevel: number) => {
     if (gradeLevel >= 1 && gradeLevel <= 6) return 'bg-green-100 text-green-700';
@@ -216,6 +237,31 @@ export default function SchoolAdminClasses() {
         </div>
       )}
 
+      {/* Bulk Promote Modal */}
+      {bulkPromoteClass && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-lg">
+            <h2 className="text-lg font-semibold mb-1">Bulk Promote Class</h2>
+            <p className="text-sm text-gray-500 mb-4">Promote ALL active students from <strong>{bulkPromoteClass.name}</strong> to a new class.</p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">Destination Class</label>
+              <select value={bulkDestClassId} onChange={e => setBulkDestClassId(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="">-- Select Destination Class --</option>
+                {classes.filter(c => c.id !== bulkPromoteClass.id).sort((a,b) => (a.level||0)-(b.level||0)).map(c => (
+                  <option key={c.id} value={c.id}>{c.name} {c.stream || ''} {c.level ? `(Level ${c.level})` : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setBulkPromoteClass(null)} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleBulkPromote} disabled={bulkPromoting || !bulkDestClassId} className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {bulkPromoting ? <><Loader2 className="w-4 h-4 animate-spin" /> Promoting...</> : <><ArrowRight className="w-4 h-4" /> Promote All Students</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Classes List */}
       {loading ? (
         <div className="text-center py-8 text-sm text-[#666666]">Loading classes...</div>
@@ -249,10 +295,13 @@ export default function SchoolAdminClasses() {
                     </div>
                     <div className="text-xs text-[#666666] space-y-0.5">
                       <div>Grade {gradeLevel} · Capacity: {c.capacity}</div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-between gap-1 mt-2">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${curriculum === 'CBE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                           {curriculum === '844' ? '8-4-4' : curriculum}
                         </span>
+                        <button onClick={() => { setBulkPromoteClass(c); setBulkDestClassId(''); }} className="flex items-center gap-1 text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors font-medium">
+                          <Users className="w-3 h-3" /> Bulk Promote
+                        </button>
                       </div>
                     </div>
                   </div>

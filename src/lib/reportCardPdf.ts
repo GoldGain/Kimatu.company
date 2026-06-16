@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { getSchoolLevelBand, calculateCompetencyGrade, calculate844Grade } from './grading';
-import type { SchoolLevelBand } from './grading';
+import { getSchoolLevelBand, calculateCompetencyGrade, calculate844Grade, generateSubjectSpecificComment } from './grading';
+import type { SchoolLevelBand, SubjectResult } from './grading';
 
 // ── Shared PDF Helper Functions for Report Cards ─────────────────────────────
 
@@ -65,12 +65,11 @@ export function formatPosition(position: number | null, totalStudents: number): 
   return `${ordinal(position)} out of ${totalStudents || '—'}`;
 }
 
-// ── AI Comment Generator with Rich Vocabulary ────────────────────────────────
+// ── Legacy AI Comment Generator (kept for backward compatibility) ─────────────
 const COMMENT_TEMPLATES = {
   top1: [
     "Exceptional performance! You ranked 1st out of {total} students. Your mastery of {bestSubject} is remarkable, and your dedication sets a brilliant example. With your {grade} grade ({descriptor}), you demonstrate that excellence is a habit. Continue being the trailblazer you are!",
     "Magnificent work! Securing 1st position among {total} students requires extraordinary commitment. Your {grade} grade in {bestSubject} reflects exceptional understanding. You are an inspiration to your peers — keep shining brilliantly!",
-    "Absolutely stellar! Ranking 1st out of {total} is no small feat. Your command of {bestSubject} is truly commendable, earning you a well-deserved {grade} grade ({descriptor}). The sky is your starting point!",
   ],
   top2: [
     "Outstanding achievement! You claimed 2nd place among {total} students. Your proficiency in {bestSubject} is impressive, earning a {grade} grade ({descriptor}). A little more effort and the top spot is yours!",
@@ -135,15 +134,28 @@ export function generateUniqueAIComment(
   position: number | null,
   totalStudents: number,
   isNew: boolean,
-  classData?: any
+  classData?: any,
+  allSubjectResults?: SubjectResult[]
 ): string {
+  // If we have full subject data, use the rich subject-specific generator
+  if (allSubjectResults && allSubjectResults.length > 0) {
+    return generateSubjectSpecificComment(
+      studentName,
+      allSubjectResults,
+      avgPct,
+      position,
+      totalStudents,
+      classData
+    );
+  }
+
+  // Fallback to template-based generator
   const band = getSchoolLevelBand(classData);
   const is844 = band === '844';
   const grade = is844 ? calculate844Grade(avgPct) : calculateCompetencyGrade(avgPct, band);
-  const gradeLabel = is844 ? grade.grade : grade.subLevel;
+  const gradeLabel = is844 ? (grade as any).grade : (grade as any).subLevel;
   const descriptor = grade.descriptor;
 
-  // Create a unique seed for this student + their specific metrics
   const seed = `${studentName}-${avgPct.toFixed(1)}-${position}-${totalStudents}-${deviation || 0}`;
   const rand = seededRandom(seed);
 
@@ -175,7 +187,6 @@ export function generateUniqueAIComment(
     templates = COMMENT_TEMPLATES.droppedSevere;
   }
 
-  // Pick template deterministically but uniquely per student
   const template = templates[Math.floor(rand * templates.length)];
 
   return template
@@ -216,10 +227,10 @@ export function drawTrendGraph(
   doc.rect(x, y, width, height, 'S');
 
   // Title
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(60, 60, 70);
-  doc.text('PERFORMANCE TREND', x + 5, y + 8);
+  doc.text('PERFORMANCE TREND', x + 5, y + 7);
 
   const maxAvg = Math.max(...trendData.map(d => d.avg), 100);
   const minAvg = Math.min(...trendData.map(d => d.avg), 0);
@@ -232,12 +243,7 @@ export function drawTrendGraph(
     doc.line(graphX, gridY, graphX + graphW, gridY);
   }
 
-  // Draw line
   const stepX = graphW / Math.max(trendData.length - 1, 1);
-
-  // Area fill (light gradient effect)
-  doc.setFillColor(37, 99, 235);
-  doc.setGState(new (doc as any).GState({ opacity: 0.1 }));
 
   const points = trendData.map((d, i) => ({
     x: graphX + stepX * i,
@@ -254,25 +260,22 @@ export function drawTrendGraph(
   }
 
   // Draw points
-  points.forEach((p, i) => {
-    // Outer circle
+  points.forEach((p) => {
     doc.setFillColor(37, 99, 235);
-    doc.circle(p.x, p.y, 3, 'F');
-    // Inner white
+    doc.circle(p.x, p.y, 2.5, 'F');
     doc.setFillColor(255, 255, 255);
-    doc.circle(p.x, p.y, 1.5, 'F');
+    doc.circle(p.x, p.y, 1.2, 'F');
 
-    // Term label
-    doc.setFontSize(6);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
-    doc.text(p.term, p.x, graphY + graphH + 8, { align: 'center' });
+    const termLabel = p.term.length > 10 ? p.term.substring(0, 10) : p.term;
+    doc.text(termLabel, p.x, graphY + graphH + 7, { align: 'center' });
 
-    // Average label above point
-    doc.setFontSize(6);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(37, 99, 235);
-    doc.text(`${p.avg.toFixed(0)}%`, p.x, p.y - 6, { align: 'center' });
+    doc.text(`${p.avg.toFixed(0)}%`, p.x, p.y - 5, { align: 'center' });
   });
 
   doc.setLineWidth(0.2);
@@ -290,7 +293,6 @@ export async function addLogoToPDF(
 ): Promise<boolean> {
   if (!logoUrl) return false;
   try {
-    // Check if it's a data URL or remote URL
     if (logoUrl.startsWith('data:')) {
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
@@ -302,9 +304,55 @@ export async function addLogoToPDF(
       doc.addImage(logoUrl, format, x, y, maxWidth, maxHeight);
       return true;
     }
-    // For remote URLs, we'll skip adding to avoid CORS issues in PDF generation
-    // The school name will be displayed as text fallback
+    // For remote URLs, fetch and convert to data URL
+    try {
+      const response = await fetch(logoUrl);
+      const blob = await response.blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const format = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+      doc.addImage(dataUrl, format, x, y, maxWidth, maxHeight);
+      return true;
+    } catch {
+      return false;
+    }
+  } catch {
     return false;
+  }
+}
+
+// ── Add Student Photo to PDF ─────────────────────────────────────────────────
+export async function addStudentPhotoToPDF(
+  doc: jsPDF,
+  photoUrl: string | null | undefined,
+  x: number,
+  y: number,
+  size: number
+): Promise<boolean> {
+  if (!photoUrl) return false;
+  try {
+    let dataUrl = photoUrl;
+    if (!photoUrl.startsWith('data:')) {
+      const response = await fetch(photoUrl);
+      const blob = await response.blob();
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+    const format = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+    // Draw circle clip for photo
+    doc.setDrawColor(37, 99, 235);
+    doc.setLineWidth(0.5);
+    doc.rect(x, y, size, size, 'S');
+    doc.addImage(dataUrl, format, x, y, size, size);
+    return true;
   } catch {
     return false;
   }
@@ -320,68 +368,68 @@ export function addSignaturesToPDF(
   const hasPrincipalSig = signatures.principal_signature_url && signatures.principal_signature_url.startsWith('data:');
   const hasTeacherSig = signatures.teacher_signature_url && signatures.teacher_signature_url.startsWith('data:');
 
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(60, 60, 70);
 
   if (hasTeacherSig || hasPrincipalSig) {
-    // Digital signatures section
     doc.text('DIGITAL SIGNATURES', 14, y);
 
-    // Teacher signature
     if (hasTeacherSig) {
       try {
-        doc.addImage(signatures.teacher_signature_url!, 'PNG', 14, y + 5, 50, 20);
+        doc.addImage(signatures.teacher_signature_url!, 'PNG', 14, y + 3, 45, 16);
       } catch {
-        // Fallback to line
         doc.setDrawColor(150, 150, 155);
-        doc.line(14, y + 20, 64, y + 20);
+        doc.line(14, y + 16, 60, y + 16);
       }
     } else {
       doc.setDrawColor(150, 150, 155);
-      doc.line(14, y + 20, 64, y + 20);
+      doc.line(14, y + 16, 60, y + 16);
     }
-    doc.setFontSize(7);
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
-    doc.text('Class Teacher Signature', 14, y + 26);
+    doc.text('Class Teacher Signature', 14, y + 22);
 
-    // Principal signature
     if (hasPrincipalSig) {
       try {
-        doc.addImage(signatures.principal_signature_url!, 'PNG', 120, y + 5, 50, 20);
+        doc.addImage(signatures.principal_signature_url!, 'PNG', 120, y + 3, 45, 16);
       } catch {
         doc.setDrawColor(150, 150, 155);
-        doc.line(120, y + 20, 170, y + 20);
+        doc.line(120, y + 16, 165, y + 16);
       }
     } else {
       doc.setDrawColor(150, 150, 155);
-      doc.line(120, y + 20, 170, y + 20);
+      doc.line(120, y + 16, 165, y + 16);
     }
-    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 26);
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 110);
+    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 22);
   } else {
-    // Traditional signature lines
     doc.setDrawColor(150, 150, 155);
-    doc.line(14, y + 15, 80, y + 15);
-    doc.line(120, y + 15, 186, y + 15);
-    doc.setFontSize(8);
+    doc.line(14, y + 12, 75, y + 12);
+    doc.line(120, y + 12, 181, y + 12);
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(80, 80, 85);
-    doc.text('Class Teacher Signature', 14, y + 22);
-    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 22);
+    doc.text('Class Teacher Signature', 14, y + 18);
+    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 18);
   }
 
   // Date
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y + 32);
+  doc.setFontSize(7);
+  doc.setTextColor(80, 80, 85);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y + 27);
 
   // School stamp area
   doc.setDrawColor(180, 180, 185);
   doc.setLineDashPattern([2, 2], 0);
-  doc.rect(120, y + 5, 40, 25);
+  doc.rect(120, y + 3, 35, 22);
   doc.setLineDashPattern([], 0);
-  doc.setFontSize(6);
+  doc.setFontSize(5.5);
   doc.setTextColor(150, 150, 155);
-  doc.text('OFFICIAL STAMP', 140, y + 18, { align: 'center' });
+  doc.text('OFFICIAL STAMP', 137.5, y + 15, { align: 'center' });
 }
 
 // ── Draw Header with Logo ────────────────────────────────────────────────────
@@ -392,26 +440,26 @@ export async function drawReportHeader(
 ) {
   // Blue header background
   doc.setFillColor(37, 99, 235);
-  doc.rect(0, 0, 210, 38, 'F');
+  doc.rect(0, 0, 210, 32, 'F');
 
   // Try to add logo
   const logoAdded = schoolInfo.logo_url
-    ? await addLogoToPDF(doc, schoolInfo.logo_url, 14, 4, 22, 22)
+    ? await addLogoToPDF(doc, schoolInfo.logo_url, 12, 3, 20, 20)
     : false;
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(logoAdded ? 14 : 16);
+  doc.setFontSize(logoAdded ? 13 : 15);
   doc.setFont('helvetica', 'bold');
-  doc.text(schoolInfo.name || 'School', logoAdded ? 40 : 105, logoAdded ? 14 : 13, { align: logoAdded ? 'left' : 'center' });
+  doc.text(schoolInfo.name || 'School', logoAdded ? 36 : 105, logoAdded ? 12 : 11, { align: logoAdded ? 'left' : 'center' });
 
-  doc.setFontSize(10);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(subtitle, 105, 24, { align: 'center' });
+  doc.text(subtitle, 105, logoAdded ? 20 : 20, { align: 'center' });
 
   if (schoolInfo.motto) {
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'italic');
-    doc.text(`"${schoolInfo.motto}"`, 105, 32, { align: 'center' });
+    doc.text(`"${schoolInfo.motto}"`, 105, 27, { align: 'center' });
   }
 }
 
@@ -424,20 +472,20 @@ export function drawStudentInfo(
   termName: string,
   academicYear: string,
   position: string,
-  y: number = 45
+  y: number = 38
 ) {
   doc.setTextColor(0, 0, 0);
-  doc.setFontSize(10);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.text(`Student: ${studentName}`, 14, y);
-  doc.text(`Adm No: ${admissionNo}`, 14, y + 7);
-  doc.text(`Class: ${className}`, 14, y + 14);
+  doc.text(`Adm No: ${admissionNo}`, 14, y + 6);
+  doc.text(`Class: ${className}`, 14, y + 12);
   doc.text(`Term: ${termName} ${academicYear}`, 120, y);
-  doc.text(`Position: ${position}`, 120, y + 7);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 14);
+  doc.text(`Position: ${position}`, 120, y + 6);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 12);
 
   doc.setDrawColor(37, 99, 235);
-  doc.line(14, y + 20, 196, y + 20);
+  doc.line(14, y + 17, 196, y + 17);
 }
 
 // ── Draw Results Table ───────────────────────────────────────────────────────
@@ -451,31 +499,34 @@ export function drawResultsTable(
   const isPrimary = getSchoolLevelBand(classData) === 'primary';
 
   const tableHead = is844
-    ? ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', '8-4-4 Grade', 'Points', 'Descriptor']
-    : ['#', 'Subject', 'Marks', 'Out Of', 'Percentage', 'CBE Grade', 'Points', 'Descriptor'];
+    ? ['#', 'Subject', 'Marks', 'Out Of', '%', '8-4-4 Grade', 'Points']
+    : isPrimary
+    ? ['#', 'Subject', 'Marks', 'Out Of', '%', 'CBE Grade']
+    : ['#', 'Subject', 'Marks', 'Out Of', '%', 'CBE Grade', 'Points'];
 
   const tableBody = results.map((r, i) => {
     const pct = getPercentage(r);
     const grading = gradeFromPercentage(pct, classData);
-    return [
+    const row: any[] = [
       i + 1,
       r.subjects?.name || 'N/A',
       String(r.marks || '0'),
       String(r.out_of || 100),
       `${pct}%`,
       grading.grade,
-      grading.points ?? '—',
-      grading.descriptor,
     ];
+    if (!isPrimary) row.push(grading.points ?? '—');
+    return row;
   });
 
   autoTable(doc, {
     startY,
     head: [tableHead],
     body: tableBody,
-    styles: { fontSize: 9 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+    styles: { fontSize: 8, cellPadding: 1.5 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
     alternateRowStyles: { fillColor: [245, 247, 255] },
+    margin: { left: 14, right: 14 },
   });
 
   return (doc as any).lastAutoTable.finalY;
@@ -497,20 +548,20 @@ export function drawSummaryBox(
   const overallGrading = gradeFromPercentage(avgPercentage, classData);
 
   doc.setFillColor(245, 247, 255);
-  doc.rect(14, startY, 182, 28, 'F');
-  doc.setFontSize(9);
+  doc.rect(14, startY, 182, 22, 'F');
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
-  doc.text(`Total Subjects: ${results.length}`, 20, startY + 8);
-  doc.text(`Total Marks: ${totalMarks}`, 80, startY + 8);
-  doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 150, startY + 8);
-  doc.text(`Class Position: ${position}`, 20, startY + 18);
-  doc.text(`Overall Grade: ${overallGrading.grade}`, 80, startY + 18);
-  if (totalPoints !== null) {
-    doc.text(`Total Points: ${totalPoints}`, 150, startY + 18);
+  doc.text(`Subjects: ${results.length}`, 20, startY + 7);
+  doc.text(`Total Marks: ${totalMarks}`, 65, startY + 7);
+  doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 130, startY + 7);
+  doc.text(`Position: ${position}`, 20, startY + 15);
+  doc.text(`Grade: ${overallGrading.grade}`, 65, startY + 15);
+  if (!isPrimary && totalPoints !== null) {
+    doc.text(`Total Points: ${totalPoints}`, 130, startY + 15);
   }
 
-  return startY + 32;
+  return startY + 26;
 }
 
 // ── Draw Deviation ───────────────────────────────────────────────────────────
@@ -526,17 +577,17 @@ export function drawDeviation(
     if (deviation >= 0) doc.setTextColor(22, 163, 74);
     else doc.setTextColor(220, 38, 38);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.text(`${arrow} ${sign}${deviation.toFixed(1)}% vs previous term (Prev: ${previousAvg?.toFixed(1)}%)`, 14, startY);
     doc.setTextColor(0, 0, 0);
   } else {
     doc.setTextColor(100, 100, 100);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.text('First Term — No previous data for comparison', 14, startY);
     doc.setTextColor(0, 0, 0);
   }
-  return startY + 10;
+  return startY + 8;
 }
 
 // ── Draw Achievements ────────────────────────────────────────────────────────
@@ -548,18 +599,19 @@ export function drawAchievements(
   if (bestSubjects.length === 0) return startY;
 
   doc.setFillColor(254, 249, 195);
-  doc.rect(14, startY, 182, 6 + bestSubjects.length * 6, 'F');
-  doc.setFontSize(8);
+  doc.rect(14, startY, 182, 5 + bestSubjects.length * 5, 'F');
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(202, 138, 4);
-  doc.text('ACHIEVEMENT:', 18, startY + 5);
+  doc.text('ACHIEVEMENT:', 18, startY + 4);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(0, 0, 0);
   bestSubjects.forEach((b, bi) => {
     const pts = b.points !== null ? ` (${b.points} pts)` : '';
-    doc.text(`Best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, startY + 11 + bi * 6);
+    doc.setFontSize(7);
+    doc.text(`Best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, startY + 9 + bi * 5);
   });
-  return startY + 6 + bestSubjects.length * 6 + 8;
+  return startY + 5 + bestSubjects.length * 5 + 5;
 }
 
 // ── Draw AI Comment ──────────────────────────────────────────────────────────
@@ -568,15 +620,17 @@ export function drawAIComment(
   comment: string,
   startY: number
 ): number {
+  const commentLines = doc.splitTextToSize(comment, 168);
+  const boxHeight = Math.max(20, commentLines.length * 4.5 + 10);
+
   doc.setFillColor(254, 252, 232);
-  doc.rect(14, startY, 182, 28, 'F');
-  doc.setFontSize(9);
+  doc.rect(14, startY, 182, boxHeight, 'F');
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
-  doc.text("Class Teacher's Comment:", 18, startY + 7);
+  doc.text("Class Teacher's Comment:", 18, startY + 6);
   doc.setFont('helvetica', 'italic');
-  doc.setFontSize(8);
-  const commentLines = doc.splitTextToSize(comment, 170);
-  doc.text(commentLines, 18, startY + 14);
-  return startY + 36;
+  doc.setFontSize(7.5);
+  doc.text(commentLines, 18, startY + 12);
+  return startY + boxHeight + 4;
 }

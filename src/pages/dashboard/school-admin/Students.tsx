@@ -4,9 +4,11 @@ import { supabaseUntyped } from "@/lib/supabase/client";
 import { createScopedUser } from '@/lib/supabase/createUser';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStudents } from '@/hooks/useSupabaseData';
-import { Search, Plus, Loader2, Filter } from 'lucide-react';
+import { Search, Plus, Loader2, Filter, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
+import PromoteStudentModal from '@/components/PromoteStudentModal';
+import PhotoUpload from '@/components/PhotoUpload';
 
 export default function SchoolAdminStudents() {
   const { user } = useAuth();
@@ -172,6 +174,16 @@ export default function SchoolAdminStudents() {
     }
   };
 
+  const [promotingStudent, setPromotingStudent] = useState<any | null>(null);
+  const [photoStudent, setPhotoStudent] = useState<any | null>(null);
+
+  const handlePhotoSuccess = async (url: string, studentId: string) => {
+    await supabaseUntyped.from('students').update({ photo_url: url }).eq('id', studentId);
+    toast.success('Student photo updated!');
+    setPhotoStudent(null);
+    refetch();
+  };
+
   const filteredStudents = students.filter((s: any) => {
     const matchesSearch = 
       (s.first_name + ' ' + s.last_name).toLowerCase().includes(search.toLowerCase()) ||
@@ -260,10 +272,12 @@ export default function SchoolAdminStudents() {
           <table className="w-full text-left">
             <thead>
               <tr className="border-b bg-gray-50">
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Photo</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Admission</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Student</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Class</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Parent</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -274,6 +288,11 @@ export default function SchoolAdminStudents() {
               ) : (
                 filteredStudents.map((s: any) => (
                   <tr key={s.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
+                        {s.photo_url ? <img src={s.photo_url} alt="" className="w-full h-full object-cover" /> : <span className="text-xs font-bold text-gray-400">{(s.first_name?.[0] || '?').toUpperCase()}</span>}
+                      </div>
+                    </td>
                     <td className="px-6 py-4 text-sm font-medium">{s.admission_number}</td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium">{s.first_name} {s.last_name}</div>
@@ -284,6 +303,16 @@ export default function SchoolAdminStudents() {
                       <div className="text-sm">{s.parent_name || '-'}</div>
                       <div className="text-xs text-gray-500">{s.parent_email || s.parent_phone || '-'}</div>
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setPhotoStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors">
+                          <Camera className="w-3 h-3" /> Photo
+                        </button>
+                        <button onClick={() => setPromotingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors">
+                          Promote
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -291,6 +320,37 @@ export default function SchoolAdminStudents() {
           </table>
         </div>
       </div>
+      {/* Promote Student Modal */}
+      {promotingStudent && (
+        <PromoteStudentModal
+          student={promotingStudent}
+          classes={classes}
+          onClose={() => setPromotingStudent(null)}
+          onSuccess={() => { refetch(); setPromotingStudent(null); }}
+        />
+      )}
+
+      {/* Student Photo Modal */}
+      {photoStudent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
+            <h2 className="text-lg font-semibold mb-1">Student Photo</h2>
+            <p className="text-sm text-gray-500 mb-4">{photoStudent.first_name} {photoStudent.last_name} — {photoStudent.admission_number}</p>
+            <div className="flex flex-col items-center py-4">
+              <PhotoUpload
+                currentPhotoUrl={photoStudent.photo_url}
+                bucket="student-photos"
+                folder="students"
+                entityId={photoStudent.id}
+                onSuccess={(url) => handlePhotoSuccess(url, photoStudent.id)}
+                label="Student Photo"
+                size="lg"
+              />
+            </div>
+            <button onClick={() => setPhotoStudent(null)} className="w-full mt-3 px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50">Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
