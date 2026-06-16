@@ -5,9 +5,43 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit } from 'lucide-react';
+import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit, Plus, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateResultGrades, gradeDisplayLabel } from '@/lib/grading';
+import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand } from '@/lib/grading';
+
+// ─── Pre-populated subjects by curriculum level ───────────────────────────────
+
+const PRIMARY_SUBJECTS = [
+  'English', 'Kiswahili', 'Mathematics', 'Integrated Science', 'Social Studies',
+  'Creative Arts', 'Physical Education', 'Religious Education', 'Community Service Learning',
+];
+
+const JUNIOR_SUBJECTS = [
+  'English', 'Kiswahili', 'Mathematics', 'Integrated Science', 'Social Studies',
+  'Pre-Technical Studies', 'Business Studies', 'Agriculture', 'Creative Arts',
+  'Physical Education', 'Religious Education', 'Community Service Learning',
+];
+
+const SENIOR_SUBJECTS = [
+  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
+  'History', 'Geography', 'Business Studies', 'Agriculture', 'Computer Studies',
+  'Home Science', 'Physical Education', 'Religious Education', 'Community Service Learning',
+];
+
+const SUBJECTS_844 = [
+  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
+  'History', 'Geography', 'CRE', 'IRE', 'HRE', 'Business Studies',
+  'Agriculture', 'Computer Studies',
+];
+
+function getPresetSubjectsForBand(band: string): string[] {
+  if (band === '844') return SUBJECTS_844;
+  if (band === 'senior') return SENIOR_SUBJECTS;
+  if (band === 'junior') return JUNIOR_SUBJECTS;
+  return PRIMARY_SUBJECTS; // primary (default)
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ProcessedRow {
   student_id: string;
@@ -39,6 +73,12 @@ export default function TeacherResultsUpload() {
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('');
   const [outOf, setOutOf] = useState(100);
+
+  // Subject selection: 'db' = from DB, 'preset' = from pre-populated list, 'manual' = typed
+  const [subjectMode, setSubjectMode] = useState<'db' | 'preset' | 'manual'>('preset');
+  const [manualSubjectName, setManualSubjectName] = useState('');
+  const [savingManualSubject, setSavingManualSubject] = useState(false);
+
   // CSV mode
   const [csvData, setCsvData] = useState<ProcessedRow[]>([]);
   const [preview, setPreview] = useState(false);
@@ -93,7 +133,6 @@ export default function TeacherResultsUpload() {
         .order('first_name');
       const studs = data || [];
       setStudents(studs);
-      // Initialize manual rows
       setManualRows(studs.map((s: any) => ({
         student_id: s.id,
         name: `${s.first_name} ${s.last_name}`,
@@ -104,9 +143,85 @@ export default function TeacherResultsUpload() {
       setManualPreview([]);
     };
     fetchStudents();
+    // Reset subject selection when class changes
+    setSelectedSubject('');
+    setManualSubjectName('');
   }, [selectedClass]);
 
-  // ── Manual Entry: update a row's marks ──────────────────────────────────────
+  // ── Derived: current class data & band ──────────────────────────────────────
+  const currentClassData = classes.find((c: any) => c.id === selectedClass);
+  const currentBand = getSchoolLevelBand(currentClassData);
+  const currentGradeLabel = gradeDisplayLabel(currentBand);
+  const presetSubjects = getPresetSubjectsForBand(currentBand);
+
+  // DB subjects filtered to match the class curriculum
+  const dbSubjectsFiltered = subjects.filter((s: any) => {
+    if (!currentClassData) return true;
+    if (currentBand === '844') return s.curriculum === '844';
+    return s.curriculum === 'CBE';
+  });
+
+  // ── Resolve the effective subject name & id for submission ───────────────────
+  const getEffectiveSubjectId = () => {
+    if (subjectMode === 'db') return selectedSubject;
+    return selectedSubject; // preset also stores the DB id after save
+  };
+
+  // Save a manually-typed subject to DB and select it
+  const saveManualSubject = async () => {
+    if (!manualSubjectName.trim()) { toast.error('Enter a subject name'); return; }
+    setSavingManualSubject(true);
+    // Check if already exists
+    const existing = subjects.find(s => s.name.toLowerCase() === manualSubjectName.trim().toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
+    if (existing) {
+      setSelectedSubject(existing.id);
+      toast.info(`"${existing.name}" already exists — selected!`);
+      setSavingManualSubject(false);
+      return;
+    }
+    const { data, error } = await supabaseUntyped.from('subjects').insert([{
+      school_id: user?.schoolId,
+      name: manualSubjectName.trim(),
+      curriculum: currentBand === '844' ? '844' : 'CBE',
+      class_levels: [],
+    }]).select('*').single();
+    if (error) {
+      toast.error('Failed to save subject: ' + error.message);
+    } else {
+      toast.success(`Subject "${data.name}" saved and selected!`);
+      setSubjects(prev => [...prev, data]);
+      setSelectedSubject(data.id);
+      setManualSubjectName('');
+      setSubjectMode('preset');
+    }
+    setSavingManualSubject(false);
+  };
+
+  // When a preset subject name is selected, find or create its DB record
+  const handlePresetSubjectSelect = async (name: string) => {
+    if (!name) { setSelectedSubject(''); return; }
+    // Try to find in DB
+    const existing = subjects.find(s => s.name.toLowerCase() === name.toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
+    if (existing) {
+      setSelectedSubject(existing.id);
+      return;
+    }
+    // Auto-create in DB so results can be linked
+    const { data, error } = await supabaseUntyped.from('subjects').insert([{
+      school_id: user?.schoolId,
+      name: name.trim(),
+      curriculum: currentBand === '844' ? '844' : 'CBE',
+      class_levels: [],
+    }]).select('*').single();
+    if (error) {
+      toast.error('Could not auto-create subject: ' + error.message);
+    } else {
+      setSubjects(prev => [...prev, data]);
+      setSelectedSubject(data.id);
+    }
+  };
+
+  // ── Manual Entry helpers ─────────────────────────────────────────────────────
   const updateManualMark = (idx: number, value: string) => {
     setManualRows(prev => {
       const updated = [...prev];
@@ -116,15 +231,13 @@ export default function TeacherResultsUpload() {
     setManualPreviewReady(false);
   };
 
-  // ── Manual Entry: calculate grades and preview ───────────────────────────────
   const calculateManualGrades = () => {
     const filled = manualRows.filter(r => r.marks !== '' && !isNaN(parseFloat(r.marks)));
     if (filled.length === 0) { toast.error('Please enter marks for at least one student'); return; }
-    const selectedClassData = classes.find((c: any) => c.id === selectedClass);
     const processed: ProcessedRow[] = filled.map(r => {
       const marks = parseFloat(r.marks);
       const percentage = Math.round((marks / outOf) * 100);
-      const grades = calculateResultGrades(percentage, selectedClassData);
+      const grades = calculateResultGrades(percentage, currentClassData);
       return {
         student_id: r.student_id,
         name: r.name,
@@ -143,7 +256,10 @@ export default function TeacherResultsUpload() {
     toast.success(`Grades calculated for ${sorted.length} students!`);
   };
 
-  // ── Download manual results as PDF ──────────────────────────────────────────
+  // ── Download helpers ─────────────────────────────────────────────────────────
+  const getMainGrade = (row: ProcessedRow) => currentBand === '844' ? row.grade844.grade : row.cbcGrade.subLevel;
+  const getMainPoints = (row: ProcessedRow) => currentBand === '844' ? row.grade844.points : row.cbcGrade.points;
+
   const downloadManualPDF = () => {
     if (!manualPreview.length) return;
     const doc = new jsPDF();
@@ -168,7 +284,6 @@ export default function TeacherResultsUpload() {
     doc.save(`results_${className}_${subjectName}.pdf`);
   };
 
-  // ── Download manual results as Excel ────────────────────────────────────────
   const downloadManualExcel = () => {
     if (!manualPreview.length) return;
     const subjectName = subjects.find(s => s.id === selectedSubject)?.name || 'Subject';
@@ -189,7 +304,7 @@ export default function TeacherResultsUpload() {
     XLSX.writeFile(wb, `results_${className}_${subjectName}.xlsx`);
   };
 
-  // ── Submit results (shared for both manual and CSV) ──────────────────────────
+  // ── Submit results ───────────────────────────────────────────────────────────
   const handleSubmit = async (dataToSubmit: ProcessedRow[]) => {
     if (!selectedClass || !selectedSubject || !selectedTerm) {
       toast.error('Please select class, subject, and term');
@@ -200,7 +315,6 @@ export default function TeacherResultsUpload() {
     try {
       const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
       const teacherId = teacherData?.id ?? '';
-      const selectedClassData = classes.find((c: any) => c.id === selectedClass);
       const records = dataToSubmit.map((row) => ({
         school_id: user?.schoolId ?? '',
         student_id: row.student_id,
@@ -209,7 +323,7 @@ export default function TeacherResultsUpload() {
         teacher_id: teacherId,
         term_id: selectedTerm,
         academic_year: new Date().getFullYear().toString(),
-        curriculum: selectedClassData?.curriculum || 'CBE',
+        curriculum: currentClassData?.curriculum || 'CBE',
         marks: row.marks,
         out_of: row.out_of,
         percentage: row.percentage,
@@ -308,12 +422,11 @@ export default function TeacherResultsUpload() {
       complete: (results) => {
         const valid = (results.data as any[]).filter((row: any) => row.student_id && row.marks !== '');
         if (!valid.length) { setError('No valid rows found. Ensure marks column is filled.'); return; }
-        const selectedClassData = classes.find((c: any) => c.id === selectedClass);
         const processed: ProcessedRow[] = valid.map((row: any) => {
           const marks = parseFloat(row.marks) || 0;
           const rowOutOf = parseFloat(row.out_of) || outOf;
           const percentage = Math.round((marks / rowOutOf) * 100);
-          const grades = calculateResultGrades(percentage, selectedClassData);
+          const grades = calculateResultGrades(percentage, currentClassData);
           return {
             student_id: row.student_id,
             name: row.name || '',
@@ -382,11 +495,8 @@ export default function TeacherResultsUpload() {
     return 'bg-red-100 text-red-700';
   };
 
-  const currentClassData = classes.find((c: any) => c.id === selectedClass);
-  const currentBand = calculateResultGrades(0, currentClassData).band;
-  const currentGradeLabel = gradeDisplayLabel(currentBand);
-  const getMainGrade = (row: ProcessedRow) => currentBand === '844' ? row.grade844.grade : row.cbcGrade.subLevel;
-  const getMainPoints = (row: ProcessedRow) => currentBand === '844' ? row.grade844.points : row.cbcGrade.points;
+  // Band label for display
+  const bandLabel = currentBand === '844' ? '8-4-4 (Form 3–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : 'Primary CBE (Gr 1–6)';
 
   return (
     <div className="space-y-6">
@@ -414,24 +524,122 @@ export default function TeacherResultsUpload() {
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Subject &amp; Term</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white">
+          {/* Class selector */}
+          <select
+            value={selectedClass}
+            onChange={e => setSelectedClass(e.target.value)}
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+          >
             <option value="">Select Class</option>
-            {classes.map((c: any) => <option key={c.id} value={c.id}>{c.name} {c.stream}</option>)}
+            {classes.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name}{c.stream ? ` (${c.stream})` : ''}</option>
+            ))}
           </select>
-          <select value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white">
-            <option value="">Select Subject</option>
-            {subjects.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white">
+
+          {/* Subject selector — smart, level-aware */}
+          <div className="space-y-1">
+            {selectedClass && (
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">{bandLabel}</span>
+              </div>
+            )}
+            {subjectMode !== 'manual' ? (
+              <div className="flex gap-2">
+                <select
+                  value={selectedSubject ? (subjects.find(s => s.id === selectedSubject)?.name || '') : ''}
+                  onChange={e => handlePresetSubjectSelect(e.target.value)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+                  disabled={!selectedClass}
+                >
+                  <option value="">Select Subject</option>
+                  {/* Pre-populated subjects for this level */}
+                  {selectedClass && (
+                    <optgroup label={`Standard ${bandLabel} Subjects`}>
+                      {presetSubjects.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {/* DB subjects already added by admin */}
+                  {dbSubjectsFiltered.length > 0 && (
+                    <optgroup label="Other School Subjects">
+                      {dbSubjectsFiltered
+                        .filter(s => !presetSubjects.includes(s.name))
+                        .map((s: any) => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                    </optgroup>
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setSubjectMode('manual')}
+                  title="Add subject manually"
+                  className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Other
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Type subject name…"
+                  value={manualSubjectName}
+                  onChange={e => setManualSubjectName(e.target.value)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveManualSubject(); } }}
+                />
+                <button
+                  type="button"
+                  onClick={saveManualSubject}
+                  disabled={savingManualSubject}
+                  className="flex items-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-medium hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {savingManualSubject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSubjectMode('preset'); setManualSubjectName(''); }}
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {selectedSubject && subjectMode !== 'manual' && (
+              <p className="text-xs text-green-600">✓ {subjects.find(s => s.id === selectedSubject)?.name || ''} selected</p>
+            )}
+          </div>
+
+          {/* Term selector */}
+          <select
+            value={selectedTerm}
+            onChange={e => setSelectedTerm(e.target.value)}
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+          >
             <option value="">Select Term</option>
             {terms.map((t: any) => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
           </select>
+
+          {/* Out of */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">Out of (max marks)</label>
-            <input type="number" value={outOf} onChange={e => setOutOf(parseInt(e.target.value) || 100)} min={1} max={1000} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" placeholder="e.g. 30, 50, 100" />
+            <input
+              type="number"
+              value={outOf}
+              onChange={e => setOutOf(parseInt(e.target.value) || 100)}
+              min={1}
+              max={1000}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              placeholder="e.g. 30, 50, 100"
+            />
           </div>
         </div>
-        {students.length > 0 && <p className="text-xs text-green-600 mt-2">{students.length} students found in this class</p>}
+        {students.length > 0 && (
+          <p className="text-xs text-green-600 mt-2">{students.length} students found in this class</p>
+        )}
       </div>
 
       {/* Step 2: Choose Entry Method */}

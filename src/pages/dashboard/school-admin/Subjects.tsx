@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 
 type CurriculumType = 'CBE' | '844';
 
-const CATEGORIES = ['Languages', 'Mathematics', 'Sciences', 'Humanities', 'Technical', 'Creative'] as const;
+const CATEGORIES = ['Languages', 'Mathematics', 'Sciences', 'Humanities', 'Technical', 'Creative', 'Life Skills'] as const;
 type CategoryType = typeof CATEGORIES[number];
 
 interface Subject {
@@ -20,21 +20,57 @@ interface Subject {
   created_at?: string | null;
 }
 
-// Pre-populated subjects by curriculum
-const CBE_SUBJECTS: { name: string; category: CategoryType }[] = [
-  { name: 'English',               category: 'Languages'    },
-  { name: 'Kiswahili',             category: 'Languages'    },
-  { name: 'Mathematics',           category: 'Mathematics'  },
-  { name: 'Integrated Science',    category: 'Sciences'     },
-  { name: 'Social Studies',        category: 'Humanities'   },
-  { name: 'Pre-Technical Studies', category: 'Technical'    },
-  { name: 'Business Studies',      category: 'Humanities'   },
-  { name: 'Agriculture',           category: 'Sciences'     },
-  { name: 'Creative Arts',         category: 'Creative'     },
-  { name: 'Physical Education',    category: 'Creative'     },
-  { name: 'Religious Education',   category: 'Humanities'   },
+// ─── Pre-populated subjects by level ─────────────────────────────────────────
+
+/** PRIMARY (Grades 1–6) */
+const PRIMARY_SUBJECTS: { name: string; category: CategoryType }[] = [
+  { name: 'English',                       category: 'Languages'   },
+  { name: 'Kiswahili',                     category: 'Languages'   },
+  { name: 'Mathematics',                   category: 'Mathematics' },
+  { name: 'Integrated Science',            category: 'Sciences'    },
+  { name: 'Social Studies',                category: 'Humanities'  },
+  { name: 'Creative Arts',                 category: 'Creative'    },
+  { name: 'Physical Education',            category: 'Creative'    },
+  { name: 'Religious Education',           category: 'Humanities'  },
+  { name: 'Community Service Learning',    category: 'Life Skills' },
 ];
 
+/** JUNIOR (Grades 7–9) */
+const JUNIOR_SUBJECTS: { name: string; category: CategoryType }[] = [
+  { name: 'English',                       category: 'Languages'   },
+  { name: 'Kiswahili',                     category: 'Languages'   },
+  { name: 'Mathematics',                   category: 'Mathematics' },
+  { name: 'Integrated Science',            category: 'Sciences'    },
+  { name: 'Social Studies',                category: 'Humanities'  },
+  { name: 'Pre-Technical Studies',         category: 'Technical'   },
+  { name: 'Business Studies',              category: 'Humanities'  },
+  { name: 'Agriculture',                   category: 'Sciences'    },
+  { name: 'Creative Arts',                 category: 'Creative'    },
+  { name: 'Physical Education',            category: 'Creative'    },
+  { name: 'Religious Education',           category: 'Humanities'  },
+  { name: 'Community Service Learning',    category: 'Life Skills' },
+];
+
+/** SENIOR (Grades 10–12) */
+const SENIOR_SUBJECTS: { name: string; category: CategoryType }[] = [
+  { name: 'English',                       category: 'Languages'   },
+  { name: 'Kiswahili',                     category: 'Languages'   },
+  { name: 'Mathematics',                   category: 'Mathematics' },
+  { name: 'Biology',                       category: 'Sciences'    },
+  { name: 'Chemistry',                     category: 'Sciences'    },
+  { name: 'Physics',                       category: 'Sciences'    },
+  { name: 'History',                       category: 'Humanities'  },
+  { name: 'Geography',                     category: 'Humanities'  },
+  { name: 'Business Studies',              category: 'Humanities'  },
+  { name: 'Agriculture',                   category: 'Sciences'    },
+  { name: 'Computer Studies',              category: 'Technical'   },
+  { name: 'Home Science',                  category: 'Technical'   },
+  { name: 'Physical Education',            category: 'Creative'    },
+  { name: 'Religious Education',           category: 'Humanities'  },
+  { name: 'Community Service Learning',    category: 'Life Skills' },
+];
+
+/** 8-4-4 (Form 3–4) */
 const SUBJECTS_844: { name: string; category: CategoryType }[] = [
   { name: 'English',          category: 'Languages'   },
   { name: 'Kiswahili',        category: 'Languages'   },
@@ -45,9 +81,22 @@ const SUBJECTS_844: { name: string; category: CategoryType }[] = [
   { name: 'History',          category: 'Humanities'  },
   { name: 'Geography',        category: 'Humanities'  },
   { name: 'CRE',              category: 'Humanities'  },
+  { name: 'IRE',              category: 'Humanities'  },
+  { name: 'HRE',              category: 'Humanities'  },
   { name: 'Business Studies', category: 'Humanities'  },
   { name: 'Agriculture',      category: 'Sciences'    },
   { name: 'Computer Studies', category: 'Technical'   },
+];
+
+// Combined CBE list (union of Primary + Junior + Senior, deduplicated by name)
+const CBE_ALL_SUBJECTS: { name: string; category: CategoryType; level: string }[] = [
+  ...PRIMARY_SUBJECTS.map(s => ({ ...s, level: 'Primary (Gr 1–6)' })),
+  ...JUNIOR_SUBJECTS
+    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name))
+    .map(s => ({ ...s, level: 'Junior (Gr 7–9)' })),
+  ...SENIOR_SUBJECTS
+    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name) && !JUNIOR_SUBJECTS.find(j => j.name === s.name))
+    .map(s => ({ ...s, level: 'Senior (Gr 10–12)' })),
 ];
 
 const emptyForm = {
@@ -94,7 +143,7 @@ export default function SchoolAdminSubjects() {
 
   // Get pre-populated list for selected curriculum
   const getPresetList = (curriculum: CurriculumType) =>
-    curriculum === 'CBE' ? CBE_SUBJECTS : SUBJECTS_844;
+    curriculum === 'CBE' ? CBE_ALL_SUBJECTS : SUBJECTS_844.map(s => ({ ...s, level: '8-4-4' }));
 
   // Get subjects not yet added for the selected curriculum
   const getAvailablePresets = (curriculum: CurriculumType) => {
@@ -132,7 +181,8 @@ export default function SchoolAdminSubjects() {
   const handleQuickAdd = async () => {
     if (!selectedPreset) { toast.error('Select a subject from the list'); return; }
     const [curriculum, name] = selectedPreset.split('::');
-    const preset = getPresetList(curriculum as CurriculumType).find(p => p.name === name);
+    const list = curriculum === 'CBE' ? CBE_ALL_SUBJECTS : SUBJECTS_844.map(s => ({ ...s, level: '8-4-4' }));
+    const preset = list.find(p => p.name === name);
     if (!preset) return;
 
     setAdding(true);
@@ -243,16 +293,20 @@ export default function SchoolAdminSubjects() {
           className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Add Subject
+          Add Subject Manually
         </button>
       </div>
 
       {/* Quick-Add from Pre-populated List */}
       <div className="bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-1">
           <Wand2 className="w-5 h-5 text-emerald-600" />
           <h3 className="font-semibold text-[#111111]">Quick Add from Standard Subjects</h3>
         </div>
+        <p className="text-xs text-gray-500 mb-3">
+          All official Kenyan curriculum subjects are listed below — Primary (Gr 1–6), Junior (Gr 7–9), Senior (Gr 10–12), and 8-4-4 (Form 3–4).
+          Community Service Learning (CSL) is included for all CBE levels.
+        </p>
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <select
             value={selectedPreset}
@@ -260,12 +314,28 @@ export default function SchoolAdminSubjects() {
             className={`flex-1 ${inputClass}`}
           >
             <option value="">— Select a subject to add —</option>
-            <optgroup label="CBE Subjects">
-              {getAvailablePresets('CBE').map(p => (
-                <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (CBE)</option>
-              ))}
+            <optgroup label="CBE Subjects (Primary Gr 1–6)">
+              {getAvailablePresets('CBE')
+                .filter(p => PRIMARY_SUBJECTS.find(s => s.name === p.name))
+                .map(p => (
+                  <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (Primary)</option>
+                ))}
             </optgroup>
-            <optgroup label="8-4-4 Subjects">
+            <optgroup label="CBE Subjects (Junior Gr 7–9)">
+              {getAvailablePresets('CBE')
+                .filter(p => JUNIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name))
+                .map(p => (
+                  <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (Junior)</option>
+                ))}
+            </optgroup>
+            <optgroup label="CBE Subjects (Senior Gr 10–12)">
+              {getAvailablePresets('CBE')
+                .filter(p => SENIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name) && !JUNIOR_SUBJECTS.find(s => s.name === p.name))
+                .map(p => (
+                  <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (Senior)</option>
+                ))}
+            </optgroup>
+            <optgroup label="8-4-4 Subjects (Form 3–4)">
               {getAvailablePresets('844').map(p => (
                 <option key={`844::${p.name}`} value={`844::${p.name}`}>{p.name} (8-4-4)</option>
               ))}
@@ -300,15 +370,16 @@ export default function SchoolAdminSubjects() {
         </div>
       </div>
 
-      {/* Add Subject Form (custom) */}
+      {/* Add Subject Form (manual / custom) */}
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-          <h3 className="text-lg font-semibold mb-4 text-[#111111]">Add Custom Subject</h3>
+          <h3 className="text-lg font-semibold mb-1 text-[#111111]">Add Custom Subject Manually</h3>
+          <p className="text-xs text-gray-500 mb-4">Use this to add subjects not in the standard list (e.g. French, Sign Language, Music).</p>
           <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Subject Name *</label>
               <input
-                placeholder="e.g. Mathematics"
+                placeholder="e.g. French"
                 value={formData.name}
                 onChange={e => setFormData({ ...formData, name: e.target.value })}
                 className={inputClass}
@@ -318,7 +389,7 @@ export default function SchoolAdminSubjects() {
             <div>
               <label className="block text-xs text-gray-500 mb-1">Subject Code</label>
               <input
-                placeholder="e.g. MATH101"
+                placeholder="e.g. FRE101"
                 value={formData.code}
                 onChange={e => setFormData({ ...formData, code: e.target.value })}
                 className={inputClass}
@@ -331,8 +402,8 @@ export default function SchoolAdminSubjects() {
                 onChange={e => setFormData({ ...formData, curriculum: e.target.value as CurriculumType })}
                 className={inputClass}
               >
-                <option value="CBE">CBE</option>
-                <option value="844">8-4-4</option>
+                <option value="CBE">CBE (Grades 1–12)</option>
+                <option value="844">8-4-4 (Form 3–4)</option>
               </select>
             </div>
             <div>
@@ -374,86 +445,53 @@ export default function SchoolAdminSubjects() {
           Loading subjects...
         </div>
       ) : subjects.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] text-center">
+        <div className="bg-white rounded-2xl p-12 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-[#666666] font-medium">No subjects yet</p>
-          <p className="text-sm text-gray-400 mt-1">Use the quick-add buttons above to add standard subjects.</p>
+          <p className="text-[#666666] font-medium">No subjects added yet</p>
+          <p className="text-sm text-gray-400 mt-1">Use the quick-add panel above to add standard subjects, or click "Add Subject Manually".</p>
         </div>
       ) : (
-        Object.entries(grouped).map(([curriculum, subjectList]) => (
+        Object.entries(grouped).map(([curriculum, subs]) => (
           <div key={curriculum} className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
             <div className="flex items-center gap-2 mb-4">
               <BookOpen className="w-5 h-5 text-[#2563EB]" />
               <h3 className="font-semibold text-[#111111]">
-                {curriculum === '844' ? '8-4-4' : curriculum} Subjects ({subjectList.length})
+                {curriculum === '844' ? '8-4-4 (Form 3–4)' : 'CBE'} Subjects ({subs.length})
               </h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="text-left py-2 px-3 text-xs font-medium text-[#666666] uppercase tracking-wide">Subject Name</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-[#666666] uppercase tracking-wide">Code</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-[#666666] uppercase tracking-wide">Curriculum</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-[#666666] uppercase tracking-wide">Category</th>
-                    <th className="text-right py-2 px-3 text-xs font-medium text-[#666666] uppercase tracking-wide">Actions</th>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Subject</th>
+                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Code</th>
+                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Category</th>
+                    <th className="text-right text-xs font-medium text-[#666666] uppercase py-2 px-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {subjectList.map(subject => (
-                    <tr key={subject.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                  {subs.map(subject => (
+                    <tr key={subject.id} className="border-b border-gray-50 hover:bg-gray-50">
                       {editingId === subject.id ? (
                         <>
                           <td className="py-2 px-3">
-                            <input
-                              value={editForm.name}
-                              onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                              className="w-full px-2 py-1 border border-[#2563EB] rounded-lg text-sm focus:outline-none"
-                            />
+                            <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} className={inputClass} />
                           </td>
                           <td className="py-2 px-3">
-                            <input
-                              value={editForm.code}
-                              onChange={e => setEditForm({ ...editForm, code: e.target.value })}
-                              className="w-full px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none"
-                              placeholder="Code"
-                            />
+                            <input value={editForm.code} onChange={e => setEditForm({ ...editForm, code: e.target.value })} className={inputClass} placeholder="Code" />
                           </td>
                           <td className="py-2 px-3">
-                            <select
-                              value={editForm.curriculum}
-                              onChange={e => setEditForm({ ...editForm, curriculum: e.target.value as CurriculumType })}
-                              className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none bg-white"
-                            >
-                              <option value="CBE">CBE</option>
-                              <option value="844">8-4-4</option>
-                            </select>
-                          </td>
-                          <td className="py-2 px-3">
-                            <select
-                              value={editForm.category}
-                              onChange={e => setEditForm({ ...editForm, category: e.target.value as CategoryType | '' })}
-                              className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none bg-white"
-                            >
-                              <option value="">None</option>
+                            <select value={editForm.category} onChange={e => setEditForm({ ...editForm, category: e.target.value as CategoryType | '' })} className={inputClass}>
+                              <option value="">Category</option>
                               {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
                           </td>
                           <td className="py-2 px-3 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => handleSaveEdit(subject.id)}
-                                disabled={saving}
-                                className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
-                                title="Save"
-                              >
+                              <button onClick={() => handleSaveEdit(subject.id)} disabled={saving} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
                                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                               </button>
-                              <button
-                                onClick={() => setEditingId(null)}
-                                className="p-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"
-                                title="Cancel"
-                              >
+                              <button onClick={() => setEditingId(null)} className="p-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -461,29 +499,19 @@ export default function SchoolAdminSubjects() {
                         </>
                       ) : (
                         <>
-                          <td className="py-3 px-3 font-medium text-[#111111]">{subject.name}</td>
-                          <td className="py-3 px-3 text-[#666666]">{subject.code || <span className="text-gray-300">—</span>}</td>
-                          <td className="py-3 px-3">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${subject.curriculum === 'CBE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                              {subject.curriculum === '844' ? '8-4-4' : subject.curriculum}
-                            </span>
+                          <td className="py-2 px-3 font-medium text-[#111111]">{subject.name}</td>
+                          <td className="py-2 px-3 text-[#666666]">{subject.code || '—'}</td>
+                          <td className="py-2 px-3">
+                            {subject.category ? (
+                              <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">{subject.category}</span>
+                            ) : '—'}
                           </td>
-                          <td className="py-3 px-3 text-[#666666]">{subject.category || <span className="text-gray-300">—</span>}</td>
-                          <td className="py-3 px-3 text-right">
+                          <td className="py-2 px-3 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => startEdit(subject)}
-                                className="p-1.5 bg-blue-50 text-[#2563EB] rounded-lg hover:bg-blue-100 transition-colors"
-                                title="Edit"
-                              >
+                              <button onClick={() => startEdit(subject)} className="p-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
-                              <button
-                                onClick={() => handleDelete(subject.id, subject.name)}
-                                disabled={deletingId === subject.id}
-                                className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
-                                title="Delete"
-                              >
+                              <button onClick={() => handleDelete(subject.id, subject.name)} disabled={deletingId === subject.id} className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 disabled:opacity-50">
                                 {deletingId === subject.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                               </button>
                             </div>
