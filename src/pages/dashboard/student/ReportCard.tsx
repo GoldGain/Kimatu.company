@@ -343,9 +343,13 @@ export default function StudentReportCard() {
               <p className="text-sm text-[#666666]">Admission: {student.admission_number}</p>
               <p className="text-sm text-[#666666]">Class: {student.classes?.name}</p>
             </div>
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-2xl font-bold text-blue-600">{student.first_name?.[0]}{student.last_name?.[0]}</span>
-            </div>
+            {student.photo_url ? (
+              <img src={student.photo_url} alt={student.first_name} className="w-16 h-16 rounded-full object-cover border-2 border-blue-100" />
+            ) : (
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                <span className="text-2xl font-bold text-blue-600">{student.first_name?.[0]}{student.last_name?.[0]}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

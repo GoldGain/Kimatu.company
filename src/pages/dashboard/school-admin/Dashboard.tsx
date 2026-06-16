@@ -89,9 +89,22 @@ export default function SchoolAdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#111111]">School Dashboard</h1>
-        <p className="text-sm text-[#666666]">Welcome back, {user?.firstName}</p>
+      <div className="flex items-center gap-4">
+        {user?.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt={`${user.firstName} ${user.lastName}`}
+            className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md"
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl border-4 border-white shadow-md">
+            {user?.firstName?.[0]}{user?.lastName?.[0]}
+          </div>
+        )}
+        <div>
+          <h1 className="text-2xl font-bold text-[#111111]">School Dashboard</h1>
+          <p className="text-sm text-[#666666]">Welcome back, {user?.firstName}</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

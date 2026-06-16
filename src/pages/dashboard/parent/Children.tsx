@@ -277,9 +277,13 @@ export default function ParentChildren() {
         )}
         {children.map((child, i) => (
           <button key={i} onClick={() => selectChildDetails(child)} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${selectedChild?.id === child.id ? 'bg-[#2563EB] text-white' : 'bg-white text-[#111111] shadow-sm hover:bg-gray-50'}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedChild?.id === child.id ? 'bg-white/20' : 'bg-blue-100 text-blue-600'}`}>
-              {child.first_name?.[0]}{child.last_name?.[0]}
-            </div>
+            {child.photo_url ? (
+              <img src={child.photo_url} alt={child.first_name} className="w-8 h-8 rounded-full object-cover" />
+            ) : (
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedChild?.id === child.id ? 'bg-white/20' : 'bg-blue-100 text-blue-600'}`}>
+                {child.first_name?.[0]}{child.last_name?.[0]}
+              </div>
+            )}
             <span className="text-sm font-medium">{child.first_name} {child.last_name}</span>
           </button>
         ))}
@@ -288,7 +292,11 @@ export default function ParentChildren() {
         <>
           <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
             <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">{selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}</div>
+              {selectedChild.photo_url ? (
+                <img src={selectedChild.photo_url} alt={selectedChild.first_name} className="w-14 h-14 rounded-full object-cover border-2 border-blue-100" />
+              ) : (
+                <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">{selectedChild.first_name?.[0]}{selectedChild.last_name?.[0]}</div>
+              )}
               <div>
                 <h3 className="text-lg font-semibold">{selectedChild.first_name} {selectedChild.last_name}</h3>
                 <p className="text-sm text-[#666666]">{selectedChild.classes?.name} | {selectedChild.admission_number} | {selectedChild.curriculum}</p>

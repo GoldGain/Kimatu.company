@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import PhotoUpload from '@/components/PhotoUpload';
 
 export default function SchoolAdminProfile() {
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [profile, setProfile] = useState({ first_name: '', last_name: '', email: '' });
@@ -27,6 +27,7 @@ export default function SchoolAdminProfile() {
   const handlePhotoSuccess = async (url: string) => {
     setAvatarUrl(url);
     await supabaseUntyped.from('profiles').update({ avatar_url: url }).eq('id', user?.id);
+    await refreshProfile();
     toast.success('Profile photo updated!');
   };
 

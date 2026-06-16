@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import PhotoUpload from '@/components/PhotoUpload';
 
 export default function TeacherProfile() {
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -32,6 +32,7 @@ export default function TeacherProfile() {
     setAvatarUrl(url);
     // Save to profiles table
     await supabaseUntyped.from('profiles').update({ avatar_url: url }).eq('id', user?.id);
+    await refreshProfile();
     toast.success('Profile photo updated!');
   };
 

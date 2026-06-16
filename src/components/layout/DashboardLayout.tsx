@@ -251,9 +251,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Logout</span>
               </button>
-              <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
-                {user?.firstName?.[0]}{user?.lastName?.[0]}
-              </div>
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.firstName}
+                  className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
+                  {user?.firstName?.[0]}{user?.lastName?.[0]}
+                </div>
+              )}
             </div>
           </div>
         </header>

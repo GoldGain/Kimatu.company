@@ -16,6 +16,7 @@ import {
   drawAIComment,
   getPercentage,
   formatPosition,
+  addStudentPhotoToPDF,
   type SchoolInfo,
   type SignatureInfo,
 } from '@/lib/reportCardPdf';
@@ -317,6 +318,10 @@ export default function ParentChildReportCard() {
       );
 
       await drawReportHeader(doc, schoolInfo);
+      const photoUrl = selectedChild.photo_url || null;
+      if (photoUrl) {
+        await addStudentPhotoToPDF(doc, photoUrl, 174, 34, 22);
+      }
       drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', classDataForGrading.name || 'N/A', term?.name || '', term?.academic_year || '', positionStr);
       const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
       const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);

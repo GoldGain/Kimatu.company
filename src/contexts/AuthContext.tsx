@@ -20,6 +20,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, firstName: string, lastName: string, role: UserRole) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -121,8 +122,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message || null };
   };
 
+  const refreshProfile = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await fetchProfile(session.user.id, session.user.email!, session.user.user_metadata);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
