@@ -112,6 +112,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'My Children', icon: <Users className="w-5 h-5" />, path: '/parent/children' },
     { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/parent/timetable' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/parent/fees' },
+    { label: 'Fee Transcript', icon: <FileText className="w-5 h-5" />, path: '/parent/fee-transcript' },
     { label: 'Conferences', icon: <MessageSquare className="w-5 h-5" />, path: '/parent/conferences' },
     { label: 'AI Assistant', icon: <Bot className="w-5 h-5" />, path: '/parent/chatbot' },
     { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/parent/report-card' },

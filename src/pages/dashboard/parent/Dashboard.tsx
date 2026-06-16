@@ -9,6 +9,7 @@ interface ChildRecord {
   first_name: string;
   last_name: string;
   admission_number: string;
+  photo_url?: string | null;
   classes: { name: string } | null;
 }
 
@@ -72,12 +73,16 @@ export default function ParentDashboard() {
       {children.length > 0 && (
         <div className="bg-white rounded-2xl p-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <p className="text-sm text-[#666666] mb-2">Select Child</p>
-          <div className="flex gap-3">
+          <div className="flex gap-3 overflow-x-auto pb-2">
             {children.map((child, i) => (
-              <button key={i} onClick={() => selectChild(child)} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${selectedChild?.id === child.id ? 'bg-[#2563EB] text-white' : 'bg-gray-100 text-[#111111] hover:bg-gray-200'}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedChild?.id === child.id ? 'bg-white/20' : 'bg-blue-100'}`}>
-                  {child.first_name[0]}{child.last_name[0]}
-                </div>
+              <button key={i} onClick={() => selectChild(child)} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all flex-shrink-0 ${selectedChild?.id === child.id ? 'bg-[#2563EB] text-white' : 'bg-gray-100 text-[#111111] hover:bg-gray-200'}`}>
+                {child.photo_url ? (
+                  <img src={child.photo_url} alt={`${child.first_name} ${child.last_name}`} className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedChild?.id === child.id ? 'bg-white/20' : 'bg-blue-100'}`}>
+                    {child.first_name[0]}{child.last_name[0]}
+                  </div>
+                )}
                 <span className="text-sm font-medium">{child.first_name} {child.last_name}</span>
               </button>
             ))}
@@ -88,8 +93,19 @@ export default function ParentDashboard() {
       {selectedChild && (
         <>
           <div className="bg-[#2563EB] rounded-2xl p-6 text-white">
-            <h2 className="text-lg font-semibold">{selectedChild.first_name} {selectedChild.last_name}</h2>
-            <p className="text-white/80 text-sm">{selectedChild.classes?.name} | {selectedChild.admission_number}</p>
+            <div className="flex items-center gap-4">
+              {selectedChild.photo_url && (
+                <img
+                  src={selectedChild.photo_url}
+                  alt={`${selectedChild.first_name} ${selectedChild.last_name}`}
+                  className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-lg"
+                />
+              )}
+              <div>
+                <h2 className="text-lg font-semibold">{selectedChild.first_name} {selectedChild.last_name}</h2>
+                <p className="text-white/80 text-sm">{selectedChild.classes?.name} | {selectedChild.admission_number}</p>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

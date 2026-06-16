@@ -25,6 +25,7 @@ export default function PhotoUpload({
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,7 +77,7 @@ export default function PhotoUpload({
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
       streamRef.current = stream;
       setShowCamera(true);
       setTimeout(() => {
@@ -88,6 +89,13 @@ export default function PhotoUpload({
     } catch {
       toast.error('Camera not available. Please use file upload instead.');
     }
+  };
+
+  const switchCamera = async () => {
+    stopCamera();
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacingMode);
+    setTimeout(() => startCamera(), 100);
   };
 
   const stopCamera = () => {
@@ -133,14 +141,18 @@ export default function PhotoUpload({
               <h3 className="font-semibold">Capture Photo</h3>
               <button onClick={stopCamera}><X className="w-5 h-5 text-gray-500" /></button>
             </div>
+            <p className="text-xs text-gray-500 mb-2 text-center">
+              {facingMode === 'user' ? '📱 Front Camera' : '📷 Rear Camera'}
+            </p>
             <video ref={videoRef} className="w-full rounded-xl mb-3" autoPlay playsInline />
             <canvas ref={canvasRef} className="hidden" />
-            <div className="flex gap-3">
-              <button onClick={stopCamera} className="flex-1 px-4 py-2 border rounded-xl text-sm">Cancel</button>
-              <button onClick={capturePhoto} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm flex items-center justify-center gap-2">
-                <Check className="w-4 h-4" /> Capture
+            <div className="flex gap-2 mb-3">
+              <button onClick={switchCamera} className="flex-1 px-3 py-2 bg-gray-200 text-gray-800 rounded-lg text-xs font-medium hover:bg-gray-300 transition-colors">Switch Camera</button>
+              <button onClick={capturePhoto} className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-blue-700 transition-colors">
+                <Check className="w-3 h-3" /> Capture
               </button>
             </div>
+            <button onClick={stopCamera} className="w-full px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
           </div>
         </div>
       )}

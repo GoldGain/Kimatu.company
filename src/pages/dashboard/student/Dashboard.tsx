@@ -9,6 +9,7 @@ interface StudentRecord {
   admission_number: string;
   first_name: string;
   last_name: string;
+  photo_url?: string | null;
   classes: { name: string } | null;
 }
 
@@ -77,8 +78,19 @@ export default function StudentDashboard() {
   return (
     <div className="space-y-6">
       <div className="bg-[#2563EB] rounded-2xl p-6 text-white">
-        <h1 className="text-2xl font-bold">Welcome, {user?.firstName}!</h1>
-        <p className="text-white/80 mt-1">{studentData?.classes?.name} | {studentData?.admission_number}</p>
+        <div className="flex items-center gap-4">
+          {studentData?.photo_url && (
+            <img
+              src={studentData.photo_url}
+              alt={`${studentData.first_name} ${studentData.last_name}`}
+              className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg"
+            />
+          )}
+          <div>
+            <h1 className="text-2xl font-bold">Welcome, {user?.firstName}!</h1>
+            <p className="text-white/80 mt-1">{studentData?.classes?.name} | {studentData?.admission_number}</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

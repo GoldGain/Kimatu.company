@@ -73,6 +73,7 @@ import TeacherCurriculumNavigator from '@/pages/dashboard/teacher/CurriculumNavi
 import TeacherProfile from '@/pages/dashboard/teacher/Profile';
 import SchoolAdminProfile from '@/pages/dashboard/school-admin/Profile';
 import ParentProfile from '@/pages/dashboard/parent/Profile';
+import ParentFeeTranscript from '@/pages/dashboard/parent/FeeTranscript';
 
 function LoadingSpinner() {
   return (
@@ -192,6 +193,7 @@ function AppRoutes() {
       <Route path="/parent/report-card" element={<ProtectedRoute allowedRoles={['parent']}><ParentChildReportCard /></ProtectedRoute>} />
       <Route path="/parent/change-password" element={<ProtectedRoute allowedRoles={['parent']}><ParentChangePassword /></ProtectedRoute>} />
       <Route path="/parent/profile" element={<ProtectedRoute allowedRoles={['parent']}><ParentProfile /></ProtectedRoute>} />
+      <Route path="/parent/fee-transcript" element={<ProtectedRoute allowedRoles={['parent']}><ParentFeeTranscript /></ProtectedRoute>} />
       <Route path="/parent/timetable" element={<ProtectedRoute allowedRoles={['parent']}><TimetableView /></ProtectedRoute>} />
 
       {/* General routes */}
