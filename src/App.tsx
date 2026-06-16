@@ -155,6 +155,7 @@ function AppRoutes() {
       <Route path="/school-admin/timetable/setup" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTimetableSetup /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/generate" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTimetableGenerate /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/assign" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignTeachers /></ProtectedRoute>} />
+      <Route path="/school-admin/teacher-assignments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignTeachers /></ProtectedRoute>} />
       <Route path="/school-admin/change-password" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminChangePassword /></ProtectedRoute>} />
       <Route path="/school-admin/profile" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminProfile /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/view" element={<ProtectedRoute allowedRoles={['school_admin']}><TimetableView /></ProtectedRoute>} />

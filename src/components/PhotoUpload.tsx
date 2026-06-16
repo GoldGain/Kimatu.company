@@ -43,11 +43,15 @@ export default function PhotoUpload({
       const ext = blob.type.includes('png') ? 'png' : 'jpg';
       const path = folder ? `${folder}/${entityId}.${ext}` : `${entityId}.${ext}`;
 
+      // Ensure bucket exists by trying to upload (creates if not exists via upsert)
       const { error: uploadError } = await supabase.storage
         .from(bucket)
         .upload(path, blob, { upsert: true, contentType: blob.type });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Upload error details:', uploadError);
+        throw new Error(uploadError.message || 'Upload to storage failed');
+      }
 
       const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
       const publicUrl = urlData.publicUrl + `?t=${Date.now()}`;
@@ -56,7 +60,8 @@ export default function PhotoUpload({
       onSuccess(publicUrl);
       toast.success(`${label} uploaded successfully!`);
     } catch (err: any) {
-      toast.error('Upload failed: ' + err.message);
+      console.error('Photo upload error:', err);
+      toast.error('Upload failed: ' + (err.message || 'Unknown error'));
     } finally {
       setUploading(false);
     }

@@ -72,7 +72,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Teachers', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teachers' },
     { label: 'Classes', icon: <School className="w-5 h-5" />, path: '/school-admin/classes' },
     { label: 'Subjects', icon: <Library className="w-5 h-5" />, path: '/school-admin/subjects' },
-    { label: 'Assign Teachers', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/timetable/assign' },
+    { label: 'Teacher Assignments', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teacher-assignments' },
     { label: 'Timetable Setup', icon: <Settings className="w-5 h-5" />, path: '/school-admin/timetable/setup' },
     { label: 'Generate Timetable', icon: <Zap className="w-5 h-5" />, path: '/school-admin/timetable/generate' },
     { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/timetable/view' },
@@ -167,7 +167,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="p-4 flex flex-col h-[calc(100%-65px)]">
           <div className="flex items-center gap-3 mb-6 px-2 py-3 bg-gray-800/50 rounded-xl">
-            <div className="w-10 h-10 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden">
+            <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0">
               {user?.avatarUrl ? <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" /> : <>{user?.firstName?.[0]}{user?.lastName?.[0]}</>}
             </div>
             <div>
@@ -255,10 +255,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <img
                   src={user.avatarUrl}
                   alt={user.firstName}
-                  className="w-8 h-8 rounded-full object-cover border border-gray-200"
+                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
+                <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
                   {user?.firstName?.[0]}{user?.lastName?.[0]}
                 </div>
               )}

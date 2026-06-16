@@ -22,6 +22,7 @@ interface ChildRecord {
   classes: { name: string } | null;
   curriculum: string;
   gender: string | null;
+  photo_url?: string | null;
 }
 
 interface ResultRecord {
@@ -83,7 +84,7 @@ export default function ParentChildren() {
     // Load children linked via parent_student_links
     const { data: linked } = await supabaseUntyped
       .from('parent_student_links')
-      .select('*, students(*, classes(name))')
+      .select('*, students(id, first_name, last_name, admission_number, school_id, class_id, classes(name), photo_url, curriculum, gender))')
       .eq('parent_id', user?.id);
     if (linked) {
       const kids = linked.map((l: any) => l.students as unknown as ChildRecord).filter(Boolean);
