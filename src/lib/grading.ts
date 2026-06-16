@@ -140,12 +140,14 @@ function getGradeLabel(pct: number, band: SchoolLevelBand): string {
 }
 
 /**
- * Generates a subject-specific, personalized AI comment that:
- * - Identifies weak subjects by name
- * - Suggests specific improvement strategies
- * - Congratulates on best subjects
- * - Compares with previous term if available
- * - Adapts language to curriculum level (primary vs 8-4-4)
+ * ENHANCED AI Comment Generator that:
+ * - Congratulates on BEST subject
+ * - Identifies and addresses ALL weak subjects (not just top 2)
+ * - Gives SPECIFIC advice for each weak subject
+ * - Identifies failing subjects and recommends parent-teacher meeting
+ * - Compares with previous term performance
+ * - Adapts language to curriculum level
+ * - Includes class position and encouragement
  */
 export function generateSubjectSpecificComment(
   studentName: string,
@@ -166,7 +168,6 @@ export function generateSubjectSpecificComment(
   // Sort subjects by percentage
   const sorted = [...subjects].sort((a, b) => b.percentage - a.percentage);
   const best = sorted[0];
-  const worst = sorted[sorted.length - 1];
 
   // Identify weak subjects (below 50% for 8-4-4, below ME threshold for CBE)
   const weakThreshold = is844 ? 50 : isPrimary ? 41 : 41;
@@ -181,8 +182,6 @@ export function generateSubjectSpecificComment(
   );
 
   const bestGrade = getGradeLabel(best.percentage, band);
-  const worstGrade = getGradeLabel(worst.percentage, band);
-
   let comment = '';
   const firstName = studentName.split(' ')[0] || studentName;
 
@@ -195,46 +194,55 @@ export function generateSubjectSpecificComment(
     comment += `${firstName}, you excelled in ${best.name} (${best.percentage.toFixed(0)}% — ${bestGrade}). `;
   }
 
-  // Address failing subjects first (most urgent)
+  // Address failing subjects first (most urgent) — MENTION ALL
   if (failingSubjects.length > 0) {
     const failNames = failingSubjects.map(s => {
       const g = getGradeLabel(s.percentage, band);
       return `${s.name} (${s.percentage.toFixed(0)}%${is844 ? `, ${g}` : ''})`;
-    }).join(' and ');
+    }).join(', ');
+
     if (isPrimary) {
       comment += `However, your scores in ${failNames} need immediate attention. `;
+      failingSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
       comment += `Let's work together to bring these up to ME level. `;
     } else if (is844) {
       comment += `However, your scores in ${failNames} require urgent improvement. `;
-      if (failingSubjects.length === 1) {
-        comment += `To improve in ${failingSubjects[0].name}, ${getSubjectAdvice(failingSubjects[0].name, band)}. `;
-      } else {
-        comment += `Please seek extra help from your teachers and create a dedicated study plan for these subjects. `;
-      }
-      if (failingSubjects.length > 0) {
-        comment += `A parent-teacher meeting is recommended to create a catch-up plan. `;
-      }
+      failingSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
+      comment += `A parent-teacher meeting is recommended to create a catch-up plan. `;
     } else {
       comment += `However, your performance in ${failNames} needs immediate attention. `;
-      comment += `Please seek extra help from your teacher and dedicate more study time to these subjects. `;
+      failingSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
+      comment += `Please seek extra help from your teacher and dedicate more study time. `;
     }
   } else if (weakSubjects.length > 0) {
-    // Address weak (but not failing) subjects
-    const weakNames = weakSubjects.slice(0, 2).map(s => {
+    // Address weak (but not failing) subjects — MENTION ALL WITH SPECIFIC ADVICE
+    const weakNames = weakSubjects.map(s => {
       const g = getGradeLabel(s.percentage, band);
       return `${s.name} (${s.percentage.toFixed(0)}%${is844 ? `, ${g}` : ''})`;
-    }).join(' and ');
+    }).join(', ');
+
     if (isPrimary) {
       comment += `Let's work harder on ${weakNames} to bring ${weakSubjects.length === 1 ? 'it' : 'them'} up to ME level. `;
+      weakSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
     } else if (is844) {
       comment += `However, your performance in ${weakNames} is below expectations. `;
-      if (weakSubjects.length === 1) {
-        comment += `To raise your grade in ${weakSubjects[0].name}, ${getSubjectAdvice(weakSubjects[0].name, band)}. `;
-      } else {
-        comment += `Focus more on ${weakSubjects[0].name} and ${weakSubjects[1]?.name || weakSubjects[0].name} — ${getSubjectAdvice(weakSubjects[0].name, band)}. `;
-      }
+      weakSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
+      comment += `Focus on these areas to raise your grades next term. `;
     } else {
-      comment += `Focus more on ${weakNames} — ${getSubjectAdvice(weakSubjects[0].name, band)}. `;
+      comment += `Focus more on ${weakNames}. `;
+      weakSubjects.forEach(s => {
+        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
+      });
     }
   } else {
     // All subjects above threshold
@@ -246,9 +254,10 @@ export function generateSubjectSpecificComment(
     !weakSubjects.find(w => w.name === s.name) && !failingSubjects.find(f => f.name === s.name)
   );
   if (droppingNotMentioned.length > 0) {
-    const drop = droppingNotMentioned[0];
-    const prevPct = drop.previousPercentage!;
-    comment += `Note that your ${drop.name} grade dropped from ${prevPct.toFixed(0)}% to ${drop.percentage.toFixed(0)}% — let's review the topics you struggled with this term. `;
+    droppingNotMentioned.forEach(drop => {
+      const prevPct = drop.previousPercentage!;
+      comment += `Note that your ${drop.name} grade dropped from ${prevPct.toFixed(0)}% to ${drop.percentage.toFixed(0)}% — let's review the topics you struggled with this term. `;
+    });
   }
 
   // Closing encouragement with position
@@ -256,7 +265,8 @@ export function generateSubjectSpecificComment(
     if (position === 1) {
       comment += `Congratulations on ranking 1st out of ${totalStudents} students — keep up the outstanding work!`;
     } else if (position <= 3) {
-      comment += `Well done for ranking ${position}${position === 2 ? 'nd' : 'rd'} out of ${totalStudents} students. Aim for the top!`;
+      const suffix = position === 2 ? 'nd' : 'rd';
+      comment += `Well done for ranking ${position}${suffix} out of ${totalStudents} students. Aim for the top!`;
     } else if (position <= Math.ceil(totalStudents * 0.3)) {
       comment += `You are in the top 30% of the class. With more focus on your weak areas, you can climb even higher!`;
     } else {
