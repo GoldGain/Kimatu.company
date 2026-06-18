@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabaseUntyped } from "@/lib/supabase/client";
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Award, Download, FileText, Loader2, TrendingUp, TrendingDown, Minus, Send, Bell, Trophy } from 'lucide-react';
+import { Search, Award, Download, FileText, Loader2, TrendingUp, TrendingDown, Minus, Send, Bell, Trophy, Pencil, Trash2, X } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -63,6 +63,16 @@ export default function SchoolAdminResults() {
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const [generatingBulk, setGeneratingBulk] = useState(false);
   const [publishing, setPublishing] = useState(false);
+
+  // Edit state
+  const [editingResult, setEditingResult] = useState<any | null>(null);
+  const [editMarks, setEditMarks] = useState('');
+  const [editOutOf, setEditOutOf] = useState('');
+  const [savingResult, setSavingResult] = useState(false);
+
+  // Delete state
+  const [deletingResult, setDeletingResult] = useState<any | null>(null);
+  const [deletingResultLoading, setDeletingResultLoading] = useState(false);
   const [schoolName, setSchoolName] = useState('School');
   const [bestPerSubjectList, setBestPerSubjectList] = useState<BestInSubject[]>([]);
   const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: '' });
@@ -148,6 +158,68 @@ export default function SchoolAdminResults() {
     const classObj = classes.find(c => c.id === selectedClass);
     const { data } = await supabaseUntyped.from('results').select('*, students(id, first_name, last_name), subjects(name)').eq('class_id', selectedClass).eq('term_id', selectedTerm).eq('school_id', user?.schoolId);
     if (data && data.length > 0) { setBestPerSubjectList(computeBestPerSubject(data, classObj)); } else { setBestPerSubjectList([]); }
+  };
+
+  const openEditResult = (r: any) => {
+    setEditingResult(r);
+    setEditMarks(String(r.marks ?? ''));
+    setEditOutOf(String(r.out_of ?? 100));
+  };
+
+  const handleSaveResult = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingResult) return;
+    setSavingResult(true);
+    try {
+      const marks = parseFloat(editMarks);
+      const outOf = parseFloat(editOutOf) || 100;
+      if (isNaN(marks) || marks < 0 || marks > outOf) {
+        toast.error(`Marks must be between 0 and ${outOf}`);
+        setSavingResult(false);
+        return;
+      }
+      const percentage = Math.round((marks / outOf) * 100);
+      const classObj = classes.find(c => c.id === editingResult.class_id);
+      const band = getSchoolLevelBand(classObj);
+      const cbcResult = calculateCompetencyGrade(percentage, band === '844' ? 'junior' : band);
+      const grade844Result = calculate844Grade(percentage);
+      const { error } = await supabaseUntyped.from('results').update({
+        marks,
+        out_of: outOf,
+        percentage,
+        converted_marks: marks,
+        cbc_sublevel: cbcResult.subLevel,
+        cbc_grade: cbcResult.grade,
+        cbc_points: cbcResult.points,
+        cbc_descriptor: cbcResult.descriptor,
+        grade_844: grade844Result.grade,
+        points_844: grade844Result.points,
+      }).eq('id', editingResult.id);
+      if (error) throw new Error(error.message);
+      toast.success('Result updated and grade recalculated!');
+      setEditingResult(null);
+      fetchAll();
+    } catch (err: any) {
+      toast.error('Failed to update result: ' + err.message);
+    } finally {
+      setSavingResult(false);
+    }
+  };
+
+  const handleDeleteResult = async () => {
+    if (!deletingResult) return;
+    setDeletingResultLoading(true);
+    try {
+      const { error } = await supabaseUntyped.from('results').delete().eq('id', deletingResult.id);
+      if (error) throw new Error(error.message);
+      toast.success('Result deleted successfully.');
+      setDeletingResult(null);
+      fetchAll();
+    } catch (err: any) {
+      toast.error('Failed to delete result: ' + err.message);
+    } finally {
+      setDeletingResultLoading(false);
+    }
   };
 
   const fetchClassResults = async () => {
@@ -706,13 +778,14 @@ export default function SchoolAdminResults() {
                 <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Points</th>
                 <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">DEV</th>
                 <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Status</th>
+                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-8 text-sm text-[#666666]">Loading...</td></tr>
+                <tr><td colSpan={8} className="text-center py-8 text-sm text-[#666666]">Loading...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-sm text-[#666666]">No results found</td></tr>
+                <tr><td colSpan={8} className="text-center py-8 text-sm text-[#666666]">No results found</td></tr>
               ) : (
                 filtered.map(r => {
                   const dev = r.deviation;
@@ -746,6 +819,16 @@ export default function SchoolAdminResults() {
                       <td className="px-6 py-4">
                         <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${r.status === 'published' ? 'bg-green-100 text-green-700' : r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{r.status}</span>
                       </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => openEditResult(r)} className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors">
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                          <button onClick={() => setDeletingResult(r)} className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors">
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })
@@ -754,6 +837,70 @@ export default function SchoolAdminResults() {
           </table>
         </div>
       </div>
+      {/* Edit Result Modal */}
+      {editingResult && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Edit Result</h2>
+              <button onClick={() => setEditingResult(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-sm text-gray-600 mb-1"><strong>Student:</strong> {editingResult.students?.first_name} {editingResult.students?.last_name}</p>
+            <p className="text-sm text-gray-600 mb-4"><strong>Subject:</strong> {editingResult.subjects?.name}</p>
+            <form onSubmit={handleSaveResult} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Marks Scored *</label>
+                  <input type="number" value={editMarks} onChange={e => setEditMarks(e.target.value)} className="w-full px-4 py-2.5 border rounded-xl text-sm" min="0" step="0.1" required />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Out Of</label>
+                  <input type="number" value={editOutOf} onChange={e => setEditOutOf(e.target.value)} className="w-full px-4 py-2.5 border rounded-xl text-sm" min="1" step="1" />
+                </div>
+              </div>
+              {editMarks && editOutOf && (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+                  <strong>Preview:</strong> {Math.round((parseFloat(editMarks) / parseFloat(editOutOf)) * 100)}% — Grade will be auto-recalculated on save
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditingResult(null)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={savingResult} className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
+                  {savingResult ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save & Recalculate
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Result Confirmation Modal */}
+      {deletingResult && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold">Delete Result</h2>
+                <p className="text-xs text-gray-500">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 mb-2">
+              Are you sure you want to delete the result for:
+            </p>
+            <p className="text-sm font-medium text-gray-900 mb-1">{deletingResult.students?.first_name} {deletingResult.students?.last_name}</p>
+            <p className="text-sm text-gray-600 mb-6">Subject: {deletingResult.subjects?.name}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeletingResult(null)} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteResult} disabled={deletingResultLoading} className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {deletingResultLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

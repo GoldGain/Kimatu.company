@@ -4,7 +4,7 @@ import { supabaseUntyped } from "@/lib/supabase/client";
 import { createScopedUser } from '@/lib/supabase/createUser';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStudents } from '@/hooks/useSupabaseData';
-import { Search, Plus, Loader2, Filter, Camera } from 'lucide-react';
+import { Search, Plus, Loader2, Filter, Camera, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
@@ -32,6 +32,24 @@ export default function SchoolAdminStudents() {
     parent_email: '', 
   });
 
+  // Edit state
+  const [editingStudent, setEditingStudent] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({
+    first_name: '',
+    last_name: '',
+    class_id: '',
+    parent_name: '',
+    parent_phone: '',
+    parent_email: '',
+    gender: '' as GenderType,
+    date_of_birth: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  // Delete state
+  const [deletingStudent, setDeletingStudent] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     const fetchClasses = async () => {
       if (!user?.schoolId) return;
@@ -45,31 +63,17 @@ export default function SchoolAdminStudents() {
     fetchClasses();
   }, [user?.schoolId]);
 
-  /**
-   * Ensures a parent account exists for the given email.
-   * - If a profile with that email already exists → return its id.
-   * - If not → create a new auth user with role=parent and return the new id.
-   * Returns the parent profile id (UUID).
-   */
   const ensureParentAccount = async (parentEmail: string, parentName: string): Promise<string> => {
     const normalizedEmail = parentEmail.trim().toLowerCase();
-
-    // 1. Check if a profile already exists with this email
     const { data: existingProfile } = await supabaseUntyped
       .from('profiles')
       .select('id')
       .eq('email', normalizedEmail)
       .maybeSingle();
-
-    if (existingProfile?.id) {
-      return existingProfile.id as string;
-    }
-
-    // 2. Create a new parent account
+    if (existingProfile?.id) return existingProfile.id as string;
     const nameParts = (parentName || 'Parent').trim().split(' ');
     const firstName = nameParts[0] || 'Parent';
     const lastName = nameParts.slice(1).join(' ') || '';
-
     const result = await createScopedUser({
       email: normalizedEmail,
       password: 'Parent@2025',
@@ -78,19 +82,15 @@ export default function SchoolAdminStudents() {
       role: 'parent',
       school_id: user?.schoolId || null,
     });
-
     return result.user.id;
   };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdding(true);
-
     try {
       const studentEmail = formData.student_email || `${formData.admission_number.toLowerCase().replace(/\s+/g, '')}@student.edu`;
       const studentPassword = `${formData.admission_number}@2025`;
-
-      // 1. Create auth user for student without disrupting the school-admin session.
       const authData = await createScopedUser({
         email: studentEmail,
         password: studentPassword,
@@ -100,22 +100,16 @@ export default function SchoolAdminStudents() {
         school_id: user?.schoolId || null,
         metadata: { admission_number: formData.admission_number },
       });
-
       const studentUserId = authData.user.id;
-
-      // 2. Handle parent account creation/lookup
       let parentId: string | null = null;
       if (formData.parent_email && formData.parent_email.trim()) {
         try {
           parentId = await ensureParentAccount(formData.parent_email, formData.parent_name);
         } catch (parentError: any) {
-          // Log but don't block student creation if parent creation fails
           console.warn('Parent account creation warning:', parentError.message);
           toast.warning(`Student created but parent account issue: ${parentError.message}`);
         }
       }
-
-      // 3. Insert into students table
       const { data: studentData, error: studentError } = await supabaseUntyped
         .from('students')
         .insert({
@@ -138,39 +132,79 @@ export default function SchoolAdminStudents() {
         })
         .select('id')
         .single();
-
       if (studentError) throw new Error('Database error: ' + studentError.message);
-
       const studentId = (studentData as any)?.id;
-
-      // 4. Create parent_student_links row so parent portal shows the child
       if (parentId && studentId) {
         const { error: linkError } = await supabaseUntyped
           .from('parent_student_links')
-          .upsert(
-            { parent_id: parentId, student_id: studentId },
-            { onConflict: 'parent_id,student_id' }
-          );
-        if (linkError) {
-          console.warn('parent_student_links upsert warning:', linkError.message);
-        }
+          .upsert({ parent_id: parentId, student_id: studentId }, { onConflict: 'parent_id,student_id' });
+        if (linkError) console.warn('parent_student_links upsert warning:', linkError.message);
       }
-
-      const parentMsg = parentId
-        ? ` | Parent: ${formData.parent_email} (Password: Parent@2025)`
-        : '';
+      const parentMsg = parentId ? ` | Parent: ${formData.parent_email} (Password: Parent@2025)` : '';
       toast.success(`✅ Student added! Login: ${studentEmail} | Password: ${studentPassword}${parentMsg}`);
       setShowAdd(false);
-      setFormData({
-        admission_number: '', student_email: '', first_name: '', last_name: '', class_id: '',
-        curriculum: 'CBE' as 'CBE' | '844', gender: '' as GenderType, date_of_birth: '', parent_name: '', 
-        parent_phone: '', parent_email: '',
-      });
+      setFormData({ admission_number: '', student_email: '', first_name: '', last_name: '', class_id: '', curriculum: 'CBE' as 'CBE' | '844', gender: '' as GenderType, date_of_birth: '', parent_name: '', parent_phone: '', parent_email: '' });
       refetch();
     } catch (error: any) {
       toast.error(error.message);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const openEdit = (s: any) => {
+    setEditingStudent(s);
+    setEditForm({
+      first_name: s.first_name || '',
+      last_name: s.last_name || '',
+      class_id: s.class_id || '',
+      parent_name: s.parent_name || '',
+      parent_phone: s.parent_phone || '',
+      parent_email: s.parent_email || '',
+      gender: (s.gender || '') as GenderType,
+      date_of_birth: s.date_of_birth || '',
+    });
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+    setSaving(true);
+    try {
+      const { error } = await supabaseUntyped.from('students').update({
+        first_name: editForm.first_name.trim(),
+        last_name: editForm.last_name.trim(),
+        class_id: editForm.class_id || null,
+        parent_name: editForm.parent_name.trim() || null,
+        parent_phone: editForm.parent_phone.trim() || null,
+        parent_email: editForm.parent_email.trim() || null,
+        gender: editForm.gender || null,
+        date_of_birth: editForm.date_of_birth || null,
+      }).eq('id', editingStudent.id);
+      if (error) throw new Error(error.message);
+      toast.success('Student updated successfully!');
+      setEditingStudent(null);
+      refetch();
+    } catch (err: any) {
+      toast.error('Failed to update student: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingStudent) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabaseUntyped.from('students').delete().eq('id', deletingStudent.id);
+      if (error) throw new Error(error.message);
+      toast.success(`Student "${deletingStudent.first_name} ${deletingStudent.last_name}" deleted.`);
+      setDeletingStudent(null);
+      refetch();
+    } catch (err: any) {
+      toast.error('Failed to delete student: ' + err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -248,14 +282,7 @@ export default function SchoolAdminStudents() {
             <input type="date" value={formData.date_of_birth} onChange={e => setFormData({...formData, date_of_birth: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
             <input placeholder="Parent Name" value={formData.parent_name} onChange={e => setFormData({...formData, parent_name: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
             <input placeholder="Parent Phone" value={formData.parent_phone} onChange={e => setFormData({...formData, parent_phone: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
-            <input 
-              placeholder="Parent Email (auto-creates parent account)" 
-              value={formData.parent_email} 
-              onChange={e => setFormData({...formData, parent_email: e.target.value})} 
-              className="w-full px-4 py-2.5 border rounded-xl text-sm" 
-              type="email"
-            />
-            
+            <input placeholder="Parent Email (auto-creates parent account)" value={formData.parent_email} onChange={e => setFormData({...formData, parent_email: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" type="email" />
             <div className="md:col-span-3 flex justify-end gap-3 mt-2">
               <button type="button" onClick={() => setShowAdd(false)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
               <button type="submit" disabled={adding} className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
@@ -282,9 +309,9 @@ export default function SchoolAdminStudents() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={4} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
+                <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
               ) : filteredStudents.length === 0 ? (
-                <tr><td colSpan={4} className="text-center py-8 text-sm text-gray-500">No students found</td></tr>
+                <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-500">No students found</td></tr>
               ) : (
                 filteredStudents.map((s: any) => (
                   <tr key={s.id} className="border-b hover:bg-gray-50">
@@ -304,12 +331,18 @@ export default function SchoolAdminStudents() {
                       <div className="text-xs text-gray-500">{s.parent_email || s.parent_phone || '-'}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 flex-wrap">
                         <button onClick={() => setPhotoStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors">
                           <Camera className="w-3 h-3" /> Photo
                         </button>
                         <button onClick={() => setPromotingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors">
                           Promote
+                        </button>
+                        <button onClick={() => openEdit(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors">
+                          <Pencil className="w-3 h-3" /> Edit
+                        </button>
+                        <button onClick={() => setDeletingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors">
+                          <Trash2 className="w-3 h-3" /> Delete
                         </button>
                       </div>
                     </td>
@@ -320,6 +353,7 @@ export default function SchoolAdminStudents() {
           </table>
         </div>
       </div>
+
       {/* Promote Student Modal */}
       {promotingStudent && (
         <PromoteStudentModal
@@ -348,6 +382,94 @@ export default function SchoolAdminStudents() {
               />
             </div>
             <button onClick={() => setPhotoStudent(null)} className="w-full mt-3 px-4 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50">Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Student Modal */}
+      {editingStudent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Edit Student</h2>
+              <button onClick={() => setEditingStudent(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Admission: <strong>{editingStudent.admission_number}</strong></p>
+            <form onSubmit={handleSaveEdit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">First Name *</label>
+                <input value={editForm.first_name} onChange={e => setEditForm({...editForm, first_name: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Last Name *</label>
+                <input value={editForm.last_name} onChange={e => setEditForm({...editForm, last_name: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Class</label>
+                <select value={editForm.class_id} onChange={e => setEditForm({...editForm, class_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
+                  <option value="">No Class</option>
+                  {classes.map((cls) => (
+                    <option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Gender</label>
+                <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value as GenderType})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Date of Birth</label>
+                <input type="date" value={editForm.date_of_birth} onChange={e => setEditForm({...editForm, date_of_birth: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Parent Name</label>
+                <input value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Parent Phone</label>
+                <input value={editForm.parent_phone} onChange={e => setEditForm({...editForm, parent_phone: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Parent Email</label>
+                <input type="email" value={editForm.parent_email} onChange={e => setEditForm({...editForm, parent_email: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+              </div>
+              <div className="sm:col-span-2 flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditingStudent(null)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={saving} className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingStudent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold">Delete Student</h2>
+                <p className="text-xs text-gray-500">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 mb-6">
+              Are you sure you want to delete <strong>{deletingStudent.first_name} {deletingStudent.last_name}</strong> ({deletingStudent.admission_number})?
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeletingStudent(null)} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDelete} disabled={deleting} className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
