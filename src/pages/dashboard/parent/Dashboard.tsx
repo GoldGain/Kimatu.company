@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { Link } from 'react-router';
 import { Users, CreditCard, Award, Bell, BookOpen } from 'lucide-react';
+import PhotoZoomModal from '@/components/PhotoZoomModal';
 
 interface ChildRecord {
   id: string;
@@ -31,6 +32,7 @@ export default function ParentDashboard() {
   const { user } = useAuth();
   const [children, setChildren] = useState<ChildRecord[]>([]);
   const [selectedChild, setSelectedChild] = useState<ChildRecord | null>(null);
+  const [zoomPhoto, setZoomPhoto] = useState<string | null>(null);
   const [childResults, setChildResults] = useState<ResultRecord[]>([]);
   const [childFees, setChildFees] = useState(0);
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
@@ -94,11 +96,14 @@ export default function ParentDashboard() {
         <>
           <div className="bg-[#2563EB] rounded-2xl p-6 text-white">
             <div className="flex items-center gap-4">
+              {zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={selectedChild.first_name} onClose={() => setZoomPhoto(null)} />}
               {selectedChild.photo_url && (
                 <img
                   src={selectedChild.photo_url}
                   alt={`${selectedChild.first_name} ${selectedChild.last_name}`}
-                  className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-lg"
+                  className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg cursor-zoom-in hover:opacity-90 transition-opacity"
+                  onClick={() => setZoomPhoto(selectedChild.photo_url!)}
+                  title="Click to zoom"
                 />
               )}
               <div>

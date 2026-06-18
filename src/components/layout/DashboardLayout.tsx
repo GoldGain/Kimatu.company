@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
+import PhotoZoomModal from '@/components/PhotoZoomModal';
 import {
   GraduationCap,
   LayoutDashboard,
@@ -123,6 +124,7 @@ const navConfig: Record<string, NavItem[]> = {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [zoomAvatar, setZoomAvatar] = useState(false);
   const { user, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -167,7 +169,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="p-4 flex flex-col h-[calc(100%-65px)]">
           <div className="flex items-center gap-3 mb-6 px-2 py-3 bg-gray-800/50 rounded-xl">
-            <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0">
+            <div
+              className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => user?.avatarUrl && setZoomAvatar(true)}
+              title={user?.avatarUrl ? 'Click to zoom' : undefined}
+            >
               {user?.avatarUrl ? <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" /> : <>{user?.firstName?.[0]}{user?.lastName?.[0]}</>}
             </div>
             <div>
@@ -251,11 +257,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Logout</span>
               </button>
+              {zoomAvatar && user?.avatarUrl && (
+                <PhotoZoomModal
+                  photoUrl={user.avatarUrl}
+                  altText={`${user.firstName} ${user.lastName}`}
+                  onClose={() => setZoomAvatar(false)}
+                />
+              )}
               {user?.avatarUrl ? (
                 <img
                   src={user.avatarUrl}
                   alt={user.firstName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
+                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-zoom-in hover:border-blue-400 hover:shadow-md transition-all"
+                  onClick={() => setZoomAvatar(true)}
+                  title="Click to zoom"
                 />
               ) : (
                 <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">

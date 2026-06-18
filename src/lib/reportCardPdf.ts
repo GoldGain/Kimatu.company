@@ -346,12 +346,31 @@ export async function addStudentPhotoToPDF(
         reader.readAsDataURL(blob);
       });
     }
-    const format = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-    // Draw circle clip for photo
+    // Render to canvas for circular crop at high resolution
+    const canvas = document.createElement('canvas');
+    const px = Math.round(size * 3.78 * 2); // ~2x resolution for clarity
+    canvas.width = px;
+    canvas.height = px;
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+    // Circular clip
+    ctx.beginPath();
+    ctx.arc(px / 2, px / 2, px / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, 0, 0, px, px);
+    const circularDataUrl = canvas.toDataURL('image/png');
+    // Blue border circle
     doc.setDrawColor(37, 99, 235);
-    doc.setLineWidth(0.5);
-    doc.rect(x, y, size, size, 'S');
-    doc.addImage(dataUrl, format, x, y, size, size);
+    doc.setLineWidth(0.8);
+    doc.circle(x + size / 2, y + size / 2, size / 2, 'S');
+    doc.addImage(circularDataUrl, 'PNG', x, y, size, size);
     return true;
   } catch {
     return false;
@@ -442,24 +461,25 @@ export async function drawReportHeader(
   doc.setFillColor(37, 99, 235);
   doc.rect(0, 0, 210, 32, 'F');
 
-  // Try to add logo
+  // Try to add logo (left side, bigger)
   const logoAdded = schoolInfo.logo_url
-    ? await addLogoToPDF(doc, schoolInfo.logo_url, 12, 3, 20, 20)
+    ? await addLogoToPDF(doc, schoolInfo.logo_url, 10, 3, 26, 26)
     : false;
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(logoAdded ? 13 : 15);
+  // School name — always prominent
+  doc.setFontSize(logoAdded ? 14 : 16);
   doc.setFont('helvetica', 'bold');
-  doc.text(schoolInfo.name || 'School', logoAdded ? 36 : 105, logoAdded ? 12 : 11, { align: logoAdded ? 'left' : 'center' });
+  doc.text(schoolInfo.name || 'School', logoAdded ? 40 : 105, logoAdded ? 11 : 11, { align: logoAdded ? 'left' : 'center' });
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(subtitle, 105, logoAdded ? 20 : 20, { align: 'center' });
+  doc.text(subtitle, logoAdded ? 40 : 105, logoAdded ? 20 : 20, { align: logoAdded ? 'left' : 'center' });
 
   if (schoolInfo.motto) {
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'italic');
-    doc.text(`"${schoolInfo.motto}"`, 105, 27, { align: 'center' });
+    doc.text(`"${schoolInfo.motto}"`, logoAdded ? 40 : 105, 27, { align: logoAdded ? 'left' : 'center' });
   }
 }
 

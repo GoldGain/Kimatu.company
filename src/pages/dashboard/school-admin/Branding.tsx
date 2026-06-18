@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabaseUntyped } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase/client";
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, Save, Palette, School, Bell, Signature, Upload } from 'lucide-react';
+import { Loader2, Save, Palette, School, Bell, Signature, Upload, Link, X, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { subscribeToPush } from '@/hooks/usePWA';
 import DigitalSignature from '@/components/DigitalSignature';
@@ -13,6 +14,9 @@ export default function SchoolBranding() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [activeTab, setActiveTab] = useState<'branding' | 'signatures'>('branding');
+  const [logoInputMode, setLogoInputMode] = useState<'url' | 'upload'>('url');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoFileRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     name: '',
     motto: '',
@@ -79,6 +83,42 @@ export default function SchoolBranding() {
       setTeacherSigs(sigs);
     }
     setLoading(false);
+  };
+
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('File too large. Max 5MB.'); return; }
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) { toast.error('Only PNG, JPG, SVG, WEBP files are allowed.'); return; }
+
+    setLogoUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const path = `logos/${user?.schoolId}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('school-logos')
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: urlData } = supabase.storage.from('school-logos').getPublicUrl(path);
+      const publicUrl = urlData.publicUrl + `?t=${Date.now()}`;
+
+      // Save to DB immediately
+      const { error: dbError } = await supabaseUntyped
+        .from('schools')
+        .update({ logo_url: publicUrl })
+        .eq('id', user?.schoolId);
+      if (dbError) throw new Error(dbError.message);
+
+      setForm(prev => ({ ...prev, logo_url: publicUrl }));
+      toast.success('School logo uploaded and saved!');
+    } catch (err: any) {
+      toast.error('Logo upload failed: ' + err.message);
+    } finally {
+      setLogoUploading(false);
+      if (logoFileRef.current) logoFileRef.current.value = '';
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -242,9 +282,9 @@ export default function SchoolBranding() {
             <p className="text-xs text-gray-500 mb-3">Brand Preview</p>
             <div className="flex gap-3 items-center">
               {form.logo_url ? (
-                <img src={form.logo_url} alt="School Logo" className="w-12 h-12 rounded-xl object-contain border border-gray-200" />
+                <img src={form.logo_url} alt="School Logo" className="w-16 h-16 rounded-xl object-contain border border-gray-200 bg-white" />
               ) : (
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg" style={{ backgroundColor: form.primary_color }}>
+                <div className="w-16 h-16 rounded-xl flex items-center justify-center text-white font-bold text-lg" style={{ backgroundColor: form.primary_color }}>
                   {form.name?.[0] || 'S'}
                 </div>
               )}
@@ -278,11 +318,80 @@ export default function SchoolBranding() {
                 <input value={form.secondary_color} onChange={e => setForm({ ...form, secondary_color: e.target.value })} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
               </div>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Logo URL</label>
-              <input value={form.logo_url} onChange={e => setForm({ ...form, logo_url: e.target.value })} placeholder="https://example.com/logo.png" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
-              <p className="text-xs text-gray-400 mt-1">Logo appears on all PDF report cards and portal headers</p>
+
+            {/* School Logo — dual mode: Upload File OR URL */}
+            <div className="md:col-span-2">
+              <label className="block text-xs text-gray-500 mb-2">School Logo</label>
+              {/* Mode toggle */}
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setLogoInputMode('upload')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${logoInputMode === 'upload' ? 'bg-[#2563EB] text-white border-[#2563EB]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                >
+                  <Upload className="w-3.5 h-3.5" /> Upload Image File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogoInputMode('url')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${logoInputMode === 'url' ? 'bg-[#2563EB] text-white border-[#2563EB]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                >
+                  <Link className="w-3.5 h-3.5" /> Enter URL
+                </button>
+              </div>
+
+              {logoInputMode === 'upload' ? (
+                <div className="flex items-center gap-4 p-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+                  {form.logo_url ? (
+                    <div className="relative">
+                      <img src={form.logo_url} alt="Logo preview" className="w-20 h-20 object-contain rounded-lg border border-gray-200 bg-white" />
+                      <button
+                        type="button"
+                        onClick={() => setForm(prev => ({ ...prev, logo_url: '' }))}
+                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center bg-white">
+                      <Image className="w-8 h-8 text-gray-300" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <button
+                      type="button"
+                      onClick={() => logoFileRef.current?.click()}
+                      disabled={logoUploading}
+                      className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
+                    >
+                      {logoUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      {logoUploading ? 'Uploading...' : 'Choose Logo File'}
+                    </button>
+                    <p className="text-xs text-gray-400 mt-1.5">PNG, JPG, SVG, WEBP — max 5MB</p>
+                    <p className="text-xs text-gray-400">Logo appears on all report cards and portal headers</p>
+                  </div>
+                  <input
+                    ref={logoFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                    className="hidden"
+                    onChange={handleLogoFileChange}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <input
+                    value={form.logo_url}
+                    onChange={e => setForm({ ...form, logo_url: e.target.value })}
+                    placeholder="https://example.com/logo.png"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Logo appears on all PDF report cards and portal headers</p>
+                </div>
+              )}
             </div>
+
             <div>
               <label className="block text-xs text-gray-500 mb-1">Principal Name</label>
               <input value={form.principal_name} onChange={e => setForm({ ...form, principal_name: e.target.value })} placeholder="Principal's full name" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
@@ -328,28 +437,28 @@ export default function SchoolBranding() {
           {/* Teacher Signatures */}
           <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
             <h3 className="font-semibold text-[#111111] mb-4 flex items-center gap-2">
-              <Upload className="w-5 h-5 text-green-600" />
+              <Signature className="w-5 h-5 text-green-600" />
               Class Teacher Signatures
             </h3>
             <p className="text-xs text-[#666666] mb-4">
-              Each teacher's signature will appear on their class report cards. Teachers can also set their own signatures from their profile.
+              Each class teacher's signature will appear on their students' report cards.
             </p>
             {teachers.length === 0 ? (
-              <div className="text-center py-8 text-sm text-gray-500 bg-gray-50 rounded-xl">
-                No active teachers found. Add teachers first.
-              </div>
+              <p className="text-sm text-gray-400 italic">No active teachers found.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {teachers.map((teacher) => (
-                  <DigitalSignature
-                    key={teacher.id}
-                    title={`${teacher.first_name} ${teacher.last_name}`}
-                    subtitle="Class Teacher"
-                    existingSignatureUrl={teacherSigs[teacher.id]?.url || null}
-                    existingSignatureType={teacherSigs[teacher.id]?.type || null}
-                    onSave={(url, type) => saveTeacherSignature(teacher.id, url, type)}
-                    onClear={() => clearTeacherSignature(teacher.id)}
-                  />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {teachers.map((teacher: any) => (
+                  <div key={teacher.id} className="border border-gray-100 rounded-xl p-4">
+                    <p className="font-medium text-sm text-[#111111] mb-3">{teacher.first_name} {teacher.last_name}</p>
+                    <DigitalSignature
+                      title={`${teacher.first_name}'s Signature`}
+                      subtitle="Appears on their students' report cards"
+                      existingSignatureUrl={teacherSigs[teacher.id]?.url || null}
+                      existingSignatureType={teacherSigs[teacher.id]?.type || null}
+                      onSave={(url, type) => saveTeacherSignature(teacher.id, url, type)}
+                      onClear={() => clearTeacherSignature(teacher.id)}
+                    />
+                  </div>
                 ))}
               </div>
             )}

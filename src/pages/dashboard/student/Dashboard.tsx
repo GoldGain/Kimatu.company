@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { Link } from 'react-router';
 import { Award, CreditCard, ClipboardList, Clock, BookOpen, Bell } from 'lucide-react';
+import PhotoZoomModal from '@/components/PhotoZoomModal';
 
 interface StudentRecord {
   id: string;
@@ -38,6 +39,7 @@ interface HomeworkRecord {
 export default function StudentDashboard() {
   const { user } = useAuth();
   const [studentData, setStudentData] = useState<StudentRecord | null>(null);
+  const [zoomPhoto, setZoomPhoto] = useState<string | null>(null);
   const [recentResults, setRecentResults] = useState<ResultRecord[]>([]);
   const [feeBalance, setFeeBalance] = useState(0);
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
@@ -79,11 +81,14 @@ export default function StudentDashboard() {
     <div className="space-y-6">
       <div className="bg-[#2563EB] rounded-2xl p-6 text-white">
         <div className="flex items-center gap-4">
+          {zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={studentData?.first_name} onClose={() => setZoomPhoto(null)} />}
           {studentData?.photo_url && (
             <img
               src={studentData.photo_url}
               alt={`${studentData.first_name} ${studentData.last_name}`}
-              className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg"
+              className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg cursor-zoom-in hover:opacity-90 transition-opacity"
+              onClick={() => setZoomPhoto(studentData.photo_url!)}
+              title="Click to zoom"
             />
           )}
           <div>

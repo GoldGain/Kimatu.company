@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { Download, FileText, Loader2, Share2 } from 'lucide-react';
+import PhotoZoomModal from '@/components/PhotoZoomModal';
 import { toast } from 'sonner';
 import {
   generateUniqueAIComment,
@@ -27,6 +28,7 @@ import type { BestInSubject } from '@/lib/bestPerSubject';
 export default function StudentReportCard() {
   const { user } = useAuth();
   const [student, setStudent] = useState<any>(null);
+  const [zoomPhoto, setZoomPhoto] = useState<string | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [terms, setTerms] = useState<any[]>([]);
   const [selectedTerm, setSelectedTerm] = useState('');
@@ -257,11 +259,11 @@ export default function StudentReportCard() {
       // Header with logo
       await drawReportHeader(doc, schoolInfo);
 
-      // Student photo (top-right corner)
+      // Student photo (top-right corner) — bigger (30x30mm)
       const photoUrl = student.photo_url || null;
       if (photoUrl) {
         try {
-          await addStudentPhotoToPDF(doc, photoUrl, 174, 34, 22);
+          await addStudentPhotoToPDF(doc, photoUrl, 168, 33, 30);
         } catch {}
       }
 
@@ -343,10 +345,17 @@ export default function StudentReportCard() {
               <p className="text-sm text-[#666666]">Admission: {student.admission_number}</p>
               <p className="text-sm text-[#666666]">Class: {student.classes?.name}</p>
             </div>
+{zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={student.first_name} onClose={() => setZoomPhoto(null)} />}
             {student.photo_url ? (
-              <img src={student.photo_url} alt={student.first_name} className="w-16 h-16 rounded-full object-cover border-2 border-blue-100" />
+              <img
+                src={student.photo_url}
+                alt={student.first_name}
+                className="w-20 h-20 rounded-full object-cover border-2 border-blue-200 cursor-zoom-in hover:border-blue-400 hover:shadow-lg transition-all"
+                onClick={() => setZoomPhoto(student.photo_url)}
+                title="Click to zoom"
+              />
             ) : (
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+              <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
                 <span className="text-2xl font-bold text-blue-600">{student.first_name?.[0]}{student.last_name?.[0]}</span>
               </div>
             )}
