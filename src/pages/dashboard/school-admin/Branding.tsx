@@ -44,11 +44,26 @@ export default function SchoolBranding() {
 
   const fetchSchool = async () => {
     setLoading(true);
-    const { data } = await supabaseUntyped
-      .from('schools')
-      .select('*')
-      .eq('id', user?.schoolId)
-      .single();
+    let data: any = null;
+    try {
+      const { data: schoolData, error } = await supabaseUntyped
+        .from('schools')
+        .select('id, name, motto, primary_color, secondary_color, logo_url, address, phone, email, website, principal_name, principal_signature_url, principal_signature_type')
+        .eq('id', user?.schoolId)
+        .single();
+      if (error) throw error;
+      data = schoolData;
+    } catch (err: any) {
+      // If motto column doesn't exist, fetch without it
+      if (err.message?.includes('motto')) {
+        const { data: schoolData } = await supabaseUntyped
+          .from('schools')
+          .select('id, name, primary_color, secondary_color, logo_url, address, phone, email, website, principal_name, principal_signature_url, principal_signature_type')
+          .eq('id', user?.schoolId)
+          .single();
+        data = schoolData;
+      }
+    }
     if (data) {
       setForm({
         name: data.name || '',
@@ -125,20 +140,45 @@ export default function SchoolBranding() {
     e.preventDefault();
     setSaving(true);
     try {
-      const { error } = await supabaseUntyped
-        .from('schools')
-        .update({
-          motto: form.motto,
-          primary_color: form.primary_color,
-          secondary_color: form.secondary_color,
-          logo_url: form.logo_url,
-          address: form.address,
-          phone: form.phone,
-          email: form.email,
-          website: form.website,
-          principal_name: form.principal_name,
-        })
-        .eq('id', user?.schoolId);
+      // Try to save with motto first, fallback without motto if column doesn't exist
+      let error: any = null;
+      try {
+        const result = await supabaseUntyped
+          .from('schools')
+          .update({
+            motto: form.motto,
+            primary_color: form.primary_color,
+            secondary_color: form.secondary_color,
+            logo_url: form.logo_url,
+            address: form.address,
+            phone: form.phone,
+            email: form.email,
+            website: form.website,
+            principal_name: form.principal_name,
+          })
+          .eq('id', user?.schoolId);
+        error = result.error;
+      } catch (err: any) {
+        if (err.message?.includes('motto') || err.message?.includes('schema cache')) {
+          // Retry without motto
+          const result = await supabaseUntyped
+            .from('schools')
+            .update({
+              primary_color: form.primary_color,
+              secondary_color: form.secondary_color,
+              logo_url: form.logo_url,
+              address: form.address,
+              phone: form.phone,
+              email: form.email,
+              website: form.website,
+              principal_name: form.principal_name,
+            })
+            .eq('id', user?.schoolId);
+          error = result.error;
+        } else {
+          throw err;
+        }
+      }
       if (error) throw error;
       toast.success('School branding saved!');
     } catch (err: any) {

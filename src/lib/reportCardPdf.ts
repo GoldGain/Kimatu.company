@@ -467,10 +467,11 @@ export async function drawReportHeader(
     : false;
 
   doc.setTextColor(255, 255, 255);
-  // School name — always prominent
+  // School name — always prominent, never fall back to generic 'School'
+  const displayName = schoolInfo.name?.trim() || 'IIANI SENIOR SCHOOL';
   doc.setFontSize(logoAdded ? 14 : 16);
   doc.setFont('helvetica', 'bold');
-  doc.text(schoolInfo.name || 'School', logoAdded ? 40 : 105, logoAdded ? 11 : 11, { align: logoAdded ? 'left' : 'center' });
+  doc.text(displayName, logoAdded ? 40 : 105, logoAdded ? 11 : 11, { align: logoAdded ? 'left' : 'center' });
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');

@@ -85,19 +85,37 @@ export default function SchoolAdminResults() {
   const fetchAll = async () => {
     setLoading(true);
     const schoolId = user?.schoolId ?? '';
-    const [{ data: r }, { data: c }, { data: t }, { data: sch }] = await Promise.all([
-      supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
-      supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
-      supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
-      supabaseUntyped.from('schools').select('name, motto, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
-    ]);
-    setResults(r || []);
-    setClasses(c || []);
-    setTerms(t || []);
+    let sch: any = null;
+    try {
+      const results = await Promise.all([
+        supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
+        supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
+        supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
+        supabaseUntyped.from('schools').select('name, motto, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
+      ]);
+      setResults((results[0].data as any[]) || []);
+      setClasses((results[1].data as any[]) || []);
+      setTerms((results[2].data as any[]) || []);
+      sch = results[3].data;
+    } catch (err: any) {
+      // If motto column doesn't exist, fetch without it
+      if (err.message?.includes('motto')) {
+        const results = await Promise.all([
+          supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
+          supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
+          supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
+          supabaseUntyped.from('schools').select('name, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
+        ]);
+        setResults((results[0].data as any[]) || []);
+        setClasses((results[1].data as any[]) || []);
+        setTerms((results[2].data as any[]) || []);
+        sch = results[3].data;
+      }
+    }
     if (sch) {
-      setSchoolName(sch.name || 'School');
+      setSchoolName(sch.name?.trim() || 'IIANI SENIOR SCHOOL');
       setSchoolInfo({
-        name: sch.name || 'School',
+        name: sch.name?.trim() || 'IIANI SENIOR SCHOOL',
         motto: sch.motto || '',
         logo_url: sch.logo_url || null,
         principal_name: sch.principal_name || '',

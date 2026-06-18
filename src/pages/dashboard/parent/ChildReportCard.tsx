@@ -107,21 +107,49 @@ export default function ParentChildReportCard() {
   };
 
   const fetchSchoolInfo = async (schoolId: string) => {
-    const { data } = await supabaseUntyped
-      .from('schools')
-      .select('name, motto, logo_url, principal_name, address, phone, email')
-      .eq('id', schoolId)
-      .maybeSingle();
-    if (data) {
-      setSchoolInfo({
-        name: data.name || 'School',
-        motto: data.motto || '',
-        logo_url: data.logo_url || null,
-        principal_name: data.principal_name || '',
-        address: data.address || '',
-        phone: data.phone || '',
-        email: data.email || '',
-      });
+    try {
+      const { data } = await supabaseUntyped
+        .from('schools')
+        .select('name, motto, logo_url, principal_name, address, phone, email')
+        .eq('id', schoolId)
+        .maybeSingle();
+      if (data) {
+        setSchoolInfo({
+          name: data.name?.trim() || 'IIANI SENIOR SCHOOL',
+          motto: data.motto || '',
+          logo_url: data.logo_url || null,
+          principal_name: data.principal_name || '',
+          address: data.address || '',
+          phone: data.phone || '',
+          email: data.email || '',
+        });
+      } else {
+        setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+      }
+    } catch (err: any) {
+      // If motto column doesn't exist, fetch without it
+      if (err.message?.includes('motto')) {
+        const { data } = await supabaseUntyped
+          .from('schools')
+          .select('name, logo_url, principal_name, address, phone, email')
+          .eq('id', schoolId)
+          .maybeSingle();
+        if (data) {
+          setSchoolInfo({
+            name: data.name?.trim() || 'IIANI SENIOR SCHOOL',
+            motto: '',
+            logo_url: data.logo_url || null,
+            principal_name: data.principal_name || '',
+            address: data.address || '',
+            phone: data.phone || '',
+            email: data.email || '',
+          });
+        } else {
+          setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+        }
+      } else {
+        setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+      }
     }
   };
 
@@ -320,7 +348,7 @@ export default function ParentChildReportCard() {
       await drawReportHeader(doc, schoolInfo);
       const photoUrl = selectedChild.photo_url || null;
       if (photoUrl) {
-        await addStudentPhotoToPDF(doc, photoUrl, 168, 33, 30);
+        await addStudentPhotoToPDF(doc, photoUrl, 163, 30, 35);
       }
       drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', classDataForGrading.name || 'N/A', term?.name || '', term?.academic_year || '', positionStr);
       const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);

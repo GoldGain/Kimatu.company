@@ -30,12 +30,24 @@ export default function SchoolAdminAnnouncements() {
 
   const fetchSchoolInfo = async () => {
     if (!user?.schoolId) return;
-    const { data } = await supabaseUntyped
-      .from('schools')
-      .select('name, motto, logo_url, principal_name, address, phone, email')
-      .eq('id', user.schoolId)
-      .maybeSingle();
-    setSchoolInfo(data);
+    try {
+      const { data } = await supabaseUntyped
+        .from('schools')
+        .select('name, motto, logo_url, principal_name, address, phone, email')
+        .eq('id', user.schoolId)
+        .maybeSingle();
+      setSchoolInfo(data);
+    } catch (err: any) {
+      // If motto column doesn't exist, fetch without it
+      if (err.message?.includes('motto')) {
+        const { data } = await supabaseUntyped
+          .from('schools')
+          .select('name, logo_url, principal_name, address, phone, email')
+          .eq('id', user.schoolId)
+          .maybeSingle();
+        setSchoolInfo(data);
+      }
+    }
   };
 
   const fetchClasses = async () => {
