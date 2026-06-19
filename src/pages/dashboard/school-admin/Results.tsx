@@ -940,26 +940,27 @@ export default function SchoolAdminResults() {
               ) : (
                 filtered.map(r => {
                   const dev = r.deviation;
-                  // Recompute grade live from percentage using the correct grading logic
-                  // (same as report cards) so search results always match report cards.
                   const pct = r.percentage !== undefined && r.percentage !== null
                     ? Number(r.percentage)
                     : Math.round((r.marks / (r.out_of || 100)) * 100);
-                  const classDataForRow = r.classes || classes.find((c: any) => c.id === r.class_id);
-                  const rowBand = getSchoolLevelBand(classDataForRow);
-                  const is844Row = rowBand === '844';
-                  const isPrimaryRow = rowBand === 'primary';
+                  // Use stored grade values directly — they are already correctly computed
+                  // by the upload flow and match what report cards show.
+                  // r.curriculum tells us which system: '844' or 'CBE'.
+                  // For CBE: use cbc_sublevel (ME1/EE2/etc.) for junior/senior,
+                  //           or cbc_grade (ME/EE/etc.) for primary (cbc_sublevel is null).
+                  // For 844: use grade_844 (A/B+/etc.).
+                  const is844Row = String(r.curriculum || '').toUpperCase() === '844';
                   let displayGrade = '';
                   let displayPoints: number | null = null;
                   if (is844Row) {
-                    const g844 = calculate844Grade(pct);
-                    displayGrade = g844.grade;
-                    displayPoints = g844.points;
+                    displayGrade = r.grade_844 || '';
+                    displayPoints = r.points_844 != null ? Number(r.points_844) : null;
                   } else {
-                    const gcbc = calculateCompetencyGrade(pct, rowBand);
-                    // Primary: show only cbc_grade (EE/ME/AE/BE), no sub-level, no points
-                    displayGrade = isPrimaryRow ? gcbc.grade : gcbc.subLevel;
-                    displayPoints = isPrimaryRow ? null : gcbc.points;
+                    // CBE: prefer cbc_sublevel (has sub-level like ME1); fall back to cbc_grade
+                    displayGrade = r.cbc_sublevel || r.cbc_grade || '';
+                    // Primary has no points (cbc_points = 0 or null)
+                    const pts = r.cbc_points != null ? Number(r.cbc_points) : null;
+                    displayPoints = pts && pts > 0 ? pts : null;
                   }
                   return (
                     <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
