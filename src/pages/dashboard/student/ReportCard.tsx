@@ -90,7 +90,7 @@ export default function StudentReportCard() {
         .maybeSingle();
       if (data) {
         setSchoolInfo({
-          name: data.name?.trim() || 'IIANI SENIOR SCHOOL',
+          name: data.name?.trim() || 'School',
           motto: data.motto || '',
           logo_url: data.logo_url || null,
           principal_name: data.principal_name || '',
@@ -99,7 +99,7 @@ export default function StudentReportCard() {
           email: data.email || '',
         });
       } else {
-        setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+        setSchoolInfo({ name: 'School' });
       }
     } catch (err: any) {
       // If motto column doesn't exist, fetch without it
@@ -111,7 +111,7 @@ export default function StudentReportCard() {
           .maybeSingle();
         if (data) {
           setSchoolInfo({
-            name: data.name?.trim() || 'IIANI SENIOR SCHOOL',
+            name: data.name?.trim() || 'School',
             motto: '',
             logo_url: data.logo_url || null,
             principal_name: data.principal_name || '',
@@ -120,10 +120,10 @@ export default function StudentReportCard() {
             email: data.email || '',
           });
         } else {
-          setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+          setSchoolInfo({ name: 'School' });
         }
       } else {
-        setSchoolInfo({ name: 'IIANI SENIOR SCHOOL' });
+        setSchoolInfo({ name: 'School' });
       }
     }
   };

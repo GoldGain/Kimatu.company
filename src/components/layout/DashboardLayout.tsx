@@ -79,6 +79,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/timetable/view' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/school-admin/fees' },
     { label: 'Results', icon: <FileText className="w-5 h-5" />, path: '/school-admin/results' },
+    { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/stream-dashboard' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
     { label: 'Branding & Notifications', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/school-admin/profile' },
@@ -86,6 +87,8 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'teacher': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/teacher' },
+    { label: 'Class Dashboard', icon: <Users className="w-5 h-5" />, path: '/teacher/class-dashboard' },
+    { label: 'Subject Dashboard', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/subject-dashboard' },
     { label: 'My Subjects', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/my-subjects' },
     { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/timetable' },
     { label: 'Upload Results', icon: <Upload className="w-5 h-5" />, path: '/teacher/results/upload' },

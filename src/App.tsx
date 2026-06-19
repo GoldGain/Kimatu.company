@@ -52,6 +52,9 @@ import TeacherStudents from '@/pages/dashboard/teacher/Students';
 import TeacherLessonPlan from '@/pages/dashboard/teacher/LessonPlan';
 import TeacherMySubjects from '@/pages/dashboard/teacher/MySubjects';
 import TeacherExamTimetable from '@/pages/dashboard/teacher/ExamTimetable';
+import ClassTeacherDashboard from '@/pages/dashboard/class-teacher/Dashboard';
+import SubjectTeacherDashboard from '@/pages/dashboard/subject-teacher/Dashboard';
+import StreamDashboard from '@/pages/dashboard/stream/Dashboard';
 import StudentDashboard from '@/pages/dashboard/student/Dashboard';
 import StudentResults from '@/pages/dashboard/student/Results';
 import StudentFees from '@/pages/dashboard/student/Fees';
@@ -144,6 +147,7 @@ function AppRoutes() {
 
       {/* School Admin routes */}
       <Route path="/school-admin" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminDashboard /></ProtectedRoute>} />
+      <Route path="/school-admin/stream-dashboard" element={<ProtectedRoute allowedRoles={['school_admin']}><StreamDashboard /></ProtectedRoute>} />
       <Route path="/school-admin/students" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminStudents /></ProtectedRoute>} />
       <Route path="/school-admin/teachers" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTeachers /></ProtectedRoute>} />
       <Route path="/school-admin/classes" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminClasses /></ProtectedRoute>} />
@@ -162,6 +166,8 @@ function AppRoutes() {
 
       {/* Teacher routes */}
       <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherDashboard /></ProtectedRoute>} />
+      <Route path="/teacher/class-dashboard" element={<ProtectedRoute allowedRoles={['teacher']}><ClassTeacherDashboard /></ProtectedRoute>} />
+      <Route path="/teacher/subject-dashboard" element={<ProtectedRoute allowedRoles={['teacher']}><SubjectTeacherDashboard /></ProtectedRoute>} />
       <Route path="/teacher/results/upload" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherResultsUpload /></ProtectedRoute>} />
       <Route path="/teacher/attendance" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherAttendance /></ProtectedRoute>} />
       <Route path="/teacher/homework" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherHomework /></ProtectedRoute>} />

@@ -315,19 +315,22 @@ export async function addLogoToPDF(
   try {
     let dataUrl: string;
 
+    const getSafeUrl = (url: string) => {
+      if (url.startsWith('data:')) return url;
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}t=${Date.now()}`;
+    };
+
     if (logoUrl.startsWith('data:')) {
-      // Already a data URL — render through canvas to normalise format
       dataUrl = await renderToCanvas(logoUrl);
     } else {
-      // Strip cache-busting query param for fetch, but keep original for img.src
       const fetchUrl = logoUrl.split('?')[0];
       let blob: Blob | null = null;
 
-      // Try fetch first (works when CORS headers are set)
       try {
-        const resp = await fetch(fetchUrl, { mode: 'cors' });
+        const resp = await fetch(getSafeUrl(fetchUrl), { mode: 'cors' });
         if (resp.ok) blob = await resp.blob();
-      } catch { /* fall through to img-based approach */ }
+      } catch { /* fall through */ }
 
       if (blob) {
         const blobUrl = URL.createObjectURL(blob);
@@ -337,14 +340,18 @@ export async function addLogoToPDF(
           URL.revokeObjectURL(blobUrl);
         }
       } else {
-        // Fallback: load directly via <img> (works for same-origin or CORS-enabled CDN)
-        dataUrl = await renderToCanvas(logoUrl);
+        try {
+          dataUrl = await renderToCanvas(getSafeUrl(logoUrl));
+        } catch {
+          dataUrl = await renderToCanvas(logoUrl);
+        }
       }
     }
 
     doc.addImage(dataUrl, 'PNG', x, y, maxWidth, maxHeight);
     return true;
-  } catch {
+  } catch (err) {
+    console.error('Logo rendering failed:', err);
     return false;
   }
 }
@@ -492,7 +499,7 @@ export async function drawReportHeader(
 
   doc.setTextColor(255, 255, 255);
   // School name — always prominent, never fall back to generic 'School'
-  const displayName = schoolInfo.name?.trim() || 'IIANI SENIOR SCHOOL';
+  const displayName = schoolInfo.name?.trim() || 'School';
   doc.setFontSize(logoAdded ? 14 : 16);
   doc.setFont('helvetica', 'bold');
   doc.text(displayName, logoAdded ? 40 : 105, logoAdded ? 11 : 11, { align: logoAdded ? 'left' : 'center' });

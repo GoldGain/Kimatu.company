@@ -82,6 +82,11 @@ export default function SchoolAdminResults() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  const getPercentage = (r: any) => {
+    if (r.percentage !== undefined && r.percentage !== null) return Number(r.percentage);
+    return Math.round((r.marks / (r.out_of || 100)) * 100);
+  };
+
   const fetchAll = async () => {
     setLoading(true);
     const schoolId = user?.schoolId ?? '';
@@ -113,9 +118,9 @@ export default function SchoolAdminResults() {
       }
     }
     if (sch) {
-      setSchoolName(sch.name?.trim() || 'IIANI SENIOR SCHOOL');
+      setSchoolName(sch.name?.trim() || 'School');
       setSchoolInfo({
-        name: sch.name?.trim() || 'IIANI SENIOR SCHOOL',
+        name: sch.name?.trim() || 'School',
         motto: sch.motto || '',
         logo_url: sch.logo_url || null,
         principal_name: sch.principal_name || '',
@@ -524,7 +529,7 @@ export default function SchoolAdminResults() {
         doc.text(`STUDENT RESULTS TABLE — ${classObj?.name || ''} — ${termObj?.name || ''} ${termObj?.academic_year || ''}`, 105, 16, { align: 'center' });
 
         const subjectShorts = allSubjects.map(s => shortName(s));
-        const tableHeaders = isPrimary ? ['POS', 'Student', ...subjectShorts, 'Total', 'Avg%', 'Grade'] : ['POS', 'Student', ...subjectShorts, 'Total', 'Pts', 'Grade'];
+        const tableHeaders = isPrimary ? ['POS', 'Student', ...subjectShorts, 'Total', 'Avg%', 'Grade'] : ['POS', 'Student', ...subjectShorts, 'Total', 'Avg%', 'Pts', 'Grade'];
 
         const tableRows = summaries.map((s: any) => {
           const gr = is844 ? overallGrade844(s.avgPct) : overallGradeWithBand(s.avgPct, band);
@@ -534,13 +539,13 @@ export default function SchoolAdminResults() {
             if (isPrimary) return `${pct.toFixed(0)}% ${(subGrade as any).grade || (subGrade as any).subLevel}`;
             return `${pct.toFixed(0)}% ${(subGrade as any).subLevel || (subGrade as any).grade}`;
           });
-          if (isPrimary) { return [`${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`, `${s.student?.first_name || ''} ${s.student?.last_name || ''}`, ...subjectCells, `${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`, `${s.avgPct.toFixed(1)}%`, (gr as any).grade || (gr as any).subLevel]; }
-          else { return [`${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`, `${s.student?.first_name || ''} ${s.student?.last_name || ''}`, ...subjectCells, `${s.totalPct.toFixed(0)}/${allSubjects.length * 100}`, String(s.totalPoints), (gr as any).subLevel || (gr as any).grade]; }
+                  if (isPrimary) { return [`${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`, `${s.student?.first_name || ''} ${s.student?.last_name || ''}`, ...subjectCells, `${s.totalPct.toFixed(0)}`, `${s.avgPct.toFixed(1)}%`, (gr as any).grade || (gr as any).subLevel]; }
+          else { return [`${s.position}${s.position === 1 ? 'st' : s.position === 2 ? 'nd' : s.position === 3 ? 'rd' : 'th'}`, `${s.student?.first_name || ''} ${s.student?.last_name || ''}`, ...subjectCells, `${s.totalPct.toFixed(0)}`, `${s.avgPct.toFixed(1)}%`, String(s.totalPoints), (gr as any).subLevel || (gr as any).grade]; }
         });
 
         const subjectMeans = allSubjects.map(sub => { const vals = summaries.map(s => s.subjects[sub]).filter(v => v !== undefined); return vals.length ? `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)}%` : '-'; });
         if (isPrimary) { tableRows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', `${classMean.toFixed(1)}%`, overallGradeWithBand(classMean, band).grade]); }
-        else { tableRows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', '', is844 ? overallGrade844(classMean).grade : overallGradeWithBand(classMean, band).subLevel]); }
+        else { tableRows.push(['', 'SUBJECT MEAN', ...subjectMeans, '', `${classMean.toFixed(1)}%`, '', is844 ? overallGrade844(classMean).grade : overallGradeWithBand(classMean, band).subLevel]); }
 
         autoTable(doc, { startY: 24, head: [tableHeaders], body: tableRows, styles: { fontSize: 6.5, cellPadding: 1 }, headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 6.5, fontStyle: 'bold' }, alternateRowStyles: { fillColor: [245, 247, 255] }, didParseCell: (data: any) => { if (data.section === 'body' && data.row.index === tableRows.length - 1) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = [230, 240, 255]; } } });
         doc.setFontSize(7); doc.setTextColor(150, 150, 150);
@@ -940,9 +945,8 @@ export default function SchoolAdminResults() {
               ) : (
                 filtered.map(r => {
                   const dev = r.deviation;
-                  const pct = r.percentage !== undefined && r.percentage !== null
-                    ? Number(r.percentage)
-                    : Math.round((r.marks / (r.out_of || 100)) * 100);
+                  const isPrimary = getSchoolLevelBand(r.classes) === 'primary';
+                  const pct = getPercentage(r);
                   // Use stored grade values directly — they are already correctly computed
                   // by the upload flow and match what report cards show.
                   // r.curriculum tells us which system: '844' or 'CBE'.
@@ -978,7 +982,7 @@ export default function SchoolAdminResults() {
                       <td className="px-6 py-4">
                         <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(displayGrade)}`}>{displayGrade}</span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-[#666666]">{displayPoints !== null ? displayPoints : '—'}</td>
+                      <td className="px-6 py-4 text-sm text-[#666666]">{isPrimary ? '—' : (displayPoints !== null ? displayPoints : '—')}</td>
                       <td className="px-6 py-4">
                         {dev !== null && dev !== undefined ? (
                           <span className={`flex items-center gap-1 text-xs font-semibold ${Number(dev) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
