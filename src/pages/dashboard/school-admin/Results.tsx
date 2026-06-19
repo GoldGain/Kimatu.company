@@ -206,6 +206,7 @@ export default function SchoolAdminResults() {
       const percentage = Math.round((marks / outOf) * 100);
       const classObj = classes.find(c => c.id === editingResult.class_id);
       const band = getSchoolLevelBand(classObj);
+      const isPrimaryBand = band === 'primary';
       const cbcResult = calculateCompetencyGrade(percentage, band === '844' ? 'junior' : band);
       const grade844Result = calculate844Grade(percentage);
       const { error } = await supabaseUntyped.from('results').update({
@@ -213,9 +214,10 @@ export default function SchoolAdminResults() {
         out_of: outOf,
         percentage,
         converted_marks: marks,
-        cbc_sublevel: cbcResult.subLevel,
+        // Primary: cbc_sublevel must be null (enum only accepts EE1/ME1 etc.)
+        cbc_sublevel: isPrimaryBand ? null : (cbcResult.subLevel || null),
         cbc_grade: cbcResult.grade,
-        cbc_points: cbcResult.points,
+        cbc_points: isPrimaryBand ? null : cbcResult.points,
         cbc_descriptor: cbcResult.descriptor,
         grade_844: grade844Result.grade,
         points_844: grade844Result.points,

@@ -294,21 +294,23 @@ export async function addLogoToPDF(
   if (!logoUrl) return false;
 
   // Helper: render any image (including SVG/WebP) to PNG data URL via canvas
-  const renderToCanvas = (src: string): Promise<string> =>
+  const renderToCanvas = (src: string, timeoutMs = 8000): Promise<string> =>
     new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Image load timeout')), timeoutMs);
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
+        clearTimeout(timer);
         const canvas = document.createElement('canvas');
         // Use 2× resolution for sharpness
         const scale = 2;
-        canvas.width = img.naturalWidth * scale || maxWidth * 3.78 * scale;
-        canvas.height = img.naturalHeight * scale || maxHeight * 3.78 * scale;
+        canvas.width = (img.naturalWidth || maxWidth * 3.78) * scale;
+        canvas.height = (img.naturalHeight || maxHeight * 3.78) * scale;
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/png'));
       };
-      img.onerror = reject;
+      img.onerror = (e) => { clearTimeout(timer); reject(e); };
       img.src = src;
     });
 
@@ -324,13 +326,29 @@ export async function addLogoToPDF(
     if (logoUrl.startsWith('data:')) {
       dataUrl = await renderToCanvas(logoUrl);
     } else {
+      // Strip existing query params for a clean fetch URL
       const fetchUrl = logoUrl.split('?')[0];
       let blob: Blob | null = null;
 
+      // Attempt 1: fetch with explicit CORS headers and cache-control
       try {
-        const resp = await fetch(getSafeUrl(fetchUrl), { mode: 'cors' });
+        const resp = await fetch(getSafeUrl(fetchUrl), {
+          mode: 'cors',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        });
         if (resp.ok) blob = await resp.blob();
-      } catch { /* fall through */ }
+      } catch { /* fall through to next attempt */ }
+
+      // Attempt 2: fetch without custom headers (some CDNs reject extra headers)
+      if (!blob) {
+        try {
+          const resp = await fetch(fetchUrl, { mode: 'cors' });
+          if (resp.ok) blob = await resp.blob();
+        } catch { /* fall through */ }
+      }
 
       if (blob) {
         const blobUrl = URL.createObjectURL(blob);
@@ -340,6 +358,7 @@ export async function addLogoToPDF(
           URL.revokeObjectURL(blobUrl);
         }
       } else {
+        // Fallback: direct img src (works if CORS headers are set on bucket)
         try {
           dataUrl = await renderToCanvas(getSafeUrl(logoUrl));
         } catch {

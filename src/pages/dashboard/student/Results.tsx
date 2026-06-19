@@ -143,8 +143,23 @@ export default function StudentResults() {
     return 'Below Expectation';
   };
 
+  // Determine the display grade for a result row, respecting primary vs junior/senior
+  const getDisplayGrade = (r: any): string => {
+    const is844 = String(r.curriculum || '').toUpperCase() === '844';
+    if (is844) return r.grade_844 || '';
+    // For CBE: primary uses cbc_grade (EE/ME/AE/BE), junior/senior uses cbc_sublevel (EE1/ME1/etc.)
+    return r.cbc_sublevel || r.cbc_grade || '';
+  };
+
+  const getDisplayPoints = (r: any): number | null => {
+    const is844 = String(r.curriculum || '').toUpperCase() === '844';
+    if (is844) return r.points_844 != null ? Number(r.points_844) : null;
+    const pts = r.cbc_points != null ? Number(r.cbc_points) : null;
+    return pts && pts > 0 ? pts : null;
+  };
+
   const filtered = filter === 'all' ? results : results.filter(r => {
-    const grade = r.cbc_grade || r.grade_844 || '';
+    const grade = getDisplayGrade(r);
     return grade.startsWith(filter);
   });
 
@@ -316,12 +331,12 @@ export default function StudentResults() {
                     <td className="px-6 py-4 text-sm font-medium">{r.marks}</td>
                     <td className="px-6 py-4 text-sm font-medium">{r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100)}%</td>
                     <td className="px-6 py-4">
-                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_844)}`}>
-                        {r.cbc_grade || r.grade_844}
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(getDisplayGrade(r))}`}>
+                        {getDisplayGrade(r)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-[#666666]">{r.cbc_points || r.points_844}</td>
-                    <td className="px-6 py-4 text-sm text-[#666666]">{gradeDescriptor(r.cbc_grade || r.grade_844)}</td>
+                    <td className="px-6 py-4 text-sm text-[#666666]">{getDisplayPoints(r) ?? '—'}</td>
+                    <td className="px-6 py-4 text-sm text-[#666666]">{gradeDescriptor(getDisplayGrade(r))}</td>
                     <td className="px-6 py-4 text-sm text-[#666666]">{r.terms?.name}</td>
                   </tr>
                 ))

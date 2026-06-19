@@ -331,10 +331,10 @@ export default function TeacherResultsUpload() {
         out_of: row.out_of,
         percentage: row.percentage,
         converted_marks: row.percentage,
-        // For primary: sub-level is null (no EE1/ME1 etc.) and points are 0
-        cbc_sublevel: isPrimaryClass ? null : row.cbcGrade.subLevel,
+        // For primary: sub-level is null (no EE1/ME1 etc.) and points are null
+        cbc_sublevel: isPrimaryClass ? null : (row.cbcGrade.subLevel || null),
         cbc_grade: row.cbcGrade.grade,
-        cbc_points: isPrimaryClass ? 0 : row.cbcGrade.points,
+        cbc_points: isPrimaryClass ? null : row.cbcGrade.points,
         cbc_descriptor: row.cbcGrade.descriptor,
         grade_844: row.grade844.grade,
         position: row.position,
