@@ -315,6 +315,9 @@ export default function TeacherResultsUpload() {
     try {
       const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
       const teacherId = teacherData?.id ?? '';
+      // Primary (Grades 1-6): cbc_sublevel MUST be null (enum only accepts EE1/ME1 etc.)
+      // Primary grades use cbc_grade (EE/ME/AE/BE) with no sub-level and no points.
+      const isPrimaryClass = currentBand === 'primary';
       const records = dataToSubmit.map((row) => ({
         school_id: user?.schoolId ?? '',
         student_id: row.student_id,
@@ -328,9 +331,10 @@ export default function TeacherResultsUpload() {
         out_of: row.out_of,
         percentage: row.percentage,
         converted_marks: row.percentage,
-        cbc_sublevel: row.cbcGrade.subLevel,
+        // For primary: sub-level is null (no EE1/ME1 etc.) and points are 0
+        cbc_sublevel: isPrimaryClass ? null : row.cbcGrade.subLevel,
         cbc_grade: row.cbcGrade.grade,
-        cbc_points: row.cbcGrade.points,
+        cbc_points: isPrimaryClass ? 0 : row.cbcGrade.points,
         cbc_descriptor: row.cbcGrade.descriptor,
         grade_844: row.grade844.grade,
         position: row.position,

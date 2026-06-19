@@ -88,7 +88,7 @@ export default function SchoolAdminResults() {
     let sch: any = null;
     try {
       const results = await Promise.all([
-        supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
+        supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name), classes(curriculum, grade_level, level, name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
         supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
         supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
         supabaseUntyped.from('schools').select('name, motto, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
@@ -101,7 +101,7 @@ export default function SchoolAdminResults() {
       // If motto column doesn't exist, fetch without it
       if (err.message?.includes('motto')) {
         const results = await Promise.all([
-          supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
+          supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name), classes(curriculum, grade_level, level, name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
           supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
           supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
           supabaseUntyped.from('schools').select('name, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
@@ -940,6 +940,27 @@ export default function SchoolAdminResults() {
               ) : (
                 filtered.map(r => {
                   const dev = r.deviation;
+                  // Recompute grade live from percentage using the correct grading logic
+                  // (same as report cards) so search results always match report cards.
+                  const pct = r.percentage !== undefined && r.percentage !== null
+                    ? Number(r.percentage)
+                    : Math.round((r.marks / (r.out_of || 100)) * 100);
+                  const classDataForRow = r.classes || classes.find((c: any) => c.id === r.class_id);
+                  const rowBand = getSchoolLevelBand(classDataForRow);
+                  const is844Row = rowBand === '844';
+                  const isPrimaryRow = rowBand === 'primary';
+                  let displayGrade = '';
+                  let displayPoints: number | null = null;
+                  if (is844Row) {
+                    const g844 = calculate844Grade(pct);
+                    displayGrade = g844.grade;
+                    displayPoints = g844.points;
+                  } else {
+                    const gcbc = calculateCompetencyGrade(pct, rowBand);
+                    // Primary: show only cbc_grade (EE/ME/AE/BE), no sub-level, no points
+                    displayGrade = isPrimaryRow ? gcbc.grade : gcbc.subLevel;
+                    displayPoints = isPrimaryRow ? null : gcbc.points;
+                  }
                   return (
                     <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
@@ -952,11 +973,11 @@ export default function SchoolAdminResults() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-[#666666]">{r.subjects?.name}</td>
-                      <td className="px-6 py-4 text-sm font-medium">{r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100)}%</td>
+                      <td className="px-6 py-4 text-sm font-medium">{pct}%</td>
                       <td className="px-6 py-4">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_844)}`}>{r.cbc_grade || r.grade_844}</span>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(displayGrade)}`}>{displayGrade}</span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-[#666666]">{r.cbc_points || r.points_844}</td>
+                      <td className="px-6 py-4 text-sm text-[#666666]">{displayPoints !== null ? displayPoints : '—'}</td>
                       <td className="px-6 py-4">
                         {dev !== null && dev !== undefined ? (
                           <span className={`flex items-center gap-1 text-xs font-semibold ${Number(dev) >= 0 ? 'text-green-600' : 'text-red-600'}`}>

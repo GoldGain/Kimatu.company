@@ -292,34 +292,58 @@ export async function addLogoToPDF(
   maxHeight: number
 ): Promise<boolean> {
   if (!logoUrl) return false;
-  try {
-    if (logoUrl.startsWith('data:')) {
+
+  // Helper: render any image (including SVG/WebP) to PNG data URL via canvas
+  const renderToCanvas = (src: string): Promise<string> =>
+    new Promise((resolve, reject) => {
       const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = logoUrl;
-      });
-      const format = logoUrl.includes('image/png') ? 'PNG' : 'JPEG';
-      doc.addImage(logoUrl, format, x, y, maxWidth, maxHeight);
-      return true;
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Use 2× resolution for sharpness
+        const scale = 2;
+        canvas.width = img.naturalWidth * scale || maxWidth * 3.78 * scale;
+        canvas.height = img.naturalHeight * scale || maxHeight * 3.78 * scale;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+
+  try {
+    let dataUrl: string;
+
+    if (logoUrl.startsWith('data:')) {
+      // Already a data URL — render through canvas to normalise format
+      dataUrl = await renderToCanvas(logoUrl);
+    } else {
+      // Strip cache-busting query param for fetch, but keep original for img.src
+      const fetchUrl = logoUrl.split('?')[0];
+      let blob: Blob | null = null;
+
+      // Try fetch first (works when CORS headers are set)
+      try {
+        const resp = await fetch(fetchUrl, { mode: 'cors' });
+        if (resp.ok) blob = await resp.blob();
+      } catch { /* fall through to img-based approach */ }
+
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        try {
+          dataUrl = await renderToCanvas(blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      } else {
+        // Fallback: load directly via <img> (works for same-origin or CORS-enabled CDN)
+        dataUrl = await renderToCanvas(logoUrl);
+      }
     }
-    // For remote URLs, fetch and convert to data URL
-    try {
-      const response = await fetch(logoUrl);
-      const blob = await response.blob();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      const format = dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-      doc.addImage(dataUrl, format, x, y, maxWidth, maxHeight);
-      return true;
-    } catch {
-      return false;
-    }
+
+    doc.addImage(dataUrl, 'PNG', x, y, maxWidth, maxHeight);
+    return true;
   } catch {
     return false;
   }
