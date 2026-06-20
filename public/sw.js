@@ -1,5 +1,5 @@
-// CBE-Analytics Service Worker - v1.0
-const CACHE_NAME = 'eduhub-v1';
+// CBE-Analytics Service Worker - v2.0
+const CACHE_NAME = 'eduhub-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
