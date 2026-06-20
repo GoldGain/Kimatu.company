@@ -73,3 +73,30 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── Results Table Print Styles ─────────────────────────────────────────── */
+@media print {
+  .results-table {
+    font-size: 10px !important;
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+  .results-table th {
+    background-color: #2563EB !important;
+    color: #ffffff !important;
+    border: 1px solid #1d4ed8 !important;
+    padding: 6px 8px !important;
+    font-weight: 600 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .results-table td {
+    border: 1px solid #d1d5db !important;
+    padding: 5px 8px !important;
+  }
+  .results-table tr:nth-child(even) td {
+    background-color: #f9fafb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

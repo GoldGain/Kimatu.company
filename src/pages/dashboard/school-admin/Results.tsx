@@ -97,7 +97,7 @@ export default function SchoolAdminResults() {
         supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name), classes(curriculum, grade_level, level, name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
         supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
         supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
-        supabaseUntyped.from('schools').select('name, motto, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
+        supabaseUntyped.from('schools').select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email').eq('id', schoolId).maybeSingle(),
       ]);
       setResults((results[0].data as any[]) || []);
       setClasses((results[1].data as any[]) || []);
@@ -110,7 +110,7 @@ export default function SchoolAdminResults() {
           supabaseUntyped.from('results').select('*, students(first_name, last_name, admission_number), subjects(name), classes(curriculum, grade_level, level, name)').eq('school_id', schoolId).order('created_at', { ascending: false }),
           supabaseUntyped.from('classes').select('*').eq('school_id', schoolId).order('level'),
           supabaseUntyped.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
-          supabaseUntyped.from('schools').select('name, logo_url, principal_name, principal_signature_url').eq('id', schoolId).maybeSingle(),
+          supabaseUntyped.from('schools').select('name, logo_url, principal_name, principal_signature_url, address, phone, email').eq('id', schoolId).maybeSingle(),
         ]);
         setResults((results[0].data as any[]) || []);
         setClasses((results[1].data as any[]) || []);
@@ -125,6 +125,9 @@ export default function SchoolAdminResults() {
         motto: sch.motto || '',
         logo_url: sch.logo_url || null,
         principal_name: sch.principal_name || '',
+        address: sch.address || '',
+        phone: sch.phone || '',
+        email: sch.email || '',
       });
       setPrincipalSignatureUrl(sch.principal_signature_url || null);
     }
@@ -933,17 +936,17 @@ export default function SchoolAdminResults() {
 
       <div className="bg-white rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full border-collapse results-table">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50">
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Student</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Subject</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Marks</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Grade</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Points</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">DEV</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Status</th>
-                <th className="text-left text-xs font-medium text-[#666666] uppercase px-6 py-4">Actions</th>
+              <tr className="bg-[#2563EB] text-white">
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Student</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Subject</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Marks</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Grade</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Points</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">DEV</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Status</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -976,23 +979,23 @@ export default function SchoolAdminResults() {
                     displayPoints = pts && pts > 0 ? pts : null;
                   }
                   return (
-                    <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs font-bold"><Award className="w-4 h-4" /></div>
+                    <tr key={r.id} className="border-b border-gray-200 hover:bg-blue-50 transition-colors even:bg-gray-50/50">
+                      <td className="px-4 py-3 border border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-bold flex-shrink-0"><Award className="w-3.5 h-3.5" /></div>
                           <div>
-                            <span className="text-sm font-medium">{r.students?.first_name} {r.students?.last_name}</span><br />
-                            <span className="text-xs text-[#666666]">{r.students?.admission_number}</span>
+                            <span className="text-sm font-semibold text-[#111111]">{r.students?.first_name} {r.students?.last_name}</span><br />
+                            <span className="text-xs text-[#888888]">{r.students?.admission_number}</span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-[#666666]">{r.subjects?.name}</td>
-                      <td className="px-6 py-4 text-sm font-medium">{pct}%</td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 border border-gray-200 text-sm font-medium text-[#333333]">{r.subjects?.name}</td>
+                      <td className="px-4 py-3 border border-gray-200 text-sm font-bold text-[#111111]">{pct}%</td>
+                      <td className="px-4 py-3 border border-gray-200">
                         <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(displayGrade)}`}>{displayGrade}</span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-[#666666]">{isPrimary ? '—' : (displayPoints !== null ? displayPoints : '—')}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 border border-gray-200 text-sm font-medium text-center">{isPrimary ? <span className="text-gray-400">—</span> : (displayPoints !== null ? <span className="font-bold text-blue-700">{displayPoints}</span> : <span className="text-gray-400">—</span>)}</td>
+                      <td className="px-4 py-3 border border-gray-200">
                         {dev !== null && dev !== undefined ? (
                           <span className={`flex items-center gap-1 text-xs font-semibold ${Number(dev) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {Number(dev) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -1002,10 +1005,10 @@ export default function SchoolAdminResults() {
                           <span className="text-xs text-gray-400 flex items-center gap-1"><Minus className="w-3 h-3" />NEW</span>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 border border-gray-200">
                         <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${r.status === 'published' ? 'bg-green-100 text-green-700' : r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{r.status}</span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 border border-gray-200">
                         <div className="flex items-center gap-2">
                           <button onClick={() => openEditResult(r)} className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors">
                             <Pencil className="w-3 h-3" /> Edit

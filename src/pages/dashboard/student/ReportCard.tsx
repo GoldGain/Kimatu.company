@@ -85,7 +85,7 @@ export default function StudentReportCard() {
     try {
       const { data } = await supabaseUntyped
         .from('schools')
-        .select('name, motto, logo_url, principal_name, address, phone, email')
+        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email')
         .eq('id', schoolId)
         .maybeSingle();
       if (data) {
@@ -98,12 +98,17 @@ export default function StudentReportCard() {
           phone: data.phone || '',
           email: data.email || '',
         });
+        // Also set principal signature from school data
+        setSignatures(prev => ({
+          ...prev,
+          principal_signature_url: data.principal_signature_url || null,
+        }));
       } else {
         setSchoolInfo({ name: 'School' });
       }
     } catch (err: any) {
-      // If motto column doesn't exist, fetch without it
-      if (err.message?.includes('motto')) {
+      // If column doesn't exist, fetch without it
+      try {
         const { data } = await supabaseUntyped
           .from('schools')
           .select('name, logo_url, principal_name, address, phone, email')
@@ -122,34 +127,45 @@ export default function StudentReportCard() {
         } else {
           setSchoolInfo({ name: 'School' });
         }
-      } else {
+      } catch {
         setSchoolInfo({ name: 'School' });
       }
     }
   };
 
   const fetchSignatures = async (schoolId: string, classTeacherId?: string) => {
-    // Principal signature
-    const { data: schoolSig } = await supabaseUntyped
-      .from('schools')
-      .select('principal_signature_url')
-      .eq('id', schoolId)
-      .maybeSingle();
+    // Principal signature — column now exists after migration
+    let principalSigUrl: string | null = null;
+    try {
+      const { data: schoolSig } = await supabaseUntyped
+        .from('schools')
+        .select('principal_signature_url')
+        .eq('id', schoolId)
+        .maybeSingle();
+      principalSigUrl = schoolSig?.principal_signature_url || null;
+    } catch {
+      // Column may not exist on older deployments — ignore
+    }
 
     let teacherSigUrl: string | null = null;
     if (classTeacherId) {
-      const { data: teacherSig } = await supabaseUntyped
-        .from('teachers')
-        .select('signature_url')
-        .eq('id', classTeacherId)
-        .maybeSingle();
-      teacherSigUrl = teacherSig?.signature_url || null;
+      try {
+        const { data: teacherSig } = await supabaseUntyped
+          .from('teachers')
+          .select('signature_url')
+          .eq('id', classTeacherId)
+          .maybeSingle();
+        teacherSigUrl = teacherSig?.signature_url || null;
+      } catch {
+        // Ignore errors fetching teacher signature
+      }
     }
 
-    setSignatures({
-      principal_signature_url: schoolSig?.principal_signature_url || null,
+    setSignatures(prev => ({
+      ...prev,
+      principal_signature_url: principalSigUrl,
       teacher_signature_url: teacherSigUrl,
-    });
+    }));
   };
 
   useEffect(() => {

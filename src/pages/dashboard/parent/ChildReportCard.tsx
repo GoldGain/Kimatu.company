@@ -110,7 +110,7 @@ export default function ParentChildReportCard() {
     try {
       const { data } = await supabaseUntyped
         .from('schools')
-        .select('name, motto, logo_url, principal_name, address, phone, email')
+        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email')
         .eq('id', schoolId)
         .maybeSingle();
       if (data) {
@@ -123,12 +123,17 @@ export default function ParentChildReportCard() {
           phone: data.phone || '',
           email: data.email || '',
         });
+        // Also set principal signature from school data
+        setSignatures(prev => ({
+          ...prev,
+          principal_signature_url: data.principal_signature_url || null,
+        }));
       } else {
         setSchoolInfo({ name: 'School' });
       }
     } catch (err: any) {
-      // If motto column doesn't exist, fetch without it
-      if (err.message?.includes('motto')) {
+      // Fallback without optional columns
+      try {
         const { data } = await supabaseUntyped
           .from('schools')
           .select('name, logo_url, principal_name, address, phone, email')
@@ -147,31 +152,42 @@ export default function ParentChildReportCard() {
         } else {
           setSchoolInfo({ name: 'School' });
         }
-      } else {
+      } catch {
         setSchoolInfo({ name: 'School' });
       }
     }
   };
 
   const fetchSignatures = async (schoolId: string, classTeacherId?: string) => {
-    const { data: schoolSig } = await supabaseUntyped
-      .from('schools')
-      .select('principal_signature_url')
-      .eq('id', schoolId)
-      .maybeSingle();
+    let principalSigUrl: string | null = null;
+    try {
+      const { data: schoolSig } = await supabaseUntyped
+        .from('schools')
+        .select('principal_signature_url')
+        .eq('id', schoolId)
+        .maybeSingle();
+      principalSigUrl = schoolSig?.principal_signature_url || null;
+    } catch {
+      // Ignore if column doesn't exist
+    }
     let teacherSigUrl: string | null = null;
     if (classTeacherId) {
-      const { data: teacherSig } = await supabaseUntyped
-        .from('teachers')
-        .select('signature_url')
-        .eq('id', classTeacherId)
-        .maybeSingle();
-      teacherSigUrl = teacherSig?.signature_url || null;
+      try {
+        const { data: teacherSig } = await supabaseUntyped
+          .from('teachers')
+          .select('signature_url')
+          .eq('id', classTeacherId)
+          .maybeSingle();
+        teacherSigUrl = teacherSig?.signature_url || null;
+      } catch {
+        // Ignore errors
+      }
     }
-    setSignatures({
-      principal_signature_url: schoolSig?.principal_signature_url || null,
+    setSignatures(prev => ({
+      ...prev,
+      principal_signature_url: principalSigUrl,
       teacher_signature_url: teacherSigUrl,
-    });
+    }));
   };
 
   const fetchSchoolPayConfig = async (schoolId: string) => {
