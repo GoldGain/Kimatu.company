@@ -128,7 +128,7 @@ const navConfig: Record<string, NavItem[]> = {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [zoomAvatar, setZoomAvatar] = useState(false);
-  const { user, signOut } = useAuth();
+  const { user, signOut, schoolData } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -160,10 +160,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside className={`fixed top-0 left-0 z-50 h-full w-64 bg-[#1A1A1A] text-white transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between p-4 border-b border-gray-800">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-lg font-bold">CBE-Analytics</span>
+            {schoolData?.logo_url ? (
+              <img src={schoolData.logo_url} alt={schoolData.name} className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
+            ) : (
+              <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center">
+                <GraduationCap className="w-5 h-5 text-white" />
+              </div>
+            )}
+            <span className="text-lg font-bold truncate max-w-[140px]">{schoolData?.name || 'CBE-Analytics'}</span>
           </Link>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
             <X className="w-5 h-5" />
@@ -234,10 +238,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Menu className="w-5 h-5" />
             </button>
             <div className="hidden lg:flex items-center gap-2">
-              <div className="w-7 h-7 bg-[#2563EB] rounded-lg flex items-center justify-center">
-                <GraduationCap className="w-4 h-4 text-white" />
-              </div>
-              <span className="text-base font-bold text-[#111111]">CBE-Analytics</span>
+              {schoolData?.logo_url ? (
+                <img src={schoolData.logo_url} alt={schoolData.name} className="w-7 h-7 rounded-lg object-contain bg-gray-100 p-0.5" />
+              ) : (
+                <div className="w-7 h-7 bg-[#2563EB] rounded-lg flex items-center justify-center">
+                  <GraduationCap className="w-4 h-4 text-white" />
+                </div>
+              )}
+              <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'CBE-Analytics'}</span>
             </div>
             <div className="flex items-center gap-3">
               <PWAInstallButton variant="icon" />

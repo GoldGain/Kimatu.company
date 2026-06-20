@@ -7,7 +7,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function SchoolAdminFees() {
-  const { user } = useAuth();
+  const { user, schoolData } = useAuth();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
@@ -240,7 +240,7 @@ export default function SchoolAdminFees() {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text('CBE-Analytics School Management', 105, 15, { align: 'center' });
+    doc.text(schoolData?.name || 'School', 105, 15, { align: 'center' });
     doc.setFontSize(12);
     doc.text('OFFICIAL PAYMENT RECEIPT', 105, 25, { align: 'center' });
     doc.setTextColor(0, 0, 0);

@@ -115,7 +115,7 @@ export default function ParentChildReportCard() {
         .maybeSingle();
       if (data) {
         setSchoolInfo({
-          name: data.name?.trim() || 'Your School',
+          name: data.name?.trim() || 'School',
           motto: data.motto || '',
           logo_url: data.logo_url || null,
           principal_name: data.principal_name || '',
@@ -124,7 +124,7 @@ export default function ParentChildReportCard() {
           email: data.email || '',
         });
       } else {
-        setSchoolInfo({ name: 'Your School' });
+        setSchoolInfo({ name: 'School' });
       }
     } catch (err: any) {
       // If motto column doesn't exist, fetch without it
@@ -136,7 +136,7 @@ export default function ParentChildReportCard() {
           .maybeSingle();
         if (data) {
           setSchoolInfo({
-            name: data.name?.trim() || 'Your School',
+            name: data.name?.trim() || 'School',
             motto: '',
             logo_url: data.logo_url || null,
             principal_name: data.principal_name || '',
@@ -145,10 +145,10 @@ export default function ParentChildReportCard() {
             email: data.email || '',
           });
         } else {
-          setSchoolInfo({ name: 'Your School' });
+          setSchoolInfo({ name: 'School' });
         }
       } else {
-        setSchoolInfo({ name: 'Your School' });
+        setSchoolInfo({ name: 'School' });
       }
     }
   };

@@ -12,9 +12,21 @@ interface AuthUser {
   avatarUrl: string | null;
 }
 
+export interface SchoolData {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  motto: string | null;
+  principal_name: string | null;
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   profile: Profile | null;
+  schoolData: SchoolData | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, firstName: string, lastName: string, role: UserRole) => Promise<{ error: string | null }>;
@@ -28,7 +40,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [schoolData, setSchoolData] = useState<SchoolData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const fetchSchoolData = async (schoolId: string) => {
+    if (!schoolId) return;
+    try {
+      const { data, error } = await supabase
+        .from('schools')
+        .select('id, name, logo_url, address, phone, email, motto, principal_name')
+        .eq('id', schoolId)
+        .single();
+
+      if (error) {
+        console.error('School fetch error:', error);
+        return;
+      }
+
+      if (data) {
+        setSchoolData({
+          id: data.id,
+          name: data.name, // Always use the actual school name from the database
+          logo_url: data.logo_url || null,
+          address: data.address || null,
+          phone: data.phone || null,
+          email: data.email || null,
+          motto: data.motto || null,
+          principal_name: data.principal_name || null,
+        });
+      }
+    } catch (err) {
+      console.error('fetchSchoolData error:', err);
+    }
+  };
 
   const fetchProfile = async (userId: string, email: string, metadata: any) => {
     try {
@@ -52,16 +96,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           schoolId: profileData.school_id,
           avatarUrl: profileData.avatar_url,
         });
+        // Fetch school data if user has a school
+        if (profileData.school_id) {
+          await fetchSchoolData(profileData.school_id);
+        }
       } else {
+        const schoolId = metadata?.school_id || null;
         setUser({
           id: userId,
           email: email,
           role: metadata?.role || 'student',
           firstName: metadata?.first_name || '',
           lastName: metadata?.last_name || '',
-          schoolId: metadata?.school_id || null,
+          schoolId: schoolId,
           avatarUrl: null,
         });
+        if (schoolId) {
+          await fetchSchoolData(schoolId);
+        }
       }
     } catch (err) {
       console.error('fetchProfile error:', err);
@@ -87,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setProfile(null);
+        setSchoolData(null);
         setLoading(false);
       }
     });
@@ -113,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setSchoolData(null);
   };
 
   const resetPassword = async (email: string) => {
@@ -130,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, schoolData, loading, signIn, signUp, signOut, resetPassword, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

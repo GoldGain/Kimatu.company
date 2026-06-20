@@ -17,6 +17,7 @@ import {
   addSignaturesToPDF,
   drawReportHeader,
   addStudentPhotoToPDF,
+  addLogoToPDF,
   type SchoolInfo,
   type SignatureInfo,
 } from '@/lib/reportCardPdf';
@@ -376,16 +377,22 @@ export default function SchoolAdminResults() {
       });
       const bestPerSubjectData = computeBestPerSubject(rawResults, classObj);
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      // Use schoolInfo.name (fetched from DB) for all pages
+      const displaySchoolName = schoolInfo.name || schoolName || 'School';
 
-      // ── PAGE 1: CLASS SUMMARY ───────────────────────────────────────────────
+      // ── PAGE 1: CLASS SUMMARY ────────────────────────────────────────────────────
       {
         doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 35, 'F');
+        // Add logo to top-left if available
+        const logoAdded = schoolInfo.logo_url
+          ? await addLogoToPDF(doc, schoolInfo.logo_url, 10, 3, 26, 26)
+          : false;
         doc.setTextColor(255, 255, 255); doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-        doc.text(schoolName, 105, 13, { align: 'center' });
+        doc.text(displaySchoolName, logoAdded ? 40 : 105, 13, { align: logoAdded ? 'left' : 'center' });
         doc.setFontSize(11);
-        doc.text('CLASS RESULTS SUMMARY', 105, 22, { align: 'center' });
+        doc.text('CLASS RESULTS SUMMARY', logoAdded ? 40 : 105, 22, { align: logoAdded ? 'left' : 'center' });
         doc.setFontSize(9);
-        doc.text(`${classObj?.name || 'Class'} — ${termObj?.name || 'Term'} ${termObj?.academic_year || ''}`, 105, 30, { align: 'center' });
+        doc.text(`${classObj?.name || 'Class'} — ${termObj?.name || 'Term'} ${termObj?.academic_year || ''}`, logoAdded ? 40 : 105, 30, { align: logoAdded ? 'left' : 'center' });
 
         const classGrade = is844 ? overallGrade844(classMean) : overallGradeWithBand(classMean, band);
         const statsY = 42;
@@ -493,7 +500,7 @@ export default function SchoolAdminResults() {
       {
         doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
         doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-        doc.text(schoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
+        doc.text(displaySchoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
         doc.text('SUBJECT PERFORMANCE ANALYSIS', 105, 16, { align: 'center' });
 
         const subRows = subjectStats.map((s, i) => {
@@ -527,7 +534,7 @@ export default function SchoolAdminResults() {
       {
         doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
         doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-        doc.text(schoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
+        doc.text(displaySchoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
         doc.text(`STUDENT RESULTS TABLE — ${classObj?.name || ''} — ${termObj?.name || ''} ${termObj?.academic_year || ''}`, 105, 16, { align: 'center' });
 
         const subjectShorts = allSubjects.map(s => shortName(s));
@@ -559,7 +566,7 @@ export default function SchoolAdminResults() {
       {
         doc.setFillColor(37, 99, 235); doc.rect(0, 0, 210, 20, 'F');
         doc.setTextColor(255, 255, 255); doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-        doc.text(schoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
+        doc.text(displaySchoolName, 105, 8, { align: 'center' }); doc.setFontSize(10);
         doc.text('GENDER PERFORMANCE ANALYSIS', 105, 16, { align: 'center' });
 
         const maleSummaries = summaries.filter(s => s.gender === 'male');

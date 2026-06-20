@@ -350,6 +350,14 @@ export async function addLogoToPDF(
         } catch { /* fall through */ }
       }
 
+      // Attempt 3: fetch without mode restriction (default browser behavior)
+      if (!blob) {
+        try {
+          const resp = await fetch(fetchUrl);
+          if (resp.ok) blob = await resp.blob();
+        } catch { /* fall through */ }
+      }
+
       if (blob) {
         const blobUrl = URL.createObjectURL(blob);
         try {
@@ -359,6 +367,7 @@ export async function addLogoToPDF(
         }
       } else {
         // Fallback: direct img src (works if CORS headers are set on bucket)
+        console.warn('All fetch attempts failed for logo, trying direct img src:', logoUrl);
         try {
           dataUrl = await renderToCanvas(getSafeUrl(logoUrl));
         } catch {
@@ -387,14 +396,45 @@ export async function addStudentPhotoToPDF(
   try {
     let dataUrl = photoUrl;
     if (!photoUrl.startsWith('data:')) {
-      const response = await fetch(photoUrl);
-      const blob = await response.blob();
-      dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+      const fetchUrl = photoUrl.split('?')[0];
+      let blob: Blob | null = null;
+
+      // Attempt 1: fetch with CORS mode and cache-busting
+      try {
+        const resp = await fetch(`${fetchUrl}?t=${Date.now()}`, {
+          mode: 'cors',
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+        });
+        if (resp.ok) blob = await resp.blob();
+      } catch { /* fall through */ }
+
+      // Attempt 2: fetch without custom headers
+      if (!blob) {
+        try {
+          const resp = await fetch(fetchUrl, { mode: 'cors' });
+          if (resp.ok) blob = await resp.blob();
+        } catch { /* fall through */ }
+      }
+
+      // Attempt 3: no-cors mode as last resort
+      if (!blob) {
+        try {
+          const resp = await fetch(fetchUrl);
+          if (resp.ok) blob = await resp.blob();
+        } catch { /* fall through */ }
+      }
+
+      if (blob) {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob!);
+        });
+      } else {
+        console.warn('Student photo fetch failed, skipping photo');
+        return false;
+      }
     }
     // Render to canvas for circular crop at high resolution
     const canvas = document.createElement('canvas');
