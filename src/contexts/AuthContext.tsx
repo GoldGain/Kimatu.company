@@ -45,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchSchoolData = async (schoolId: string) => {
     if (!schoolId) return;
+    console.log('[AuthContext] fetchSchoolData called with schoolId:', schoolId);
     try {
       // Use type cast to avoid TypeScript errors with columns like motto
       const { data, error } = await (supabase as any)
@@ -53,12 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', schoolId)
         .maybeSingle();
 
+      console.log('[AuthContext] school fetch result:', { data: data ? { id: data.id, name: data.name } : null, error });
+
       if (error) {
         console.error('School fetch error:', error);
         return;
       }
 
       if (data) {
+        console.log('[AuthContext] Setting schoolData:', data.name);
         setSchoolData({
           id: data.id,
           name: data.name, // Always use the actual school name from the database
