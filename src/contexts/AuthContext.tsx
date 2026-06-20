@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { supabase, supabaseUntyped } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';
 import type { UserRole, Profile } from '@/types/database';
 
 interface AuthUser {
@@ -46,8 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchSchoolData = async (schoolId: string) => {
     if (!schoolId) return;
     try {
-      // Use supabaseUntyped to avoid TypeScript type errors with columns like motto
-      const { data, error } = await supabaseUntyped
+      // Use type cast to avoid TypeScript errors with columns like motto
+      const { data, error } = await (supabase as any)
         .from('schools')
         .select('id, name, logo_url, address, phone, email, motto, principal_name')
         .eq('id', schoolId)
