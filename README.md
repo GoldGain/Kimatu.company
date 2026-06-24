@@ -1,1 +1,1 @@
-# EduConnect School Management System
+# kimatu School Management System
