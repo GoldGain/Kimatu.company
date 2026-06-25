@@ -8,6 +8,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import PWAFloatingButton from '@/components/PWAFloatingButton';
 import Home from '@/pages/Home';
+import GetStarted from '@/pages/GetStarted';
 import Login from '@/pages/auth/Login';
 import Register from '@/pages/auth/Register';
 import ForgotPassword from '@/pages/auth/ForgotPassword';
@@ -81,7 +82,7 @@ import ParentFeeTranscript from '@/pages/dashboard/parent/FeeTranscript';
 function LoadingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F5F3EF]">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#2563EB]" />
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1A365D]" />
     </div>
   );
 }
@@ -121,6 +122,7 @@ function AppRoutes() {
       <Routes>
       {/* Public routes */}
       <Route path="/" element={<PublicRoute><Home /></PublicRoute>} />
+      <Route path="/get-started" element={<GetStarted />} />
       <Route path="/auth/login" element={<Login />} />
       <Route path="/auth/register" element={<Register />} />
       <Route path="/auth/forgot-password" element={<ForgotPassword />} />
