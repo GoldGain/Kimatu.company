@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
 import PhotoZoomModal from '@/components/PhotoZoomModal';
 import {
-  GraduationCap,
   LayoutDashboard,
   Users,
   BookOpen,
@@ -25,17 +24,14 @@ import {
   Upload,
   ClipboardList,
   Award,
-  Clock,
-  Download,
-  Palette,
-  Sparkles,
-  Share2,
-  DollarSign,
-  Building2,
   Calendar,
   Zap,
   Brain,
   User,
+  Palette,
+  Share2,
+  DollarSign,
+  Building2,
 } from 'lucide-react';
 
 interface NavItem {
@@ -96,7 +92,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Homework', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/homework' },
     { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/analytics' },
     { label: 'My Students', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
-    { label: 'Lesson Plans', icon: <Sparkles className="w-5 h-5" />, path: '/teacher/lesson-plan' },
+    { label: 'Lesson Plans', icon: <FileText className="w-5 h-5" />, path: '/teacher/lesson-plan' },
     { label: 'Curriculum Navigator', icon: <Brain className="w-5 h-5" />, path: '/teacher/curriculum' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/teacher/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/teacher/change-password' },
@@ -142,7 +138,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleWhatsAppShare = () => {
     const url = encodeURIComponent(window.location.href);
-    const text = encodeURIComponent(`Check out CBE-Analytics - School Management System: ${window.location.origin}`);
+    const text = encodeURIComponent(`Check out Kimatu Analytics - School Management System: ${window.location.origin}`);
     window.open(`https://wa.me/?text=${text}%20${url}`, '_blank');
   };
 
@@ -163,11 +159,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {schoolData?.logo_url ? (
               <img src={schoolData.logo_url} alt={schoolData.name} className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
             ) : (
-              <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center">
-                <GraduationCap className="w-5 h-5 text-white" />
-              </div>
+              <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg" />
             )}
-            <span className="text-lg font-bold truncate max-w-[140px]">{schoolData?.name || 'CBE-Analytics'}</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold truncate max-w-[140px]">{schoolData?.name || 'Kimatu'}</span>
+              {!schoolData?.name && <span className="text-[8px] -mt-0.5" style={{ color: '#D4AF37' }}>ANALYTICS</span>}
+            </div>
           </Link>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
             <X className="w-5 h-5" />
@@ -177,7 +174,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 flex flex-col h-[calc(100%-65px)]">
           <div className="flex items-center gap-3 mb-6 px-2 py-3 bg-gray-800/50 rounded-xl">
             <div
-              className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+              className="w-16 h-16 rounded-full bg-[#1A365D] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
               onClick={() => user?.avatarUrl && setZoomAvatar(true)}
               title={user?.avatarUrl ? 'Click to zoom' : undefined}
             >
@@ -197,7 +194,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${
                   location.pathname === item.path 
-                    ? 'bg-[#2563EB] text-white' 
+                    ? 'text-white bg-[#1A365D]' 
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`}
               >
@@ -241,11 +238,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {schoolData?.logo_url ? (
                 <img src={schoolData.logo_url} alt={schoolData.name} className="w-7 h-7 rounded-lg object-contain bg-gray-100 p-0.5" />
               ) : (
-                <div className="w-7 h-7 bg-[#2563EB] rounded-lg flex items-center justify-center">
-                  <GraduationCap className="w-4 h-4 text-white" />
-                </div>
+                <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-7 h-7 rounded-lg" />
               )}
-              <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'CBE-Analytics'}</span>
+              <div className="flex flex-col">
+                <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'Kimatu'}</span>
+                {!schoolData?.name && <span className="text-[8px] -mt-0.5" style={{ color: '#D4AF37' }}>ANALYTICS</span>}
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <PWAInstallButton variant="icon" />
@@ -279,12 +277,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <img
                   src={user.avatarUrl}
                   alt={user.firstName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-zoom-in hover:border-blue-400 hover:shadow-md transition-all"
+                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-zoom-in hover:border-[#1A365D] hover:shadow-md transition-all"
                   onClick={() => setZoomAvatar(true)}
                   title="Click to zoom"
                 />
               ) : (
-                <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
+                <div className="w-16 h-16 rounded-full bg-[#1A365D] flex items-center justify-center text-white text-sm font-bold">
                   {user?.firstName?.[0]}{user?.lastName?.[0]}
                 </div>
               )}
