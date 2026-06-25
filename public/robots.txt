@@ -1,25 +1,4 @@
-# robots.txt for CBE-Analytics (https://cbe-analytics.com)
-# Generated for Google Search Console
-
 User-agent: *
 Allow: /
-Allow: /login
-Allow: /register
-Allow: /pricing
-Allow: /about
-Allow: /contact
 
-# Block authenticated dashboard routes from indexing
-Disallow: /teacher/
-Disallow: /student/
-Disallow: /parent/
-Disallow: /school-admin/
-Disallow: /super-admin/
-Disallow: /api/
-
-# Block private/utility paths
-Disallow: /auth/
-Disallow: /_supabase/
-
-# Sitemap location
-Sitemap: https://cbe-analytics.com/sitemap.xml
+Sitemap: https://kimatu.company/sitemap.xml
