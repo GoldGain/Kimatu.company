@@ -11,15 +11,44 @@ import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand } from '@/
 
 // ─── Pre-populated subjects by curriculum level ───────────────────────────────
 
+const PRE_PRIMARY_SUBJECTS = [
+  'Mathematics Activities',
+  'English Language Activities',
+  'Environment Activities',
+  'Creative Arts Activities',
+  'Religious Studies Activities',
+  'Kiswahili Activities',
+];
+
 const PRIMARY_SUBJECTS = [
-  'English', 'Kiswahili', 'Mathematics', 'Integrated Science', 'Social Studies',
-  'Creative Arts', 'Physical Education', 'Religious Education', 'Community Service Learning',
+  'English Composition',
+  'English Grammar',
+  'Kiswahili Insha',
+  'Kiswahili Sarufi',
+  'Mathematics',
+  'Science and Technology',
+  'Social Studies',
+  'Religious Education',
+  'Creative Arts',
+  'Physical and Health Education',
+  'Indigenous Languages',
 ];
 
 const JUNIOR_SUBJECTS = [
-  'English', 'Kiswahili', 'Mathematics', 'Integrated Science', 'Social Studies',
-  'Pre-Technical Studies', 'Business Studies', 'Agriculture', 'Creative Arts',
-  'Physical Education', 'Religious Education', 'Community Service Learning',
+  'English',
+  'Kiswahili',
+  'Mathematics',
+  'Integrated Science',
+  'Social Studies',
+  'Religious Education',
+  'Creative Arts and Sports',
+  'Life Skills',
+  'Agriculture',
+  'Business Studies',
+  'Computer Science',
+  'French',
+  'German',
+  'Arabic',
 ];
 
 const SENIOR_SUBJECTS = [
@@ -38,6 +67,7 @@ function getPresetSubjectsForBand(band: string): string[] {
   if (band === '844') return SUBJECTS_844;
   if (band === 'senior') return SENIOR_SUBJECTS;
   if (band === 'junior') return JUNIOR_SUBJECTS;
+  if (band === 'pre-primary') return PRE_PRIMARY_SUBJECTS;
   return PRIMARY_SUBJECTS; // primary (default)
 }
 
@@ -267,7 +297,7 @@ export default function TeacherResultsUpload() {
     const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
     const termName = terms.find(t => t.id === selectedTerm)?.name || 'Term';
     doc.setFontSize(16);
-    doc.text('CBE-Analytics - Results Report', 14, 15);
+    doc.text('Kimatu Analytics - Results Report', 14, 15);
     doc.setFontSize(11);
     doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
     doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
@@ -456,7 +486,7 @@ export default function TeacherResultsUpload() {
     const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
     const termName = terms.find(t => t.id === selectedTerm)?.name || 'Term';
     doc.setFontSize(16);
-    doc.text('CBE-Analytics - Results Report', 14, 15);
+    doc.text('Kimatu Analytics - Results Report', 14, 15);
     doc.setFontSize(11);
     doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
     doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
@@ -500,7 +530,7 @@ export default function TeacherResultsUpload() {
   };
 
   // Band label for display
-  const bandLabel = currentBand === '844' ? '8-4-4 (Form 3–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : 'Primary CBE (Gr 1–6)';
+  const bandLabel = currentBand === '844' ? '8-4-4 (Form 1–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : currentBand === 'pre-primary' ? 'Pre-Primary CBE (PP1–PP2)' : 'Primary CBE (Gr 1–6)';
 
   return (
     <div className="space-y-6">

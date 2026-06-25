@@ -21,6 +21,8 @@ export interface SchoolData {
   email: string | null;
   motto: string | null;
   principal_name: string | null;
+  status?: string | null;
+  locked_reason?: string | null;
 }
 
 interface AuthContextType {
@@ -50,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Use type cast to avoid TypeScript errors with columns like motto
       const { data, error } = await (supabase as any)
         .from('schools')
-        .select('id, name, logo_url, address, phone, email, motto, principal_name')
+        .select('id, name, logo_url, address, phone, email, motto, principal_name, status, locked_reason')
         .eq('id', schoolId)
         .maybeSingle();
 
@@ -72,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: data.email || null,
           motto: data.motto || null,
           principal_name: data.principal_name || null,
+          status: data.status || 'active',
+          locked_reason: data.locked_reason || null,
         });
       }
     } catch (err) {

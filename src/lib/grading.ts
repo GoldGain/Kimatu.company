@@ -1,5 +1,5 @@
 export type Curriculum = 'CBE' | '844';
-export type SchoolLevelBand = 'primary' | 'junior' | 'senior' | '844';
+export type SchoolLevelBand = 'pre-primary' | 'primary' | 'junior' | 'senior' | '844';
 
 export interface CompetencyGrade {
   subLevel: string;
@@ -29,6 +29,9 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
   const rawLevel = classData?.grade_level ?? classData?.level;
   const parsedLevel = typeof rawLevel === 'number' ? rawLevel : parseInt(String(rawLevel || '').replace(/[^0-9]/g, ''), 10);
 
+  // Pre-Primary: PP1 (grade_level -1) and PP2 (grade_level 0)
+  if (Number.isFinite(parsedLevel) && parsedLevel < 1) return 'pre-primary';
+
   // Primary School: Grades 1-6 — marks only, no points
   if (Number.isFinite(parsedLevel) && parsedLevel >= 1 && parsedLevel <= 6) return 'primary';
 
@@ -40,6 +43,7 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
 
   // Fallback: parse from class name
   const name = String(classData?.name || '').toLowerCase();
+  if (/pp1|pp2|pre.?primary/.test(name)) return 'pre-primary';
   if (/senior|grade\s*1[012]|\b1[012]\b/.test(name)) return 'senior';
   if (/junior|jss|grade\s*[789]|\b[789]\b/.test(name)) return 'junior';
   return 'primary';
@@ -57,6 +61,14 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
  */
 export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 'primary'): CompetencyGrade {
   const percentage = normalizePercentage(score);
+
+  if (band === 'pre-primary') {
+    // Pre-Primary (PP1, PP2): 4 competency descriptors, NO points shown.
+    if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band: 'primary' };
+    if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band: 'primary' };
+    if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band: 'primary' };
+    return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band: 'primary' };
+  }
 
   if (band === 'junior' || band === 'senior') {
     // Junior/Senior (Grades 7-12): 8-level scale with points

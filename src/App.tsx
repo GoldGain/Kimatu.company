@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, Outlet } from 'react-router';
+import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router';
 import { Toaster } from '@/components/ui/sonner';
 import { Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -87,8 +87,46 @@ function LoadingSpinner() {
   );
 }
 
+function LockedSchoolScreen({ reason }: { reason?: string | null }) {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+  const handleLogout = async () => { await signOut(); navigate('/auth/login'); };
+  const reasonLabel = reason === 'payment_required' ? 'Payment Required'
+    : reason === 'subscription_expired' ? 'Subscription Expired'
+    : reason === 'trial_ended' ? 'Trial Period Ended'
+    : reason === 'account_review' ? 'Account Under Review'
+    : 'Access Restricted';
+  return (
+    <div className="min-h-screen bg-[#F5F3EF] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">School Access Locked</h1>
+        <p className="text-red-600 font-semibold mb-2">{reasonLabel}</p>
+        <p className="text-gray-500 text-sm mb-6">Your school's access to Kimatu Analytics has been temporarily restricted. Please contact your reseller or our support team to resolve this.</p>
+        <div className="space-y-3">
+          <a href="https://wa.me/254700000000" target="_blank" rel="noopener noreferrer"
+            className="block w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">
+            Contact Support via WhatsApp
+          </a>
+          <a href="mailto:tutorsultimate@gmail.com"
+            className="block w-full bg-[#1A365D] text-white py-3 rounded-xl font-medium hover:bg-[#2D4A7C] transition-colors">
+            Email: tutorsultimate@gmail.com
+          </a>
+          <button onClick={handleLogout}
+            className="block w-full border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+            Logout
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mt-4">Kimatu Analytics — kimatu.company</p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) {
-  const { user, loading } = useAuth();
+  const { user, loading, schoolData } = useAuth();
   
   if (loading) {
     return <LoadingSpinner />;
@@ -96,6 +134,12 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
   
   if (!user) return <Navigate to="/auth/login" replace />;
   if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
+
+  // Block school-level users (not resellers/super-admins) from locked schools
+  const schoolLevelRoles = ['school_admin', 'teacher', 'class_teacher', 'subject_teacher', 'student', 'parent'];
+  if (schoolLevelRoles.includes(user.role) && schoolData?.status === 'locked') {
+    return <LockedSchoolScreen reason={schoolData.locked_reason} />;
+  }
   
   return (
     <ErrorBoundary>

@@ -15,6 +15,8 @@ interface StandardClass {
 }
 
 const STANDARD_CLASSES: StandardClass[] = [
+  { name: 'PP1',     grade_level: -1, curriculum: 'CBE', label: 'PP1      — Pre-Primary CBE' },
+  { name: 'PP2',     grade_level: 0,  curriculum: 'CBE', label: 'PP2      — Pre-Primary CBE' },
   { name: 'Grade 1',  grade_level: 1,  curriculum: 'CBE', label: 'Grade 1  — Primary CBE'  },
   { name: 'Grade 2',  grade_level: 2,  curriculum: 'CBE', label: 'Grade 2  — Primary CBE'  },
   { name: 'Grade 3',  grade_level: 3,  curriculum: 'CBE', label: 'Grade 3  — Primary CBE'  },
@@ -27,6 +29,8 @@ const STANDARD_CLASSES: StandardClass[] = [
   { name: 'Grade 10', grade_level: 10, curriculum: 'CBE', label: 'Grade 10 — Senior CBE'   },
   { name: 'Grade 11', grade_level: 11, curriculum: 'CBE', label: 'Grade 11 — Senior CBE'   },
   { name: 'Grade 12', grade_level: 12, curriculum: 'CBE', label: 'Grade 12 — Senior CBE'   },
+  { name: 'Form 1',   grade_level: 9,  curriculum: '844', label: 'Form 1   — 8-4-4'        },
+  { name: 'Form 2',   grade_level: 10, curriculum: '844', label: 'Form 2   — 8-4-4'        },
   { name: 'Form 3',   grade_level: 11, curriculum: '844', label: 'Form 3   — 8-4-4'        },
   { name: 'Form 4',   grade_level: 12, curriculum: '844', label: 'Form 4   — 8-4-4'        },
 ];
@@ -174,6 +178,7 @@ export default function SchoolAdminClasses() {
 
   const getLevelBadgeColor = (gradeLevel: number, curriculum?: string) => {
     if (curriculum === '844') return 'bg-purple-100 text-purple-700';
+    if (gradeLevel < 1) return 'bg-pink-100 text-pink-700';
     if (gradeLevel >= 1 && gradeLevel <= 6) return 'bg-green-100 text-green-700';
     if (gradeLevel >= 7 && gradeLevel <= 9) return 'bg-blue-100 text-blue-700';
     if (gradeLevel >= 10 && gradeLevel <= 12) return 'bg-indigo-100 text-indigo-700';
@@ -183,6 +188,7 @@ export default function SchoolAdminClasses() {
   const getLevelLabel = (gradeLevel: number, curriculum?: string, name?: string) => {
     if (curriculum === '844') return '8-4-4';
     if (name?.toLowerCase().startsWith('form')) return '8-4-4';
+    if (name === 'PP1' || name === 'PP2' || gradeLevel < 1) return 'Pre-Primary';
     if (gradeLevel >= 1 && gradeLevel <= 6) return 'Primary';
     if (gradeLevel >= 7 && gradeLevel <= 9) return 'Junior';
     if (gradeLevel >= 10 && gradeLevel <= 12) return 'Senior';
