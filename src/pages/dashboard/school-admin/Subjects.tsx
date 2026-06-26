@@ -22,6 +22,16 @@ interface Subject {
 
 // ─── Pre-populated subjects by level ─────────────────────────────────────────
 
+/** PRE-PRIMARY (PP1, PP2) — Learning Areas with Activities */
+const PREPRIMARY_SUBJECTS: { name: string; category: CategoryType }[] = [
+  { name: 'Mathematics Activities',          category: 'Mathematics' },
+  { name: 'English Language Activities',     category: 'Languages'   },
+  { name: 'Environment Activities',          category: 'Sciences'    },
+  { name: 'Creative Arts Activities',        category: 'Creative'    },
+  { name: 'Religious Studies Activities',    category: 'Humanities'  },
+  { name: 'Kiswahili Activities',            category: 'Languages'   },
+];
+
 /** PRIMARY (Grades 1–6) */
 const PRIMARY_SUBJECTS: { name: string; category: CategoryType }[] = [
   { name: 'English',                       category: 'Languages'   },
@@ -88,14 +98,17 @@ const SUBJECTS_844: { name: string; category: CategoryType }[] = [
   { name: 'Computer Studies', category: 'Technical'   },
 ];
 
-// Combined CBE list (union of Primary + Junior + Senior, deduplicated by name)
+// Combined CBE list (union of Pre-Primary + Primary + Junior + Senior, deduplicated by name)
 const CBE_ALL_SUBJECTS: { name: string; category: CategoryType; level: string }[] = [
-  ...PRIMARY_SUBJECTS.map(s => ({ ...s, level: 'Primary (Gr 1–6)' })),
+  ...PREPRIMARY_SUBJECTS.map(s => ({ ...s, level: 'Pre-Primary (PP1–PP2)' })),
+  ...PRIMARY_SUBJECTS
+    .filter(s => !PREPRIMARY_SUBJECTS.find(p => p.name === s.name))
+    .map(s => ({ ...s, level: 'Primary (Gr 1–6)' })),
   ...JUNIOR_SUBJECTS
-    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name))
+    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name) && !PREPRIMARY_SUBJECTS.find(p => p.name === s.name))
     .map(s => ({ ...s, level: 'Junior (Gr 7–9)' })),
   ...SENIOR_SUBJECTS
-    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name) && !JUNIOR_SUBJECTS.find(j => j.name === s.name))
+    .filter(s => !PRIMARY_SUBJECTS.find(p => p.name === s.name) && !JUNIOR_SUBJECTS.find(j => j.name === s.name) && !PREPRIMARY_SUBJECTS.find(p => p.name === s.name))
     .map(s => ({ ...s, level: 'Senior (Gr 10–12)' })),
 ];
 
@@ -313,7 +326,7 @@ export default function SchoolAdminSubjects() {
           <h3 className="font-semibold text-[#111111]">Quick Add from Standard Subjects</h3>
         </div>
         <p className="text-xs text-gray-500 mb-3">
-          All official Kenyan curriculum subjects are listed below — Primary (Gr 1–6), Junior (Gr 7–9), Senior (Gr 10–12), and 8-4-4 (Form 3–4).
+          All official Kenyan curriculum subjects are listed below — PP1 &amp; PP2, Primary (Gr 1–6), Junior (Gr 7–9), Senior (Gr 10–12), and 8-4-4 (Form 3–4).
           Community Service Learning (CSL) is included for all CBE levels.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -323,6 +336,13 @@ export default function SchoolAdminSubjects() {
             className={`flex-1 ${inputClass}`}
           >
             <option value="">— Select a subject to add —</option>
+            <optgroup label="Pre-Primary Subjects (PP1–PP2)">
+              {getAvailablePresets('CBE')
+                .filter(p => PREPRIMARY_SUBJECTS.find(s => s.name === p.name))
+                .map(p => (
+                  <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (PP1 &amp; PP2)</option>
+                ))}
+            </optgroup>
             <optgroup label="CBE Subjects (Primary Gr 1–6)">
               {getAvailablePresets('CBE')
                 .filter(p => PRIMARY_SUBJECTS.find(s => s.name === p.name))
@@ -332,14 +352,14 @@ export default function SchoolAdminSubjects() {
             </optgroup>
             <optgroup label="CBE Subjects (Junior Gr 7–9)">
               {getAvailablePresets('CBE')
-                .filter(p => JUNIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name))
+                .filter(p => JUNIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name) && !PREPRIMARY_SUBJECTS.find(s => s.name === p.name))
                 .map(p => (
                   <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (Junior)</option>
                 ))}
             </optgroup>
             <optgroup label="CBE Subjects (Senior Gr 10–12)">
               {getAvailablePresets('CBE')
-                .filter(p => SENIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name) && !JUNIOR_SUBJECTS.find(s => s.name === p.name))
+                .filter(p => SENIOR_SUBJECTS.find(s => s.name === p.name) && !PRIMARY_SUBJECTS.find(s => s.name === p.name) && !JUNIOR_SUBJECTS.find(s => s.name === p.name) && !PREPRIMARY_SUBJECTS.find(s => s.name === p.name))
                 .map(p => (
                   <option key={`CBE::${p.name}`} value={`CBE::${p.name}`}>{p.name} (Senior)</option>
                 ))}
@@ -411,7 +431,7 @@ export default function SchoolAdminSubjects() {
                 onChange={e => setFormData({ ...formData, curriculum: e.target.value as CurriculumType })}
                 className={inputClass}
               >
-                <option value="CBE">CBE (Grades 1–12)</option>
+                <option value="CBE">CBE (PP1 – Senior)</option>
                 <option value="844">8-4-4 (Form 3–4)</option>
               </select>
             </div>
@@ -465,7 +485,7 @@ export default function SchoolAdminSubjects() {
             <div className="flex items-center gap-2 mb-4">
               <BookOpen className="w-5 h-5 text-[#2563EB]" />
               <h3 className="font-semibold text-[#111111]">
-                {curriculum === '844' ? '8-4-4 (Form 3–4)' : 'CBE'} Subjects ({subs.length})
+                {curriculum === '844' ? '8-4-4 (Form 3–4)' : 'CBE (PP1–Senior)'} Subjects ({subs.length})
               </h3>
             </div>
             <div className="overflow-x-auto">
