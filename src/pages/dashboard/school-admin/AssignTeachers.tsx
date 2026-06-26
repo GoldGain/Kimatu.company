@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Plus, Trash2, AlertCircle, CheckCircle, Users, BookOpen } from 'lucide-react';
+import TeacherWorkloadTable from '@/components/TeacherWorkloadTable';
+import type { LessonDistribution, Day } from '@/lib/timetable';
 
 interface TeacherAssignment {
   id: string;
@@ -52,6 +54,8 @@ export default function AssignTeachers() {
     lessons_per_week: 5,
     is_priority: false,
   });
+  const [workloadDistribution, setWorkloadDistribution] = useState<LessonDistribution[]>([]);
+  const [unavailableDays, setUnavailableDays] = useState<Day[]>([]);
 
   useEffect(() => {
     if (user?.schoolId) fetchData();
@@ -265,10 +269,40 @@ export default function AssignTeachers() {
                 <input
                   type="number" min="1" max="10"
                   value={formData.lessons_per_week}
-                  onChange={(e) => setFormData({ ...formData, lessons_per_week: parseInt(e.target.value) })}
+                  onChange={(e) => setFormData({ ...formData, lessons_per_week: parseInt(e.target.value) || 5 })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              {/* Unavailable Days */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Teacher Unavailable Days</label>
+                <div className="flex flex-wrap gap-2">
+                  {(['monday','tuesday','wednesday','thursday','friday'] as Day[]).map((day) => (
+                    <label key={day} className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={unavailableDays.includes(day)}
+                        onChange={(e) => {
+                          setUnavailableDays(prev =>
+                            e.target.checked ? [...prev, day] : prev.filter(d => d !== day)
+                          );
+                        }}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-red-500"
+                      />
+                      <span className="text-xs text-gray-600 capitalize">{day.slice(0,3)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {/* Workload Distribution Preview */}
+              {formData.teacher_id && (
+                <TeacherWorkloadTable
+                  teacherId={formData.teacher_id}
+                  totalLessonsPerWeek={formData.lessons_per_week}
+                  unavailableDays={unavailableDays}
+                  onChange={setWorkloadDistribution}
+                />
+              )}
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input

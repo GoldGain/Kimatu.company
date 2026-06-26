@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router';
-import { Menu, X, LogIn } from 'lucide-react';
+import { Menu, X, LogIn, ArrowRight } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
@@ -52,11 +52,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <Link to="/auth/login" className="inline-flex items-center gap-2 text-base font-medium bg-[#1A365D] text-white px-5 py-2.5 rounded-full hover:bg-[#2D4A7C] transition-colors shadow-lg">
+                  <Link to="/auth/login" className="inline-flex items-center gap-2 text-base font-bold bg-[#1A365D] text-white px-6 py-2.5 rounded-full hover:bg-[#2D4A7C] transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95">
                     <LogIn className="w-4 h-4" /> Login
                   </Link>
-                  <Link to="/get-started" className="text-base font-medium bg-[#D4AF37] text-white px-5 py-2.5 rounded-full hover:bg-[#C4A030] transition-colors shadow-lg">
-                    Get Started
+                  <Link to="/get-started" className="inline-flex items-center gap-2 text-base font-bold bg-[#D4AF37] text-white px-6 py-2.5 rounded-full hover:bg-[#C4A030] transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95">
+                    Get Started <ArrowRight className="w-4 h-4" />
                   </Link>
                 </div>
               )}

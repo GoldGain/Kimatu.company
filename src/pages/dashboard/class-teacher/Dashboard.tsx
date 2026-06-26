@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Users, FileText, Download, Loader2, BookOpen, TrendingUp, Award, BarChart3, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSchoolLevelBand } from '@/lib/grading';
+import ClassTeacherAlerts from '@/components/ClassTeacherAlerts';
 
 interface StudentPerformance {
   id: string;
@@ -280,6 +281,8 @@ export default function ClassTeacherDashboard() {
       {/* Overview Tab */}
       {activeTab === 'overview' && (
         <div className="space-y-4">
+          {/* Class Teacher Alerts */}
+          <ClassTeacherAlerts classId={assignedClass.id} teacherId={user?.id || ''} />
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-900 mb-4">Subjects in {assignedClass.name}</h3>
             {subjects.length === 0 ? (

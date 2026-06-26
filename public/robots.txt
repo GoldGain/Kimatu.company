@@ -1,4 +1,20 @@
 User-agent: *
 Allow: /
+Disallow: /school-admin/
+Disallow: /teacher/
+Disallow: /student/
+Disallow: /parent/
+Disallow: /super-admin/
+Disallow: /master-admin/
+Disallow: /reseller-admin/
+Disallow: /api/
+
+# Allow public pages
+Allow: /auth/login
+Allow: /auth/register
+Allow: /get-started
 
 Sitemap: https://kimatu.company/sitemap.xml
+
+# Crawl-delay for polite crawling
+Crawl-delay: 10
