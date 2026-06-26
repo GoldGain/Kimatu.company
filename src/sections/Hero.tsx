@@ -10,9 +10,9 @@ function WhatsAppButton() {
   return (
     <button
       onClick={handleWhatsApp}
-      className="inline-flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-full text-sm font-medium hover:bg-green-700 transition-colors shadow-lg shadow-green-600/20"
+      className="inline-flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-full text-base font-semibold hover:bg-green-700 transition-colors shadow-lg shadow-green-600/20"
     >
-      <MessageCircle className="w-4 h-4" /> Chat on WhatsApp
+      <MessageCircle className="w-5 h-5" /> Chat on WhatsApp
     </button>
   );
 }
@@ -64,34 +64,34 @@ export default function Hero() {
             <div className="relative z-10">
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles className="w-5 h-5 text-[#D4AF37]" />
-                <span className="text-sm text-gray-300">Kenya&apos;s Leading School Platform</span>
+                <span className="text-base text-gray-300 font-medium">Kenya&apos;s Leading School Platform</span>
               </div>
-              <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-2">
+              <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-3 leading-tight">
                 Kimatu Analytics
               </h1>
-              <p className="text-lg md:text-xl font-medium mb-2" style={{ color: '#D4AF37' }}>
+              <p className="text-xl md:text-2xl font-bold mb-3" style={{ color: '#D4AF37' }}>
                 Smarter Schools, Brighter Futures
               </p>
-              <p className="text-sm text-gray-300 mb-6">
+              <p className="text-base md:text-lg text-gray-300 mb-6 leading-relaxed">
                 School Analytics Simplified — Manage learners, learning areas, assessments, fees, and report cards all in one place.
               </p>
               <div className="space-y-3 mb-6">
                 <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
-                  <span className="text-sm text-gray-300">CBE &amp; 8-4-4 Curriculum Support</span>
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#D4AF37] animate-pulse" />
+                  <span className="text-base text-gray-300 font-medium">CBE &amp; 8-4-4 Curriculum Support (Form 3 &amp; 4 only)</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
-                  <span className="text-sm text-gray-300">Pre-Primary to Senior School</span>
+                  <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                  <span className="text-base text-gray-300 font-medium">Pre-Primary to Senior School</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" style={{ animationDelay: '0.6s' }} />
-                  <span className="text-sm text-gray-300">Real-Time Collaboration &amp; Analytics</span>
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" style={{ animationDelay: '0.6s' }} />
+                  <span className="text-base text-gray-300 font-medium">Real-Time Collaboration &amp; Analytics</span>
                 </div>
               </div>
               <div className="flex flex-wrap gap-3 mb-6">
-                <Link to="/get-started" className="inline-flex items-center gap-2 bg-white text-[#1A365D] px-5 py-2.5 rounded-full text-sm font-bold hover:bg-gray-100 transition-colors shadow-lg">
-                  Get Started <ArrowRight className="w-4 h-4" />
+                <Link to="/get-started" className="inline-flex items-center gap-2 bg-white text-[#1A365D] px-6 py-3 rounded-full text-base font-bold hover:bg-gray-100 transition-colors shadow-lg">
+                  Get Started <ArrowRight className="w-5 h-5" />
                 </Link>
                 <WhatsAppButton />
               </div>
@@ -102,20 +102,20 @@ export default function Hero() {
                 <div className="w-3 h-3 rounded-full bg-red-500" />
                 <div className="w-3 h-3 rounded-full bg-yellow-500" />
                 <div className="w-3 h-3 rounded-full bg-green-500" />
-                <div className="ml-auto text-xs text-gray-500">Dashboard Preview</div>
+                <div className="ml-auto text-sm text-gray-500 font-medium">Dashboard Preview</div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-[#D4AF37]/20 rounded-lg p-3 text-center">
-                  <div className="text-lg font-bold text-[#D4AF37]">2,000+</div>
-                  <div className="text-[10px] text-gray-400">Schools</div>
+                  <div className="text-xl font-bold text-[#D4AF37]">2,000+</div>
+                  <div className="text-xs text-gray-400">Schools</div>
                 </div>
                 <div className="bg-blue-500/20 rounded-lg p-3 text-center">
-                  <div className="text-lg font-bold text-blue-400">500K+</div>
-                  <div className="text-[10px] text-gray-400">Learners</div>
+                  <div className="text-xl font-bold text-blue-400">500K+</div>
+                  <div className="text-xs text-gray-400">Learners</div>
                 </div>
                 <div className="bg-green-500/20 rounded-lg p-3 text-center">
-                  <div className="text-lg font-bold text-green-400">50K+</div>
-                  <div className="text-[10px] text-gray-400">Teachers</div>
+                  <div className="text-xl font-bold text-green-400">50K+</div>
+                  <div className="text-xs text-gray-400">Teachers</div>
                 </div>
               </div>
               <div className="mt-3 flex gap-2">
@@ -132,28 +132,28 @@ export default function Hero() {
           <div className="hero-card md:col-span-5 rounded-2xl p-6 relative overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.2)] transition-shadow duration-200"
                style={{ background: 'linear-gradient(135deg, #F8F6F0 0%, #FFFFFF 100%)' }}>
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-medium bg-[#1A365D] text-white px-3 py-1 rounded-full">Curricula Supported</span>
+              <span className="text-sm font-bold bg-[#1A365D] text-white px-3 py-1 rounded-full">Curricula Supported</span>
               <BookOpen className="w-5 h-5 text-[#1A365D]" />
             </div>
             <div className="space-y-3">
               <div className="flex items-center gap-3 p-3 bg-[#1A365D]/5 rounded-xl">
                 <div className="w-10 h-10 bg-[#1A365D] rounded-lg flex items-center justify-center text-white text-xs font-bold">CBE</div>
                 <div>
-                  <div className="text-sm font-semibold text-[#111111]">Competency Based Education</div>
-                  <div className="text-xs text-gray-500">PP1 - Senior School</div>
+                  <div className="text-base font-bold text-[#111111]">Competency Based Education</div>
+                  <div className="text-sm text-gray-500">PP1 - Senior School</div>
                 </div>
               </div>
               <div className="flex items-center gap-3 p-3 bg-[#D4AF37]/10 rounded-xl">
                 <div className="w-10 h-10 bg-[#D4AF37] rounded-lg flex items-center justify-center text-white text-xs font-bold">8-4-4</div>
                 <div>
-                  <div className="text-sm font-semibold text-[#111111]">8-4-4 System</div>
-                  <div className="text-xs text-gray-500">Form 1 - Form 4</div>
+                  <div className="text-base font-bold text-[#111111]">8-4-4 System</div>
+                  <div className="text-sm text-gray-500 font-medium">Form 3 &amp; Form 4 only</div>
                 </div>
               </div>
             </div>
-            <div className="flex justify-center gap-2 mt-4">
+            <div className="flex flex-wrap justify-center gap-2 mt-4">
               {['PP1', 'PP2', 'G1-6', 'G7-9', 'G10-12'].map((tag, i) => (
-                <span key={i} className="text-xs bg-[#1A365D]/10 text-[#1A365D] px-2 py-1 rounded-full font-medium">
+                <span key={i} className="text-sm bg-[#1A365D]/10 text-[#1A365D] px-3 py-1 rounded-full font-semibold">
                   {tag}
                 </span>
               ))}
@@ -164,21 +164,21 @@ export default function Hero() {
           <div className="hero-card md:col-span-3 bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.2)] transition-shadow duration-200">
             <div className="flex items-center gap-2 mb-3">
               <TrendingUp className="w-5 h-5 text-[#1A365D]" />
-              <span className="text-xs text-gray-500 font-medium">Performance</span>
+              <span className="text-sm text-gray-500 font-semibold">Performance</span>
             </div>
             <div className="space-y-3">
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-[#111111]">98%</span>
-                <span className="text-xs text-green-500 font-medium">Satisfaction</span>
+                <span className="text-3xl font-bold text-[#111111]">98%</span>
+                <span className="text-sm text-green-500 font-semibold">Satisfaction</span>
               </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-[#1A365D] rounded-full" style={{ width: '98%' }} />
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-[#111111]">35%</span>
-                <span className="text-xs text-[#D4AF37] font-medium">Efficiency</span>
+                <span className="text-3xl font-bold text-[#111111]">35%</span>
+                <span className="text-sm text-[#D4AF37] font-semibold">Efficiency</span>
               </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-[#D4AF37] rounded-full" style={{ width: '35%' }} />
               </div>
             </div>
@@ -187,8 +187,8 @@ export default function Hero() {
           {/* Analytics Preview Card */}
           <div className="hero-card md:col-span-5 bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.2)] transition-shadow duration-200">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-[#111111]">School Analytics</span>
-              <span className="text-xs text-[#D4AF37] font-medium">+24.5%</span>
+              <span className="text-base font-bold text-[#111111]">School Analytics</span>
+              <span className="text-sm text-[#D4AF37] font-bold">+24.5%</span>
             </div>
             <div className="flex items-end gap-1 h-20">
               {[30, 45, 35, 60, 50, 75, 65, 80, 70, 85, 78, 90].map((h, i) => (
@@ -200,7 +200,7 @@ export default function Hero() {
                 </div>
               ))}
             </div>
-            <div className="flex justify-between mt-2 text-[10px] text-gray-400">
+            <div className="flex justify-between mt-2 text-sm text-gray-400">
               <span>Jan</span>
               <span>Jun</span>
               <span>Dec</span>
@@ -213,11 +213,11 @@ export default function Hero() {
             <div className="text-center relative z-10">
               <Users className="w-8 h-8 text-[#1A365D] mx-auto mb-3" />
               <div className="text-5xl md:text-6xl font-bold mb-2" style={{ color: '#1A365D' }}>2,000+</div>
-              <p className="text-sm text-gray-500 mb-4">Schools Trust Kimatu Analytics</p>
+              <p className="text-base text-gray-500 mb-4 font-medium">Schools Trust Kimatu Analytics</p>
             </div>
             <div className="flex justify-center gap-2 mb-4">
               {['CBE', '8-4-4', 'Both'].map((tag, i) => (
-                <span key={i} className="text-xs px-3 py-1 rounded-full font-medium" 
+                <span key={i} className="text-sm px-3 py-1 rounded-full font-semibold" 
                       style={{ background: i === 1 ? '#D4AF37' : '#1A365D', color: 'white' }}>
                   {tag}
                 </span>
@@ -225,7 +225,7 @@ export default function Hero() {
             </div>
             <div className="rounded-xl p-4 text-center" style={{ background: 'linear-gradient(135deg, #1A365D, #2D4A7C)' }}>
               <div className="text-2xl font-bold text-white">All-in-one</div>
-              <p className="text-xs text-gray-300">School operations, analytics, and communication</p>
+              <p className="text-base text-gray-300">School operations, analytics, and communication</p>
             </div>
           </div>
 
@@ -233,10 +233,10 @@ export default function Hero() {
           <div className="hero-card md:col-span-4 bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.2)] transition-shadow duration-200">
             <div className="text-center">
               <div className="text-3xl font-bold text-[#1A365D] font-mono tabular-nums">{formatTime(currentTime)}</div>
-              <div className="text-sm text-gray-500 mb-3">{formatDate(currentTime)}</div>
-              <div className="grid grid-cols-7 gap-1 text-center text-xs">
+              <div className="text-base text-gray-500 mb-3 font-medium">{formatDate(currentTime)}</div>
+              <div className="grid grid-cols-7 gap-1 text-center text-sm">
                 {['M','T','W','T','F','S','S'].map((d, i) => (
-                  <div key={i} className="text-gray-400 font-medium">{d}</div>
+                  <div key={i} className="text-gray-400 font-bold">{d}</div>
                 ))}
                 {Array.from({ length: adjustedFirstDay }, (_, i) => (
                   <div key={`empty-${i}`} />
@@ -244,7 +244,7 @@ export default function Hero() {
                 {Array.from({ length: daysInMonth }, (_, i) => (
                   <div 
                     key={i} 
-                    className={`py-1 rounded ${i + 1 === today ? 'text-white font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
+                    className={`py-1 rounded font-medium ${i + 1 === today ? 'text-white font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
                     style={i + 1 === today ? { background: 'linear-gradient(135deg, #1A365D, #D4AF37)' } : {}}
                   >
                     {i + 1}
