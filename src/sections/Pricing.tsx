@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState } from 'react';
-import { Check, Star, MessageCircle, Calculator, School, Users, Building2 } from 'lucide-react';
+import { Check, Star, MessageCircle, Calculator, School, Users, Building2, CreditCard } from 'lucide-react';
 import { Link } from 'react-router';
+import { initializePayment, calculatePaymentAmount, generatePaymentReference } from '@/lib/paystack';
+import { toast } from 'sonner';
 
 interface PricingPlan {
   name: string;
@@ -104,6 +106,43 @@ function PricingCard({ plan, billingCycle, learnerCount }: { plan: PricingPlan; 
   };
 
   const price = getPrice();
+  const [paying, setPaying] = useState(false);
+
+  const handlePayNow = async () => {
+    if (price <= 0) {
+      toast.info('Please contact us via WhatsApp for Essential plan signup');
+      return;
+    }
+    setPaying(true);
+    try {
+      const reference = generatePaymentReference('school');
+      await initializePayment({
+        email: 'school@kimatu.company',
+        amount: price * 100, // Convert to kobo
+        reference,
+        metadata: {
+          plan: plan.name,
+          billing_cycle: billingCycle,
+          learner_count: learnerCount,
+          amount_kes: price,
+        },
+        onSuccess: (response) => {
+          toast.success(`Payment successful! Reference: ${response.reference}`);
+          // TODO: Call your backend to verify and activate the plan
+        },
+        onCancel: () => {
+          toast.info('Payment cancelled');
+        },
+        onError: (error) => {
+          toast.error('Payment failed: ' + error.message);
+        },
+      });
+    } catch (error: any) {
+      toast.error('Failed to initialize payment: ' + error.message);
+    } finally {
+      setPaying(false);
+    }
+  };
 
   return (
     <div className={`relative rounded-2xl p-6 transition-all duration-300 hover:shadow-xl ${
@@ -155,12 +194,23 @@ function PricingCard({ plan, billingCycle, learnerCount }: { plan: PricingPlan; 
       </ul>
 
       <div className="space-y-2">
+        <button
+          onClick={handlePayNow}
+          disabled={paying}
+          className={`block w-full text-center py-2.5 rounded-full text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+            plan.featured 
+              ? 'bg-white text-[#1A365D] hover:bg-gray-100 shadow-lg disabled:opacity-70' 
+              : 'bg-[#1A365D] text-white hover:bg-[#2D4A7C] disabled:opacity-70'
+          }`}
+        >
+          {paying ? 'Processing...' : <><CreditCard className="w-4 h-4" /> Pay Now</>}
+        </button>
         <Link 
           to="/get-started"
-          className={`block w-full text-center py-2.5 rounded-full text-sm font-bold transition-all ${
+          className={`block w-full text-center py-2 rounded-full text-xs font-medium transition-all ${
             plan.featured 
-              ? 'bg-white text-[#1A365D] hover:bg-gray-100 shadow-lg' 
-              : 'bg-[#1A365D] text-white hover:bg-[#2D4A7C]'
+              ? 'bg-white/10 text-white hover:bg-white/20 border border-white/30' 
+              : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
           }`}
         >
           Get Started
@@ -292,11 +342,14 @@ export default function Pricing() {
         </div>
 
         {/* Paystack Payment Note */}
-        <div className="mt-10 text-center">
+        <div className="mt-10 text-center space-y-3">
           <div className="inline-flex items-center gap-2 bg-[#D4AF37]/10 text-[#1A365D] px-5 py-2.5 rounded-full text-sm font-medium">
             <Star className="w-4 h-4" />
             Secure Paystack payment — Ksh 50 per learner per term
           </div>
+          <p className="text-xs text-gray-500">
+            Paystack accepts M-Pesa, Bank Cards, and Bank Transfer
+          </p>
         </div>
       </div>
     </section>
