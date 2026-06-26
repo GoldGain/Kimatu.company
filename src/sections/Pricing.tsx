@@ -291,11 +291,11 @@ export default function Pricing() {
           ))}
         </div>
 
-        {/* Free Trial Note */}
+        {/* Paystack Payment Note */}
         <div className="mt-10 text-center">
           <div className="inline-flex items-center gap-2 bg-[#D4AF37]/10 text-[#1A365D] px-5 py-2.5 rounded-full text-sm font-medium">
             <Star className="w-4 h-4" />
-            Start with a FREE 3-month trial — No credit card required!
+            Secure Paystack payment — Ksh 50 per learner per term
           </div>
         </div>
       </div>
