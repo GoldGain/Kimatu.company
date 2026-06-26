@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router';
+import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { Toaster } from '@/components/ui/sonner';
 import { Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -104,15 +104,15 @@ function LockedSchoolScreen({ reason }: { reason?: string | null }) {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">School Access Locked</h1>
         <p className="text-red-600 font-semibold mb-2">{reasonLabel}</p>
-        <p className="text-gray-500 text-sm mb-6">Your school's access to Kimatu Analytics has been temporarily restricted. Please contact your reseller or our support team to resolve this.</p>
+        <p className="text-gray-500 text-sm mb-6">Your school&apos;s access to Kimatu Analytics has been temporarily restricted. Please contact our support team to resolve this.</p>
         <div className="space-y-3">
-          <a href="https://wa.me/254700000000" target="_blank" rel="noopener noreferrer"
+          <a href="https://wa.me/254114645757" target="_blank" rel="noopener noreferrer"
             className="block w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">
-            Contact Support via WhatsApp
+            Contact Support via WhatsApp — 0114 645 757
           </a>
-          <a href="mailto:tutorsultimate@gmail.com"
+          <a href="mailto:martinmakau123@gmail.com"
             className="block w-full bg-[#1A365D] text-white py-3 rounded-xl font-medium hover:bg-[#2D4A7C] transition-colors">
-            Email: tutorsultimate@gmail.com
+            Email: martinmakau123@gmail.com
           </a>
           <button onClick={handleLogout}
             className="block w-full border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors">
@@ -271,4 +271,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-// trigger build
