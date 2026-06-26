@@ -21,32 +21,32 @@ export default function CTA() {
             <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-white/20">
               <Sparkles className="w-8 h-8 text-[#D4AF37]" />
             </div>
-            <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">
+            <h2 className="text-4xl md:text-5xl font-extrabold text-white mb-4 leading-tight">
               Ready to Transform Your School?
             </h2>
-            <p className="text-white/80 max-w-2xl mx-auto mb-8 text-lg">
+            <p className="text-white/80 max-w-2xl mx-auto mb-8 text-lg md:text-xl leading-relaxed">
               Join 2,000+ schools across Kenya already using Kimatu Analytics to streamline management, 
               improve communication, and enhance learning outcomes. Smarter Schools, Brighter Futures.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link
                 to="/get-started"
-                className="inline-flex items-center gap-2 bg-white px-8 py-3.5 rounded-full text-sm font-bold hover:bg-gray-100 transition-colors shadow-lg"
+                className="inline-flex items-center gap-2 bg-white px-8 py-4 rounded-full text-base font-bold hover:bg-gray-100 transition-colors shadow-lg"
                 style={{ color: '#1A365D' }}
               >
-                Get Started <ArrowRight className="w-4 h-4" />
+                Get Started <ArrowRight className="w-5 h-5" />
               </Link>
               <button
                 onClick={handleWhatsApp}
-                className="inline-flex items-center gap-2 border-2 border-white/30 text-white px-8 py-3.5 rounded-full text-sm font-bold hover:bg-white/10 transition-colors"
+                className="inline-flex items-center gap-2 border-2 border-white/30 text-white px-8 py-4 rounded-full text-base font-bold hover:bg-white/10 transition-colors"
               >
-                <MessageCircle className="w-4 h-4" /> Chat on WhatsApp
+                <MessageCircle className="w-5 h-5" /> Chat on WhatsApp
               </button>
             </div>
-            <div className="mt-6 flex flex-wrap justify-center gap-3 text-xs text-white/60">
-              <span className="flex items-center gap-1"><span className="text-[#D4AF37]">✓</span> Free 3-month trial</span>
-              <span className="flex items-center gap-1"><span className="text-[#D4AF37]">✓</span> No credit card required</span>
+            <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-white/60">
+              <span className="flex items-center gap-1"><span className="text-[#D4AF37]">✓</span> Affordable pricing at Ksh 50 per learner per term</span>
               <span className="flex items-center gap-1"><span className="text-[#D4AF37]">✓</span> CBE &amp; 8-4-4 support</span>
+              <span className="flex items-center gap-1"><span className="text-[#D4AF37]">✓</span> Full PP1 &amp; PP2 support</span>
             </div>
           </div>
         </div>
