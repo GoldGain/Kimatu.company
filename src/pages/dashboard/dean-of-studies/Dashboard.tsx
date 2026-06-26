@@ -113,7 +113,7 @@ export default function DeanOfStudiesDashboard() {
         // Get learning area assignments for this class
         const { data: assignments } = await supabaseUntyped
           .from('teacher_subject_assignments')
-          .select('subject_id, teacher_id, subjects(id, name), profiles(id, first_name, last_name)')
+          .select('subject_id, teacher_id, subjects(id, name), teachers(id, first_name, last_name)')
           .eq('class_id', cls.id)
           .eq('is_active', true);
 
@@ -123,7 +123,7 @@ export default function DeanOfStudiesDashboard() {
             uniqueAreas.set(a.subjects.id, {
               id: a.subjects.id,
               name: a.subjects.name,
-              teacherName: a.profiles ? `${a.profiles.first_name} ${a.profiles.last_name}` : 'Unassigned',
+              teacherName: a.teachers ? `${a.teachers.first_name} ${a.teachers.last_name}` : 'Unassigned',
               teacherId: a.teacher_id,
             });
           }

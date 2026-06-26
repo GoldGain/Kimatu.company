@@ -41,8 +41,7 @@ export default function ExamTimetable() {
   });
 
   useEffect(() => {
-    fetchTeacherClasses();
-    fetchTeacherSubjects();
+    fetchTeacherClassesAndSubjects();
   }, []);
 
   useEffect(() => {
@@ -51,37 +50,49 @@ export default function ExamTimetable() {
     }
   }, [selectedClass, examPeriod, selectedTerm, selectedYear]);
 
-  const fetchTeacherClasses = async () => {
+  const fetchTeacherClassesAndSubjects = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
-        .from('teacher_classes')
-        .select('classes(id, name, grade_level)')
-        .eq('teacher_id', user.id);
+      // Get teacher record first
+      const { data: teacher } = await supabase
+        .from('teachers')
+        .select('id')
+        .eq('profile_id', user.id)
+        .maybeSingle();
+
+      if (!teacher) return;
+
+      // Get teacher's assignments to derive classes and subjects
+      const { data: assignments, error } = await supabase
+        .from('teacher_subject_assignments')
+        .select('*, classes(id, name, grade_level), subjects(id, name)')
+        .eq('teacher_id', teacher.id)
+        .eq('is_active', true);
 
       if (error) throw error;
-      setClasses(data?.map((tc: any) => tc.classes) || []);
+
+      const uniqueClasses: any[] = [];
+      const seenClasses = new Set();
+      const uniqueSubjects: any[] = [];
+      const seenSubjects = new Set();
+
+      (assignments || []).forEach((a: any) => {
+        if (a.classes && !seenClasses.has(a.classes.id)) {
+          seenClasses.add(a.classes.id);
+          uniqueClasses.push(a.classes);
+        }
+        if (a.subjects && !seenSubjects.has(a.subjects.id)) {
+          seenSubjects.add(a.subjects.id);
+          uniqueSubjects.push(a.subjects);
+        }
+      });
+
+      setClasses(uniqueClasses);
+      setSubjects(uniqueSubjects);
     } catch (err: any) {
-      toast.error('Failed to load classes');
-    }
-  };
-
-  const fetchTeacherSubjects = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('teacher_subjects')
-        .select('subjects(id, name)')
-        .eq('teacher_id', user.id);
-
-      if (error) throw error;
-      setSubjects(data?.map((ts: any) => ts.subjects) || []);
-    } catch (err: any) {
-      toast.error('Failed to load subjects');
+      toast.error('Failed to load classes and subjects');
     }
   };
 

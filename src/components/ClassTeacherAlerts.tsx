@@ -34,13 +34,13 @@ export default function ClassTeacherAlerts({ classId, teacherId }: ClassTeacherA
     try {
       // 1. Check for students with low performance (< 40%)
       const { data: lowPerf } = await supabase
-        .from('cat_exam_results')
+        .from('results')
         .select(`
-          combined_marks,
+          percentage,
           students(first_name, last_name, id)
         `)
-        .eq('students.class_id', classId)
-        .lt('combined_marks', 40)
+        .eq('class_id', classId)
+        .lt('percentage', 40)
         .limit(10);
 
       if (lowPerf && lowPerf.length > 0) {
@@ -70,7 +70,7 @@ export default function ClassTeacherAlerts({ classId, teacherId }: ClassTeacherA
         .eq('is_active', true);
 
       const { data: recentResults } = await supabase
-        .from('cat_exam_results')
+        .from('results')
         .select('student_id')
         .in('student_id', (students || []).map((s: any) => s.id));
 

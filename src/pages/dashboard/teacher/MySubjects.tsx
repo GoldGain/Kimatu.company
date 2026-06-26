@@ -36,15 +36,15 @@ export default function TeacherMySubjects() {
 
   const fetchData = async () => {
     try {
-      // Get teacher's school
-      const { data: profile } = await supabaseUntyped
-        .from('profiles')
-        .select('school_id')
-        .eq('id', user?.id)
-        .single();
+      // Get teacher record
+      const { data: teacher } = await supabaseUntyped
+        .from('teachers')
+        .select('id, school_id')
+        .eq('profile_id', user?.id)
+        .maybeSingle();
 
-      if (!profile?.school_id) {
-        toast.error('No school assigned to your account');
+      if (!teacher) {
+        toast.error('Teacher record not found');
         setLoading(false);
         return;
       }
@@ -57,7 +57,8 @@ export default function TeacherMySubjects() {
           classes(name),
           subjects(name)
         `)
-        .eq('teacher_id', user?.id);
+        .eq('teacher_id', teacher.id)
+        .eq('is_active', true);
 
       const enrichedAssignments = (assignmentsData || []).map((a: any) => ({
         ...a,

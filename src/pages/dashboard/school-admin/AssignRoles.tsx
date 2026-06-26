@@ -45,16 +45,16 @@ export default function AssignRoles() {
       // Fetch teachers
       const { data: teachersData } = await supabaseUntyped
         .from('teachers')
-        .select('id, profile_id, is_class_teacher, assigned_class_id, is_dean_of_studies, profiles(first_name, last_name, email)')
+        .select('id, profile_id, is_class_teacher, assigned_class_id, is_dean_of_studies, first_name, last_name, email')
         .eq('school_id', user?.schoolId)
         .eq('is_active', true);
 
       const mappedTeachers: Teacher[] = (teachersData || []).map((t: any) => ({
         id: t.id,
         profile_id: t.profile_id,
-        first_name: t.profiles?.first_name || '',
-        last_name: t.profiles?.last_name || '',
-        email: t.profiles?.email || '',
+        first_name: t.first_name || '',
+        last_name: t.last_name || '',
+        email: t.email || '',
         is_class_teacher: t.is_class_teacher || false,
         assigned_class_id: t.assigned_class_id,
         is_dean_of_studies: t.is_dean_of_studies || false,

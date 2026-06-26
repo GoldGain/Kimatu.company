@@ -12,25 +12,70 @@ export default function TeacherAnalytics() {
 
   const fetchAnalytics = async () => {
     const schoolId = user?.schoolId;
-    const { data: results } = await supabaseUntyped.from('results').select('*, subjects(name)').eq('school_id', schoolId);
-    const { count: sCount } = await supabaseUntyped.from('students').select('*', { count: 'exact', head: true }).eq('school_id', schoolId);
+    if (!schoolId) return;
+
+    // Get teacher record first
+    const { data: teacher } = await supabaseUntyped
+      .from('teachers')
+      .select('id')
+      .eq('profile_id', user?.id)
+      .maybeSingle();
+
+    if (!teacher) return;
+
+    // Fetch results for this teacher's assigned subjects
+    const { data: results } = await supabaseUntyped
+      .from('results')
+      .select('*, subjects(name)')
+      .eq('teacher_id', teacher.id)
+      .eq('school_id', schoolId);
+
+    const { count: sCount } = await supabaseUntyped
+      .from('students')
+      .select('*', { count: 'exact', head: true })
+      .eq('school_id', schoolId);
     
-    if (results) {
-      const avg = results.reduce((sum, r) => sum + (r.percentage !== undefined && r.percentage !== null ? r.percentage : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : r.marks || 0)), 0) / results.length;
-      const top = Math.max(...results.map(r => r.percentage !== undefined && r.percentage !== null ? r.percentage : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : r.marks || 0)));
+    if (results && results.length > 0) {
+      const avg = results.reduce((sum, r) => sum + (r.percentage || 0), 0) / results.length;
+      const top = Math.max(...results.map(r => r.percentage || 0));
       
       // Group by subject
       const bySubject: Record<string, { name: string; total: number; count: number }> = {};
       results.forEach(r => {
         const name = r.subjects?.name || 'Unknown';
         if (!bySubject[name]) bySubject[name] = { name, total: 0, count: 0 };
-        bySubject[name].total += (r.percentage !== undefined && r.percentage !== null ? r.percentage : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : r.marks || 0));
+        bySubject[name].total += (r.percentage || 0);
         bySubject[name].count++;
       });
+
+      // Grade distribution
+      const distribution = { EE: 0, ME: 0, AE: 0, BE: 0 };
+      results.forEach(r => {
+        const grade = r.cbc_grade || '';
+        if (grade.startsWith('EE')) distribution.EE++;
+        else if (grade.startsWith('ME')) distribution.ME++;
+        else if (grade.startsWith('AE')) distribution.AE++;
+        else if (grade.startsWith('BE')) distribution.BE++;
+      });
+      const totalDist = results.length;
+      
       setSubjectPerformance(Object.values(bySubject).map(s => ({ ...s, avg: Math.round(s.total / s.count) })));
       setStats({ totalResults: results.length, avgMarks: Math.round(avg), topGrade: top, studentsCount: sCount || 0 });
+      setGradeDist([
+        { grade: 'EE', label: 'Exceeding', count: Math.round((distribution.EE / totalDist) * 100), color: 'bg-green-500' },
+        { grade: 'ME', label: 'Meeting', count: Math.round((distribution.ME / totalDist) * 100), color: 'bg-blue-500' },
+        { grade: 'AE', label: 'Approaching', count: Math.round((distribution.AE / totalDist) * 100), color: 'bg-orange-500' },
+        { grade: 'BE', label: 'Below', count: Math.round((distribution.BE / totalDist) * 100), color: 'bg-red-500' },
+      ]);
     }
   };
+
+  const [gradeDist, setGradeDist] = useState([
+    { grade: 'EE', label: 'Exceeding', count: 0, color: 'bg-green-500' },
+    { grade: 'ME', label: 'Meeting', count: 0, color: 'bg-blue-500' },
+    { grade: 'AE', label: 'Approaching', count: 0, color: 'bg-orange-500' },
+    { grade: 'BE', label: 'Below', count: 0, color: 'bg-red-500' },
+  ]);
 
   return (
     <div className="space-y-6">
@@ -75,16 +120,11 @@ export default function TeacherAnalytics() {
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <h3 className="font-semibold text-[#111111] mb-4">CBE Grade Distribution</h3>
         <div className="flex items-end gap-2 h-40">
-          {[
-            { grade: 'EE', label: 'Exceeding', count: 35, color: 'bg-green-500' },
-            { grade: 'ME', label: 'Meeting', count: 45, color: 'bg-blue-500' },
-            { grade: 'AE', label: 'Approaching', count: 15, color: 'bg-orange-500' },
-            { grade: 'BE', label: 'Below', count: 5, color: 'bg-red-500' },
-          ].map((g, i) => (
+          {gradeDist.map((g, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-2">
               <span className="text-xs font-bold text-[#111111]">{g.count}%</span>
               <div className="w-full bg-gray-100 rounded-t-lg relative" style={{ height: '120px' }}>
-                <div className={`w-full ${g.color} rounded-t-lg absolute bottom-0 transition-all duration-1000`} style={{ height: `${g.count * 2.5}px` }} />
+                <div className={`w-full ${g.color} rounded-t-lg absolute bottom-0 transition-all duration-1000`} style={{ height: `${g.count * 1.2}px` }} />
               </div>
               <span className="text-xs font-medium text-[#666666]">{g.grade}</span>
               <span className="text-[10px] text-gray-400">{g.label}</span>
