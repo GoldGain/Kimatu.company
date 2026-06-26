@@ -191,7 +191,7 @@ export default function TeacherResultsUpload() {
     return s.curriculum === 'CBE';
   });
 
-  // ── Resolve the effective subject name & id for submission ───────────────────
+  // ── Resolve the effective learning area name & id for submission ───────────────────
   const getEffectiveSubjectId = () => {
     if (subjectMode === 'db') return selectedSubject;
     return selectedSubject; // preset also stores the DB id after save
@@ -199,7 +199,7 @@ export default function TeacherResultsUpload() {
 
   // Save a manually-typed subject to DB and select it
   const saveManualSubject = async () => {
-    if (!manualSubjectName.trim()) { toast.error('Enter a subject name'); return; }
+    if (!manualSubjectName.trim()) { toast.error('Enter a learning area name'); return; }
     setSavingManualSubject(true);
     // Check if already exists
     const existing = subjects.find(s => s.name.toLowerCase() === manualSubjectName.trim().toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
@@ -227,7 +227,7 @@ export default function TeacherResultsUpload() {
     setSavingManualSubject(false);
   };
 
-  // When a preset subject name is selected, find or create its DB record
+  // When a preset learning area name is selected, find or create its DB record
   const handlePresetSubjectSelect = async (name: string) => {
     if (!name) { setSelectedSubject(''); return; }
     // Try to find in DB
@@ -618,7 +618,7 @@ export default function TeacherResultsUpload() {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Type subject name…"
+                  placeholder="Type learning area name…"
                   value={manualSubjectName}
                   onChange={e => setManualSubjectName(e.target.value)}
                   className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"

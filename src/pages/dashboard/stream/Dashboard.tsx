@@ -234,7 +234,7 @@ export default function StreamDashboard() {
           <div className="text-2xl font-bold text-gray-900">{classAvg !== null ? `${classAvg}%` : '—'}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">Subjects</span></div>
+          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">Learning Areas</span></div>
           <div className="text-2xl font-bold text-gray-900">{subjectSummaries.length}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -289,7 +289,7 @@ export default function StreamDashboard() {
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Student</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Adm No</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg %</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subjects</th>
+                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learning Areas</th>
                     {subjectSummaries.slice(0, 4).map(sub => (
                       <th key={sub.id} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{sub.name.substring(0, 6)}</th>
                     ))}
@@ -382,7 +382,7 @@ export default function StreamDashboard() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">#</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learning Area</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Average</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Highest</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Lowest</th>

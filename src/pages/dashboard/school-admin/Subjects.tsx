@@ -307,7 +307,7 @@ export default function SchoolAdminSubjects() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111]">Subjects</h1>
+          <h1 className="text-2xl font-bold text-[#111111]">Learning Areas</h1>
           <p className="text-sm text-[#666666]">{subjects.length} subject{subjects.length !== 1 ? 's' : ''} registered</p>
         </div>
         <button
@@ -315,7 +315,7 @@ export default function SchoolAdminSubjects() {
           className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Add Subject Manually
+          Add Learning Area Manually
         </button>
       </div>
 
@@ -323,7 +323,7 @@ export default function SchoolAdminSubjects() {
       <div className="bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <div className="flex items-center gap-2 mb-1">
           <Wand2 className="w-5 h-5 text-emerald-600" />
-          <h3 className="font-semibold text-[#111111]">Quick Add from Standard Subjects</h3>
+          <h3 className="font-semibold text-[#111111]">Quick Add from Standard Learning Areas</h3>
         </div>
         <p className="text-xs text-gray-500 mb-3">
           All official Kenyan curriculum subjects are listed below — PP1 &amp; PP2, Primary (Gr 1–6), Junior (Gr 7–9), Senior (Gr 10–12), and 8-4-4 (Form 3–4).
@@ -399,14 +399,14 @@ export default function SchoolAdminSubjects() {
         </div>
       </div>
 
-      {/* Add Subject Form (manual / custom) */}
+      {/* Add Learning Area Form (manual / custom) */}
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <h3 className="text-lg font-semibold mb-1 text-[#111111]">Add Custom Subject Manually</h3>
           <p className="text-xs text-gray-500 mb-4">Use this to add subjects not in the standard list (e.g. French, Sign Language, Music).</p>
           <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Subject Name *</label>
+              <label className="block text-xs text-gray-500 mb-1">Learning Area Name *</label>
               <input
                 placeholder="e.g. French"
                 value={formData.name}
@@ -416,7 +416,7 @@ export default function SchoolAdminSubjects() {
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Subject Code</label>
+              <label className="block text-xs text-gray-500 mb-1">Learning Area Code</label>
               <input
                 placeholder="e.g. FRE101"
                 value={formData.code}
@@ -453,7 +453,7 @@ export default function SchoolAdminSubjects() {
                 className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2"
               >
                 {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                {adding ? 'Adding...' : 'Add Subject'}
+                {adding ? 'Adding...' : 'Add Learning Area'}
               </button>
               <button
                 type="button"
@@ -477,7 +477,7 @@ export default function SchoolAdminSubjects() {
         <div className="bg-white rounded-2xl p-12 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <p className="text-[#666666] font-medium">No subjects added yet</p>
-          <p className="text-sm text-gray-400 mt-1">Use the quick-add panel above to add standard subjects, or click "Add Subject Manually".</p>
+          <p className="text-sm text-gray-400 mt-1">Use the quick-add panel above to add standard learning areas, or click "Add Learning Area Manually".</p>
         </div>
       ) : (
         Object.entries(grouped).map(([curriculum, subs]) => (
@@ -492,7 +492,7 @@ export default function SchoolAdminSubjects() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Subject</th>
+                    <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
                     <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Code</th>
                     <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Category</th>
                     <th className="text-right text-xs font-medium text-[#666666] uppercase py-2 px-3">Actions</th>
@@ -564,7 +564,7 @@ export default function SchoolAdminSubjects() {
                 <Trash2 className="w-5 h-5 text-red-600" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Delete Subject</h2>
+                <h2 className="text-lg font-semibold">Delete Learning Area</h2>
                 <p className="text-xs text-gray-500">This action cannot be undone</p>
               </div>
             </div>

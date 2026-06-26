@@ -28,7 +28,7 @@ const features = [
   {
     icon: <BookOpen className="w-6 h-6" />,
     title: 'Learning Areas',
-    description: 'Manage subjects for all levels — PP1, PP2, Primary, Junior, and Senior. Full CBE support plus 8-4-4 for Form 3 & 4.',
+    description: 'Manage learning areas for all levels — PP1, PP2, Primary, Junior, and Senior. Full CBE support plus 8-4-4 for Form 3 & 4.',
     color: 'bg-[#D4AF37]',
   },
   {

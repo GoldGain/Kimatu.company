@@ -45,6 +45,9 @@ import SchoolAdminTimetableSetup from '@/pages/dashboard/school-admin/TimetableS
 import SchoolAdminTimetableGenerate from '@/pages/dashboard/school-admin/TimetableGenerate';
 import SchoolAdminAssignTeachers from '@/pages/dashboard/school-admin/AssignTeachers';
 import SchoolAdminExams from '@/pages/dashboard/school-admin/Exams';
+import SchoolAdminAssessments from '@/pages/dashboard/school-admin/Assessments';
+import SchoolAdminAssignRoles from '@/pages/dashboard/school-admin/AssignRoles';
+import DeanOfStudiesDashboard from '@/pages/dashboard/dean-of-studies/Dashboard';
 import TeacherDashboard from '@/pages/dashboard/teacher/Dashboard';
 import TeacherResultsUpload from '@/pages/dashboard/teacher/ResultsUpload';
 import TeacherAttendance from '@/pages/dashboard/teacher/Attendance';
@@ -212,6 +215,9 @@ function AppRoutes() {
       <Route path="/school-admin/profile" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminProfile /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/view" element={<ProtectedRoute allowedRoles={['school_admin']}><TimetableView /></ProtectedRoute>} />
       <Route path="/school-admin/exams" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminExams /></ProtectedRoute>} />
+      <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssessments /></ProtectedRoute>} />
+      <Route path="/school-admin/assign-roles" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignRoles /></ProtectedRoute>} />
+      <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DeanOfStudiesDashboard /></ProtectedRoute>} />
 
       {/* Teacher routes */}
       <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherDashboard /></ProtectedRoute>} />

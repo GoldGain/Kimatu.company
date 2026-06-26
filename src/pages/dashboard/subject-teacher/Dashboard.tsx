@@ -5,6 +5,7 @@ import { BookOpen, Users, Upload, Loader2, BarChart3, TrendingUp, ChevronDown, C
 import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { getSchoolLevelBand } from '@/lib/grading';
+import MarksEntryProgress from '@/components/MarksEntryProgress';
 
 interface Assignment {
   id: string;
@@ -175,7 +176,7 @@ export default function SubjectTeacherDashboard() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111]">Subject Teacher Dashboard</h1>
+          <h1 className="text-2xl font-bold text-[#111111]">Learning Area Teacher Dashboard</h1>
           <p className="text-sm text-[#666666]">Your assigned subjects, classes, and student results</p>
         </div>
         {terms.length > 0 && (
@@ -215,6 +216,15 @@ export default function SubjectTeacherDashboard() {
           <Link to="/teacher/results/upload" className="text-sm font-semibold text-blue-600 hover:underline">Go to Upload →</Link>
         </div>
       </div>
+
+      {/* Marks Entry Progress */}
+      {teacherRecord && selectedTerm && (
+        <MarksEntryProgress
+          teacherId={teacherRecord.id}
+          schoolId={teacherRecord.school_id || user?.schoolId || ''}
+          termId={selectedTerm}
+        />
+      )}
 
       {/* Assignment cards */}
       <div className="space-y-4">

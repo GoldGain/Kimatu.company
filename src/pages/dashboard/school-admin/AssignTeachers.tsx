@@ -250,7 +250,7 @@ export default function AssignTeachers() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Subject</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Learning Area</label>
                 <select
                   value={formData.subject_id}
                   onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })}
@@ -364,7 +364,7 @@ export default function AssignTeachers() {
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">#</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Teacher</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Class</th>
-                    <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Learning Area</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Lessons</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Priority</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Del</th>

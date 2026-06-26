@@ -292,11 +292,11 @@ export default function StudentReportCard() {
         previousPercentage: null,
       }));
       const sortedBest = [...subjectScores].sort((a, b) => b.percentage - a.percentage);
-      const bestSubject = sortedBest[0]?.name || 'all subjects';
-      const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
+      const bestLearningArea = sortedBest[0]?.name || 'all subjects';
+      const weakestLearningArea = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
       const studentFullName = `${student.first_name} ${student.last_name}`;
       const aiComment = generateUniqueAIComment(
-        studentFullName, avgPercentage, deviation, bestSubject, weakestSubject,
+        studentFullName, avgPercentage, deviation, bestLearningArea, weakestLearningArea,
         position, totalStudents || 0, isNew, classDataForGrading, subjectScores
       );
 
@@ -339,8 +339,8 @@ export default function StudentReportCard() {
       }
 
       // Achievements
-      const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
-      const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
+      const myBestLearningAreas = classBestList.filter((b: BestInSubject) => b.studentId === student.id);
+      const achievementEndY = drawAchievements(doc, myBestLearningAreas, trendEndY);
 
       // AI Comment
       const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
@@ -470,7 +470,7 @@ export default function StudentReportCard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Subject</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844 ? '8-4-4 Grade' : 'CBE Grade'}</th>

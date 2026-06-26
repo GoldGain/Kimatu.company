@@ -940,7 +940,7 @@ export default function SchoolAdminResults() {
             <thead>
               <tr className="bg-[#2563EB] text-white">
                 <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Student</th>
-                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Subject</th>
+                <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Learning Area</th>
                 <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Marks</th>
                 <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Grade</th>
                 <th className="text-left text-xs font-semibold uppercase px-4 py-3 border border-blue-700">Points</th>

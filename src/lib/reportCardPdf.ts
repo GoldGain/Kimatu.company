@@ -68,52 +68,52 @@ export function formatPosition(position: number | null, totalStudents: number): 
 // ── Legacy AI Comment Generator (kept for backward compatibility) ─────────────
 const COMMENT_TEMPLATES = {
   top1: [
-    "Exceptional performance! You ranked 1st out of {total} students. Your mastery of {bestSubject} is remarkable, and your dedication sets a brilliant example. With your {grade} grade ({descriptor}), you demonstrate that excellence is a habit. Continue being the trailblazer you are!",
-    "Magnificent work! Securing 1st position among {total} students requires extraordinary commitment. Your {grade} grade in {bestSubject} reflects exceptional understanding. You are an inspiration to your peers — keep shining brilliantly!",
+    "Exceptional performance! You ranked 1st out of {total} students. Your mastery of {bestLearning Area} is remarkable, and your dedication sets a brilliant example. With your {grade} grade ({descriptor}), you demonstrate that excellence is a habit. Continue being the trailblazer you are!",
+    "Magnificent work! Securing 1st position among {total} students requires extraordinary commitment. Your {grade} grade in {bestLearning Area} reflects exceptional understanding. You are an inspiration to your peers — keep shining brilliantly!",
   ],
   top2: [
-    "Outstanding achievement! You claimed 2nd place among {total} students. Your proficiency in {bestSubject} is impressive, earning a {grade} grade ({descriptor}). A little more effort and the top spot is yours!",
-    "Brilliant performance! 2nd position out of {total} students showcases your determination. Your strength in {bestSubject} with a {grade} grade is praiseworthy. Keep pushing boundaries!",
+    "Outstanding achievement! You claimed 2nd place among {total} students. Your proficiency in {bestLearning Area} is impressive, earning a {grade} grade ({descriptor}). A little more effort and the top spot is yours!",
+    "Brilliant performance! 2nd position out of {total} students showcases your determination. Your strength in {bestLearning Area} with a {grade} grade is praiseworthy. Keep pushing boundaries!",
   ],
   top3: [
-    "Excellent effort! You earned 3rd place out of {total} students. Your dedication to {bestSubject} has paid off with a {grade} grade ({descriptor}). Consistency will take you even higher!",
-    "Wonderful work! Ranking 3rd among {total} students demonstrates serious commitment. Your {grade} grade in {bestSubject} proves you have what it takes. Aim for the stars!",
+    "Excellent effort! You earned 3rd place out of {total} students. Your dedication to {bestLearning Area} has paid off with a {grade} grade ({descriptor}). Consistency will take you even higher!",
+    "Wonderful work! Ranking 3rd among {total} students demonstrates serious commitment. Your {grade} grade in {bestLearning Area} proves you have what it takes. Aim for the stars!",
   ],
   top5: [
-    "Great work! You are among the top 5 performers in a class of {total}. Your {grade} grade in {bestSubject} shows tremendous potential. With continued focus, especially on {weakestSubject}, you will reach even greater heights!",
-    "Commendable performance! Being in the top 5 out of {total} students reflects your hard work. Your {grade} grade in {bestSubject} is excellent. Keep building on this strong foundation!",
+    "Great work! You are among the top 5 performers in a class of {total}. Your {grade} grade in {bestLearning Area} shows tremendous potential. With continued focus, especially on {weakestLearning Area}, you will reach even greater heights!",
+    "Commendable performance! Being in the top 5 out of {total} students reflects your hard work. Your {grade} grade in {bestLearning Area} is excellent. Keep building on this strong foundation!",
   ],
   newStudent: [
-    "Welcome! You have achieved a {grade} grade overall ({descriptor}). Your performance in {bestSubject} shows great promise. Focus on strengthening {weakestSubject} next term. We believe in your incredible potential!",
-    "A warm welcome! Your {grade} grade ({descriptor}) indicates a solid start. You show particular aptitude in {bestSubject}. Devoting more time to {weakestSubject} will help you flourish. Exciting times ahead!",
+    "Welcome! You have achieved a {grade} grade overall ({descriptor}). Your performance in {bestLearning Area} shows great promise. Focus on strengthening {weakestLearning Area} next term. We believe in your incredible potential!",
+    "A warm welcome! Your {grade} grade ({descriptor}) indicates a solid start. You show particular aptitude in {bestLearning Area}. Devoting more time to {weakestLearning Area} will help you flourish. Exciting times ahead!",
   ],
   improved10: [
-    "Remarkable improvement! You rose by {dev}% from last term — a phenomenal leap! Your relentless effort in {bestSubject} has truly paid off with a {grade} grade ({descriptor}). This momentum will carry you to extraordinary achievements!",
-    "Phenomenal progress! A {dev}% increase from last term is truly inspiring. Your determination in {bestSubject} earned you a {grade} grade ({descriptor}). Maintain this incredible trajectory!",
+    "Remarkable improvement! You rose by {dev}% from last term — a phenomenal leap! Your relentless effort in {bestLearning Area} has truly paid off with a {grade} grade ({descriptor}). This momentum will carry you to extraordinary achievements!",
+    "Phenomenal progress! A {dev}% increase from last term is truly inspiring. Your determination in {bestLearning Area} earned you a {grade} grade ({descriptor}). Maintain this incredible trajectory!",
   ],
   improved5: [
-    "Excellent progress! You improved by {dev}% from last term. Your dedication to {bestSubject} is clearly evident in your {grade} grade ({descriptor}). To reach even greater heights, please give more attention to {weakestSubject}. Keep soaring!",
-    "Fantastic improvement! Rising by {dev}% demonstrates real commitment. Your {grade} grade in {bestSubject} reflects your growing excellence. Continue nurturing your strengths while working on {weakestSubject}.",
+    "Excellent progress! You improved by {dev}% from last term. Your dedication to {bestLearning Area} is clearly evident in your {grade} grade ({descriptor}). To reach even greater heights, please give more attention to {weakestLearning Area}. Keep soaring!",
+    "Fantastic improvement! Rising by {dev}% demonstrates real commitment. Your {grade} grade in {bestLearning Area} reflects your growing excellence. Continue nurturing your strengths while working on {weakestLearning Area}.",
   ],
   improved2: [
-    "Good improvement! You rose by {dev}% from last term. Your {grade} grade shows positive growth. Continue building on your strength in {bestSubject} while dedicating time to {weakestSubject}. Steady progress leads to remarkable success!",
-    "Nice upward trend! A {dev}% improvement shows you are on the right path. Your {grade} grade in {bestSubject} is encouraging. Keep refining your approach, especially for {weakestSubject}.",
+    "Good improvement! You rose by {dev}% from last term. Your {grade} grade shows positive growth. Continue building on your strength in {bestLearning Area} while dedicating time to {weakestLearning Area}. Steady progress leads to remarkable success!",
+    "Nice upward trend! A {dev}% improvement shows you are on the right path. Your {grade} grade in {bestLearning Area} is encouraging. Keep refining your approach, especially for {weakestLearning Area}.",
   ],
   consistent: [
-    "Consistent performance this term with a {grade} grade ({descriptor}). You demonstrate steady capability in {bestSubject}. Let's set ambitious goals to elevate {weakestSubject} next term. Your reliability is a valuable asset!",
-    "Steady and reliable! Your {grade} grade ({descriptor}) shows consistency. Your strength in {bestSubject} is clear. Channeling more energy into {weakestSubject} will create a more balanced academic profile.",
+    "Consistent performance this term with a {grade} grade ({descriptor}). You demonstrate steady capability in {bestLearning Area}. Let's set ambitious goals to elevate {weakestLearning Area} next term. Your reliability is a valuable asset!",
+    "Steady and reliable! Your {grade} grade ({descriptor}) shows consistency. Your strength in {bestLearning Area} is clear. Channeling more energy into {weakestLearning Area} will create a more balanced academic profile.",
   ],
   dropped5: [
-    "Your performance dropped by {dev}% from last term. Do not be discouraged — every accomplished learner faces challenges. Focus more on {weakestSubject} and seek guidance from your teacher. We have full confidence you will bounce back stronger!",
-    "A slight dip of {dev}% this term, but setbacks are setups for comebacks. Your previous success in {bestSubject} proves your capability. Let's create a recovery plan for {weakestSubject}. You've got this!",
+    "Your performance dropped by {dev}% from last term. Do not be discouraged — every accomplished learner faces challenges. Focus more on {weakestLearning Area} and seek guidance from your teacher. We have full confidence you will bounce back stronger!",
+    "A slight dip of {dev}% this term, but setbacks are setups for comebacks. Your previous success in {bestLearning Area} proves your capability. Let's create a recovery plan for {weakestLearning Area}. You've got this!",
   ],
   dropped10: [
-    "Your performance dropped by {dev}% from last term, which requires attention. Please dedicate more quality time to {weakestSubject} and revisit your study strategies. Your teachers and parents are here to support your recovery. We believe in your resilience!",
-    "A decline of {dev}% is concerning, but not insurmountable. Your past performance in {bestSubject} shows you have the ability. Let's identify obstacles together and create a targeted improvement plan for {weakestSubject}.",
+    "Your performance dropped by {dev}% from last term, which requires attention. Please dedicate more quality time to {weakestLearning Area} and revisit your study strategies. Your teachers and parents are here to support your recovery. We believe in your resilience!",
+    "A decline of {dev}% is concerning, but not insurmountable. Your past performance in {bestLearning Area} shows you have the ability. Let's identify obstacles together and create a targeted improvement plan for {weakestLearning Area}.",
   ],
   droppedSevere: [
-    "Your performance dropped significantly by {dev}% from last term. Urgent intervention is needed, particularly in {weakestSubject}. Please schedule a meeting with your class teacher to develop a comprehensive improvement strategy. Your potential is untapped — we are here to help you recover!",
-    "A substantial decline of {dev}% demands immediate action. Your capability in {bestSubject} proves you can excel. Let's work together intensively on {weakestSubject}. With focused effort and support, remarkable recovery is absolutely possible!",
+    "Your performance dropped significantly by {dev}% from last term. Urgent intervention is needed, particularly in {weakestLearning Area}. Please schedule a meeting with your class teacher to develop a comprehensive improvement strategy. Your potential is untapped — we are here to help you recover!",
+    "A substantial decline of {dev}% demands immediate action. Your capability in {bestLearning Area} proves you can excel. Let's work together intensively on {weakestLearning Area}. With focused effort and support, remarkable recovery is absolutely possible!",
   ],
 };
 
@@ -129,19 +129,19 @@ export function generateUniqueAIComment(
   studentName: string,
   avgPct: number,
   deviation: number | null,
-  bestSubject: string,
-  weakestSubject: string,
+  bestLearningArea: string,
+  weakestLearningArea: string,
   position: number | null,
   totalStudents: number,
   isNew: boolean,
   classData?: any,
-  allSubjectResults?: SubjectResult[]
+  allLearningAreaResults?: SubjectResult[]
 ): string {
   // If we have full subject data, use the rich subject-specific generator
-  if (allSubjectResults && allSubjectResults.length > 0) {
+  if (allLearningAreaResults && allLearningAreaResults.length > 0) {
     return generateSubjectSpecificComment(
       studentName,
-      allSubjectResults,
+      allLearningAreaResults,
       avgPct,
       position,
       totalStudents,
@@ -191,8 +191,8 @@ export function generateUniqueAIComment(
 
   return template
     .replace('{studentName}', studentName)
-    .replace('{bestSubject}', bestSubject)
-    .replace('{weakestSubject}', weakestSubject)
+    .replace('{bestLearning Area}', bestLearningArea)
+    .replace('{weakestLearning Area}', weakestLearningArea)
     .replace('{position}', String(position || 'N/A'))
     .replace('{total}', String(totalStudents))
     .replace('{dev}', deviation !== null ? Math.abs(deviation).toFixed(1) : '0')
@@ -610,10 +610,10 @@ export function drawResultsTable(
   const isPrimary = getSchoolLevelBand(classData) === 'primary';
 
   const tableHead = is844
-    ? ['#', 'Subject', 'Marks', 'Out Of', '%', '8-4-4 Grade', 'Points']
+    ? ['#', 'Learning Area', 'Marks', 'Out Of', '%', '8-4-4 Grade', 'Points']
     : isPrimary
-    ? ['#', 'Subject', 'Marks', 'Out Of', '%', 'CBE Grade']
-    : ['#', 'Subject', 'Marks', 'Out Of', '%', 'CBE Grade', 'Points'];
+    ? ['#', 'Learning Area', 'Marks', 'Out Of', '%', 'CBE Grade']
+    : ['#', 'Learning Area', 'Marks', 'Out Of', '%', 'CBE Grade', 'Points'];
 
   const tableBody = results.map((r, i) => {
     const pct = getPercentage(r);
@@ -663,7 +663,7 @@ export function drawSummaryBox(
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
-  doc.text(`Subjects: ${results.length}`, 20, startY + 7);
+  doc.text(`Learning Areas: ${results.length}`, 20, startY + 7);
   doc.text(`Total Marks: ${totalMarks}`, 65, startY + 7);
   doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 130, startY + 7);
   doc.text(`Position: ${position}`, 20, startY + 15);
@@ -704,25 +704,25 @@ export function drawDeviation(
 // ── Draw Achievements ────────────────────────────────────────────────────────
 export function drawAchievements(
   doc: jsPDF,
-  bestSubjects: any[],
+  bestLearningAreas: any[],
   startY: number
 ): number {
-  if (bestSubjects.length === 0) return startY;
+  if (bestLearningAreas.length === 0) return startY;
 
   doc.setFillColor(254, 249, 195);
-  doc.rect(14, startY, 182, 5 + bestSubjects.length * 5, 'F');
+  doc.rect(14, startY, 182, 5 + bestLearningAreas.length * 5, 'F');
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(202, 138, 4);
   doc.text('ACHIEVEMENT:', 18, startY + 4);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(0, 0, 0);
-  bestSubjects.forEach((b, bi) => {
+  bestLearningAreas.forEach((b, bi) => {
     const pts = b.points !== null ? ` (${b.points} pts)` : '';
     doc.setFontSize(7);
     doc.text(`Best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, startY + 9 + bi * 5);
   });
-  return startY + 5 + bestSubjects.length * 5 + 5;
+  return startY + 5 + bestLearningAreas.length * 5 + 5;
 }
 
 // ── Draw AI Comment ──────────────────────────────────────────────────────────

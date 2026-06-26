@@ -240,7 +240,7 @@ export default function ClassTeacherDashboard() {
           <div className="text-2xl font-bold text-gray-900">{students.length}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-green-600" /><span className="text-xs text-gray-500">Subjects</span></div>
+          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-green-600" /><span className="text-xs text-gray-500">Learning Areas</span></div>
           <div className="text-2xl font-bold text-gray-900">{subjects.length}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -284,9 +284,9 @@ export default function ClassTeacherDashboard() {
           {/* Class Teacher Alerts */}
           <ClassTeacherAlerts classId={assignedClass.id} teacherId={user?.id || ''} />
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h3 className="font-bold text-gray-900 mb-4">Subjects in {assignedClass.name}</h3>
+            <h3 className="font-bold text-gray-900 mb-4">Learning Areas in {assignedClass.name}</h3>
             {subjects.length === 0 ? (
-              <p className="text-gray-500 text-sm">No subjects assigned to this class yet.</p>
+              <p className="text-gray-500 text-sm">No learning areas assigned to this class yet.</p>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {subjects.map(sub => (
@@ -371,7 +371,7 @@ export default function ClassTeacherDashboard() {
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Pos</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Student</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg %</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subjects Done</th>
+                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learning Areas Done</th>
                     {subjects.slice(0, 5).map(sub => (
                       <th key={sub.id} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{sub.name.substring(0, 6)}</th>
                     ))}

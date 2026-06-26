@@ -75,6 +75,13 @@ export default function HeroCarousel() {
             initial={{ scale: 1 }}
             animate={{ scale: 1.05 }}
             transition={{ duration: 6, ease: 'easeOut' }}
+            onError={(e) => {
+              const target = e.currentTarget;
+              target.style.display = 'none';
+              if (target.parentElement) {
+                target.parentElement.style.background = 'linear-gradient(135deg, #1A365D 0%, #2D4A7C 50%, #1A365D 100%)';
+              }
+            }}
           />
         </motion.div>
       </AnimatePresence>
