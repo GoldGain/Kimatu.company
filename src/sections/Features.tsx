@@ -28,7 +28,7 @@ const features = [
   {
     icon: <BookOpen className="w-6 h-6" />,
     title: 'Learning Areas',
-    description: 'Manage subjects for all levels — Pre-Primary, Primary, Junior, and Senior. Support for both CBE and 8-4-4 curricula.',
+    description: 'Manage subjects for all levels — PP1, PP2, Primary, Junior, and Senior. Full CBE support plus 8-4-4 for Form 3 & 4.',
     color: 'bg-[#D4AF37]',
   },
   {
@@ -147,13 +147,13 @@ export default function Features() {
     <section id="features" className="py-16 md:py-20 bg-gradient-to-b from-[#1A1A1A] to-[#0F1729]" ref={sectionRef}>
       <div className="max-w-7xl mx-auto px-4 md:px-8">
         <div className="text-center mb-12">
-          <span className="text-sm font-medium mb-2 block" style={{ color: '#D4AF37' }}>FEATURES</span>
-          <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+          <span className="text-base font-bold mb-2 block" style={{ color: '#D4AF37' }}>FEATURES</span>
+          <h2 className="text-3xl md:text-5xl font-extrabold text-white mb-4">
             Everything Your School Needs
           </h2>
-          <p className="text-gray-400 max-w-2xl mx-auto">
+          <p className="text-gray-400 max-w-2xl mx-auto text-base leading-relaxed">
             A comprehensive suite of tools designed specifically for Kenyan schools. 
-            Supports CBE and 8-4-4 curricula from Pre-Primary through Senior School.
+            Supports CBE (PP1-Senior) and 8-4-4 (Form 3 &amp; 4 only).
           </p>
         </div>
 
