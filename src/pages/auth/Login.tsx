@@ -34,14 +34,6 @@ export default function Login() {
     else navigate('/', { replace: true });
   };
 
-  const DEMO_CREDENTIALS = [
-    { email: 'iianisecondary2024@gmail.com', pass: 'SchoolAdmin@2025', role: 'School Admin' },
-    { email: 'super@edu.ac.ke', pass: 'admin@2025', role: 'Super Admin' },
-    { email: 'teacher@greenfield.ac.ke', pass: 'Teacher@2025!', role: 'Teacher' },
-    { email: 'student@greenfield.ac.ke', pass: 'student@2025!', role: 'Student' },
-    { email: 'parent@greenfield.ac.ke', pass: 'parent@2025!', role: 'Parent' },
-  ];
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -159,8 +151,8 @@ export default function Login() {
               <span className="text-[10px] -mt-1" style={{ color: '#D4AF37' }}>ANALYTICS</span>
             </div>
           </Link>
-          <h1 className="text-2xl font-bold text-[#111111]">Welcome Back</h1>
-          <p className="text-sm text-[#666666] mt-1">Login to your school portal</p>
+          <h1 className="text-3xl font-bold text-[#111111]">Welcome Back</h1>
+          <p className="text-base text-[#666666] mt-1">Login to your school portal</p>
           <div className="mt-3 flex justify-center">
             <PWAInstallButton />
           </div>
@@ -265,28 +257,25 @@ export default function Login() {
             </Link>
           </div>
 
-          {/* Demo credentials */}
-          <div className="mt-6 pt-6 border-t border-gray-100">
-            <p className="text-xs text-gray-400 text-center mb-3">Demo Credentials (Click to auto-fill)</p>
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              {DEMO_CREDENTIALS.map((demo, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => { setIdentifier(demo.email); setPassword(demo.pass); setLoginMethod('email'); }}
-                  className="p-2 bg-gray-50 rounded-lg text-left hover:bg-gray-100 transition-colors"
-                >
-                  <span className="font-medium text-gray-600">{demo.role}</span>
-                  <br />
-                  <span className="text-gray-400">{demo.email}</span>
-                </button>
-              ))}
+          <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-500 mb-2">Need help logging in?</p>
+            <div className="flex justify-center gap-3">
+              <a 
+                href="https://wa.me/254114645757" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-green-600 hover:text-green-700 font-medium"
+              >
+                WhatsApp Support
+              </a>
+              <span className="text-gray-300">|</span>
+              <a 
+                href="mailto:martinmakau123@gmail.com"
+                className="inline-flex items-center gap-1 text-sm text-[#1A365D] hover:text-[#2D4A7C] font-medium"
+              >
+                Email Support
+              </a>
             </div>
-          </div>
-
-          <div className="mt-4 text-center text-xs text-gray-400">
-            <p>📧 School Admin / Teacher / Parent: Use Email Login</p>
-            <p className="mt-1">🎓 Students: Use Admission Number Login or Email Login</p>
           </div>
         </div>
       </div>
