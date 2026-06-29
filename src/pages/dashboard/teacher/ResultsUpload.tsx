@@ -102,6 +102,8 @@ export default function TeacherResultsUpload() {
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('');
+  const [selectedExam, setSelectedExam] = useState('');
+  const [exams, setExams] = useState<any[]>([]);
   const [outOf, setOutOf] = useState(100);
 
   // Subject selection: 'db' = from DB, 'preset' = from pre-populated list, 'manual' = typed
@@ -124,13 +126,15 @@ export default function TeacherResultsUpload() {
   useEffect(() => {
     const fetchData = async () => {
       const schoolId = user?.schoolId ?? '';
-      const [{ data: c }, { data: s }, { data: t }] = await Promise.all([
+      const [{ data: c }, { data: s }, { data: t }, { data: e }] = await Promise.all([
         supabase.from('classes').select('*').eq('school_id', schoolId).order('level'),
         supabase.from('subjects').select('*').eq('school_id', schoolId).order('name'),
         supabase.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
+        supabaseUntyped.from('school_exams').select('*').eq('school_id', schoolId).eq('is_active', true).order('name'),
       ]);
       setClasses(c || []);
       setSubjects(s || []);
+      setExams(e || []);
 
       // Auto-create default terms if none exist
       let termsData = t || [];
@@ -345,9 +349,10 @@ export default function TeacherResultsUpload() {
     try {
       const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
       const teacherId = teacherData?.id ?? '';
-      // Primary (Grades 1-6): cbc_sublevel MUST be null (enum only accepts EE1/ME1 etc.)
-      // Primary grades use cbc_grade (EE/ME/AE/BE) with no sub-level and no points.
-      const isPrimaryClass = currentBand === 'primary';
+      // Primary (Grades 1-6) and Pre-Primary (PP1/PP2): cbc_sublevel MUST be null
+      // (enum only accepts EE1/ME1 etc. for junior/senior).
+      // Primary and Pre-Primary grades use cbc_grade (EE/ME/AE/BE) with no sub-level and no points.
+      const isPrimaryClass = currentBand === 'primary' || currentBand === 'pre-primary';
       const records = dataToSubmit.map((row) => ({
         school_id: user?.schoolId ?? '',
         student_id: row.student_id,
@@ -355,6 +360,7 @@ export default function TeacherResultsUpload() {
         subject_id: selectedSubject,
         teacher_id: teacherId,
         term_id: selectedTerm,
+        exam_id: selectedExam || null,
         academic_year: new Date().getFullYear().toString(),
         curriculum: currentClassData?.curriculum || 'CBE',
         marks: row.marks,
@@ -557,7 +563,7 @@ export default function TeacherResultsUpload() {
       {/* Step 1: Select Class, Subject, Term */}
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Subject &amp; Term</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Class selector */}
           <select
             value={selectedClass}
@@ -656,6 +662,25 @@ export default function TeacherResultsUpload() {
             <option value="">Select Term</option>
             {terms.map((t: any) => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
           </select>
+
+          {/* Assessment/Exam selector */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Assessment (optional)</label>
+            <select
+              value={selectedExam}
+              onChange={e => setSelectedExam(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+            >
+              <option value="">All / Term Exam</option>
+              {exams
+                .filter(ex => !selectedTerm || ex.term_id === selectedTerm)
+                .map((ex: any) => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.name}{ex.type ? ` (${ex.type})` : ''}{ex.weightage ? ` — ${ex.weightage}%` : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
 
           {/* Out of */}
           <div>

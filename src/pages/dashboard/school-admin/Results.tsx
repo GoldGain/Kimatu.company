@@ -210,7 +210,8 @@ export default function SchoolAdminResults() {
       const percentage = Math.round((marks / outOf) * 100);
       const classObj = classes.find(c => c.id === editingResult.class_id);
       const band = getSchoolLevelBand(classObj);
-      const isPrimaryBand = band === 'primary';
+      // Pre-Primary (PP1/PP2) behaves same as Primary: no sub-level, no points
+      const isPrimaryBand = band === 'primary' || band === 'pre-primary';
       const cbcResult = calculateCompetencyGrade(percentage, band === '844' ? 'junior' : band);
       const grade844Result = calculate844Grade(percentage);
       const { error } = await supabaseUntyped.from('results').update({

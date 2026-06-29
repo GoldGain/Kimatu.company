@@ -47,6 +47,8 @@ import SchoolAdminAssignTeachers from '@/pages/dashboard/school-admin/AssignTeac
 import SchoolAdminExams from '@/pages/dashboard/school-admin/Exams';
 import SchoolAdminAssessments from '@/pages/dashboard/school-admin/Assessments';
 import SchoolAdminAssignRoles from '@/pages/dashboard/school-admin/AssignRoles';
+import SchoolAdminBulkSMS from '@/pages/dashboard/school-admin/BulkSMS';
+import SchoolAdminSMSSettings from '@/pages/dashboard/school-admin/SMSSettings';
 import DeanOfStudiesDashboard from '@/pages/dashboard/dean-of-studies/Dashboard';
 import TeacherDashboard from '@/pages/dashboard/teacher/Dashboard';
 import TeacherResultsUpload from '@/pages/dashboard/teacher/ResultsUpload';
@@ -217,6 +219,8 @@ function AppRoutes() {
       <Route path="/school-admin/exams" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminExams /></ProtectedRoute>} />
       <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssessments /></ProtectedRoute>} />
       <Route path="/school-admin/assign-roles" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignRoles /></ProtectedRoute>} />
+      <Route path="/school-admin/bulk-sms" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminBulkSMS /></ProtectedRoute>} />
+      <Route path="/school-admin/sms-settings" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminSMSSettings /></ProtectedRoute>} />
       <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DeanOfStudiesDashboard /></ProtectedRoute>} />
 
       {/* Teacher routes */}

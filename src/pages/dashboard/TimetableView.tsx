@@ -129,6 +129,7 @@ export default function TimetableView() {
   const [error, setError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [selectedClass, setSelectedClass] = useState<string>('all');
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>('all');
   const [downloadingClass, setDownloadingClass] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -324,11 +325,39 @@ export default function TimetableView() {
     return dayActivities.map(a => a.activity_name.trim().toUpperCase()).join(' / ');
   };
 
-  /** Classes to display (filtered if a specific class is selected) */
+  /** Classes to display (filtered by level and/or specific class) */
+  const LEVEL_GRADE_RANGES: Record<string, number[]> = {
+    'pre-primary': [-2, -1, 0],
+    'lower-primary': [1, 2, 3],
+    'upper-primary': [4, 5, 6],
+    'combined-primary': [1, 2, 3, 4, 5, 6],
+    'junior': [7, 8, 9],
+    'senior': [10, 11, 12],
+    'form-3-4': [11, 12],
+  };
+  const LEVEL_LABELS: Record<string, string> = {
+    'pre-primary': 'Pre-Primary (PP1, PP2)',
+    'lower-primary': 'Lower Primary (Grade 1-3)',
+    'upper-primary': 'Upper Primary (Grade 4-6)',
+    'combined-primary': 'Combined Primary (Grade 1-6)',
+    'junior': 'Junior School (Grade 7-9)',
+    'senior': 'Senior School (Grade 10-12)',
+    'form-3-4': 'Form 3 & 4 (8-4-4)',
+  };
   const displayClasses = useMemo(() => {
-    if (selectedClass === 'all') return classes;
-    return classes.filter(c => c.id === selectedClass);
-  }, [classes, selectedClass]);
+    let filtered = classes;
+    if (selectedLevelFilter !== 'all') {
+      const gradeRange = LEVEL_GRADE_RANGES[selectedLevelFilter] || [];
+      filtered = filtered.filter(c => {
+        const gl = (c as any).grade_level ?? c.level;
+        return gradeRange.includes(Number(gl));
+      });
+    }
+    if (selectedClass !== 'all') {
+      filtered = filtered.filter(c => c.id === selectedClass);
+    }
+    return filtered;
+  }, [classes, selectedClass, selectedLevelFilter]);
 
   const downloadPdf = async (classId?: string, className?: string) => {
     const targetId = classId ? `timetable-class-${classId}` : 'timetable-print-area';
@@ -670,6 +699,23 @@ export default function TimetableView() {
           </div>
         </div>
       )}
+
+      {/* Filter by level */}
+      <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="font-bold text-gray-700 text-sm">Filter by Level:</span>
+          <select
+            value={selectedLevelFilter}
+            onChange={e => { setSelectedLevelFilter(e.target.value); setSelectedClass('all'); }}
+            className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Levels</option>
+            {Object.entries(LEVEL_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Filter by class */}
       <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">

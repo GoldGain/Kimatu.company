@@ -250,7 +250,8 @@ export default function StudentReportCard() {
   const classDataForGrading = student?.classes || {};
   const is844 = (classDataForGrading?.curriculum || 'CBE') === '844';
   const band = getSchoolLevelBand(classDataForGrading);
-  const isPrimary = band === 'primary';
+  // Pre-Primary (PP1/PP2) uses same display as Primary: no sub-level, no points column
+  const isPrimary = band === 'primary' || band === 'pre-primary';
 
   const generatePDF = async () => {
     if (!results.length) { toast.error('No results found for this term'); return; }

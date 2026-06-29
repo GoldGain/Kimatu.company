@@ -63,11 +63,11 @@ export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 
   const percentage = normalizePercentage(score);
 
   if (band === 'pre-primary') {
-    // Pre-Primary (PP1, PP2): 4 competency descriptors, NO points shown.
-    if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band: 'primary' };
-    if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band: 'primary' };
-    if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band: 'primary' };
-    return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band: 'primary' };
+    // Pre-Primary (PP1, PP2): 4 competency descriptors, NO points shown, NO sub-level.
+    if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band: 'pre-primary' };
+    if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band: 'pre-primary' };
+    if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band: 'pre-primary' };
+    return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band: 'pre-primary' };
   }
 
   if (band === 'junior' || band === 'senior') {

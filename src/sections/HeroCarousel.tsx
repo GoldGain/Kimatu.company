@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const heroImages = [
-  { src: '/images/students1.jpg', alt: 'Students learning with technology in a modern classroom' },
-  { src: '/images/students2.jpg', alt: 'Teacher guiding students with interactive analytics dashboard' },
-  { src: '/images/students3.jpg', alt: 'Students collaborating in a modern computer lab' },
-  { src: '/images/students4.jpg', alt: 'Beautiful modern school campus with world-class facilities' },
-  { src: '/images/students5.jpg', alt: 'Happy students celebrating their academic achievements' },
+  { src: '/images/hero1.jpg', alt: 'Students collaborating on analytics dashboard in a modern classroom' },
+  { src: '/images/hero2.jpg', alt: 'Teacher presenting student performance analytics on smartboard' },
+  { src: '/images/hero3.jpg', alt: 'Students focused on computers in a modern digital literacy lab' },
+  { src: '/images/hero4.jpg', alt: 'Beautiful modern school campus with world-class facilities' },
+  { src: '/images/hero5.jpg', alt: 'Happy students celebrating academic achievements with certificates and trophies' },
 ];
 
 const featureBullets = [
