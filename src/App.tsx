@@ -12,6 +12,7 @@ import ResetPassword from '@/pages/auth/ResetPassword';
 
 // ─── Public Pages ────────────────────────────────────────────
 import Landing from '@/pages/Landing';
+import GetStarted from '@/pages/GetStarted';
 
 // ─── School Admin Pages ──────────────────────────────────────
 import SchoolAdminDashboard from '@/pages/dashboard/school-admin/Dashboard';
@@ -104,16 +105,15 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public */}
+      {/* ═══ PUBLIC ROUTES ═══ */}
       <Route path="/" element={<Landing />} />
+      <Route path="/get-started" element={<GetStarted />} />
       <Route path="/auth/login" element={<Login />} />
       <Route path="/auth/register" element={<Register />} />
       <Route path="/auth/forgot-password" element={<ForgotPassword />} />
       <Route path="/auth/reset-password" element={<ResetPassword />} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          SCHOOL ADMIN ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ SCHOOL ADMIN ROUTES ═══ */}
       <Route path="/school-admin" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminDashboard /></DashboardLayout></ProtectedRoute>} />
       <Route path="/school-admin/students" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminStudents /></DashboardLayout></ProtectedRoute>} />
       <Route path="/school-admin/teachers" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminTeachers /></DashboardLayout></ProtectedRoute>} />
@@ -136,14 +136,10 @@ function AppRoutes() {
       <Route path="/school-admin/library" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminLibrary /></DashboardLayout></ProtectedRoute>} />
       <Route path="/school-admin/stream-dashboard" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminStreamDashboard /></DashboardLayout></ProtectedRoute>} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          DEAN OF STUDIES ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ DEAN OF STUDIES ROUTES ═══ */}
       <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DashboardLayout><DeanOfStudiesDashboard /></DashboardLayout></ProtectedRoute>} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          TEACHER ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ TEACHER ROUTES ═══ */}
       <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherDashboard /></DashboardLayout></ProtectedRoute>} />
       <Route path="/teacher/upload-results" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherResultsUpload /></DashboardLayout></ProtectedRoute>} />
       <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherStudents /></DashboardLayout></ProtectedRoute>} />
@@ -154,9 +150,7 @@ function AppRoutes() {
       <Route path="/teacher/change-password" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherChangePassword /></DashboardLayout></ProtectedRoute>} />
       <Route path="/teacher/assignments" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherAssignments /></DashboardLayout></ProtectedRoute>} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          STUDENT ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ STUDENT ROUTES ═══ */}
       <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentDashboard /></DashboardLayout></ProtectedRoute>} />
       <Route path="/student/results" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentResults /></DashboardLayout></ProtectedRoute>} />
       <Route path="/student/report-card" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentReportCard /></DashboardLayout></ProtectedRoute>} />
@@ -169,9 +163,7 @@ function AppRoutes() {
       <Route path="/student/library" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentLibrary /></DashboardLayout></ProtectedRoute>} />
       <Route path="/student/profile" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentProfile /></DashboardLayout></ProtectedRoute>} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          PARENT ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ PARENT ROUTES ═══ */}
       <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentDashboard /></DashboardLayout></ProtectedRoute>} />
       <Route path="/parent/child" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentChild /></DashboardLayout></ProtectedRoute>} />
       <Route path="/parent/child-report-card" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentChildReportCard /></DashboardLayout></ProtectedRoute>} />
@@ -185,12 +177,10 @@ function AppRoutes() {
       <Route path="/parent/results" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentChildReportCard /></DashboardLayout></ProtectedRoute>} />
       <Route path="/parent/report-card" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><Navigate to="/parent/child-report-card" replace /></DashboardLayout></ProtectedRoute>} />
 
-      {/* ═══════════════════════════════════════════════════════════
-          SHARED ROUTES
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ SHARED ROUTES ═══ */}
       <Route path="/timetable" element={<ProtectedRoute><DashboardLayout><TimetableView /></DashboardLayout></ProtectedRoute>} />
 
-      {/* Fallback */}
+      {/* ═══ FALLBACK ═══ */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
