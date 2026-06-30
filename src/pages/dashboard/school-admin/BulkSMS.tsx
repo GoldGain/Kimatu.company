@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase/client';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { sendBulkSMS } from '@/lib/sms';
-import { MessageSquare, Send, Users, CheckCircle, AlertCircle, Loader2, Filter, ChevronDown } from 'lucide-react';
+import { sendBulkSMS, SMS_TEMPLATES } from '@/lib/sms';
+import { MessageSquare, Send, Users, CheckCircle, AlertCircle, Loader2, Filter, ChevronDown, School } from 'lucide-react';
 import { toast } from 'sonner';
 
 type SMSType = 'results' | 'custom' | 'announcement';
@@ -23,7 +23,7 @@ export default function BulkSMS() {
   const [summary, setSummary] = useState<{ sent: number; failed: number; errors: string[] } | null>(null);
   const [preview, setPreview] = useState<Array<{ name: string; phone: string; message: string }>>([]);
   const [showPreview, setShowPreview] = useState(false);
-  const [smsSettings, setSmsSettings] = useState<any>(null);
+  const [schoolName, setSchoolName] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -33,14 +33,14 @@ export default function BulkSMS() {
     if (!user?.schoolId) return;
     setLoading(true);
     try {
-      const [{ data: c }, { data: t }, { data: settings }] = await Promise.all([
+      const [{ data: c }, { data: t }, { data: school }] = await Promise.all([
         supabase.from('classes').select('*').eq('school_id', user.schoolId).order('name'),
         supabase.from('terms').select('*').eq('school_id', user.schoolId).order('academic_year', { ascending: false }),
-        supabaseUntyped.from('school_settings').select('*').eq('school_id', user.schoolId).maybeSingle(),
+        supabaseUntyped.from('schools').select('name').eq('id', user.schoolId).maybeSingle(),
       ]);
       setClasses(c || []);
       setTerms(t || []);
-      setSmsSettings(settings);
+      setSchoolName(school?.name || '');
     } catch (err: any) {
       toast.error('Failed to load data: ' + err.message);
     } finally {
@@ -49,7 +49,20 @@ export default function BulkSMS() {
   };
 
   useEffect(() => {
-    if (!selectedClass) { setStudents([]); return; }
+    if (!selectedClass) {
+      // Load ALL students if no class selected
+      const fetchAllStudents = async () => {
+        const { data } = await supabaseUntyped
+          .from('students')
+          .select('id, first_name, last_name, admission_number, parent_name, parent_phone')
+          .eq('school_id', user?.schoolId)
+          .eq('is_active', true)
+          .order('first_name');
+        setStudents(data || []);
+      };
+      fetchAllStudents();
+      return;
+    }
     const fetchStudents = async () => {
       const { data } = await supabaseUntyped
         .from('students')
@@ -63,23 +76,26 @@ export default function BulkSMS() {
   }, [selectedClass]);
 
   const buildResultsMessages = async (): Promise<Array<{ name: string; phone: string; message: string }>> => {
-    if (!selectedClass || !selectedTerm) {
-      toast.error('Please select a class and term');
+    if (!selectedTerm) {
+      toast.error('Please select a term');
       return [];
     }
+
+    const targetClassIds = selectedClass
+      ? [selectedClass]
+      : classes.map(c => c.id);
 
     const { data: results } = await supabaseUntyped
       .from('results')
       .select('student_id, subject_id, percentage, cbc_grade, cbc_sublevel, position, class_position, subjects(name)')
-      .eq('class_id', selectedClass)
+      .in('class_id', targetClassIds)
       .eq('term_id', selectedTerm);
 
     if (!results || results.length === 0) {
-      toast.error('No results found for this class and term');
+      toast.error('No results found for the selected criteria');
       return [];
     }
 
-    const { data: classData } = await supabase.from('classes').select('name').eq('id', selectedClass).single();
     const { data: termData } = await supabase.from('terms').select('name, academic_year').eq('id', selectedTerm).single();
 
     // Group results by student
@@ -90,7 +106,6 @@ export default function BulkSMS() {
     });
 
     const messages: Array<{ name: string; phone: string; message: string }> = [];
-    const senderName = smsSettings?.sms_sender_id || 'Kimatu Analytics';
 
     for (const student of students) {
       if (!student.parent_phone) continue;
@@ -100,11 +115,26 @@ export default function BulkSMS() {
       const avgPct = studentRes.reduce((s: number, r: any) => s + (r.percentage || 0), 0) / studentRes.length;
       const position = studentRes[0]?.class_position || studentRes[0]?.position;
       const subjectLines = studentRes
-        .slice(0, 5) // Limit to 5 subjects to keep SMS short
-        .map((r: any) => `${r.subjects?.name || 'Subject'}: ${r.cbc_grade || r.cbc_sublevel || '-'}`)
-        .join(', ');
+        .slice(0, 5)
+        .map((r: any) => `${r.subjects?.name || 'Subject'}: ${r.percentage?.toFixed(0) || '-'}% (${r.cbc_grade || r.cbc_sublevel || '-'})`)
+        .join('\n');
 
-      const message = `${termData?.name || 'Term'} ${termData?.academic_year || ''} Results for ${student.first_name} ${student.last_name} (${student.admission_number}) - Class: ${classData?.name || ''} | Avg: ${avgPct.toFixed(0)}%${position ? ` | Position: ${position}` : ''} | ${subjectLines}. - ${senderName}`;
+      const className = classes.find(c => c.id === student.class_id)?.name || '';
+
+      const message = SMS_TEMPLATES.resultsToParent(
+        `${student.first_name} ${student.last_name}`,
+        className,
+        studentRes.map((r: any) => ({
+          name: r.subjects?.name || 'Subject',
+          marks: r.percentage || 0,
+          grade: r.cbc_grade || r.cbc_sublevel || '-'
+        })),
+        Math.round(avgPct),
+        100,
+        position || 0,
+        students.length,
+        ''
+      );
 
       messages.push({
         name: `${student.first_name} ${student.last_name}`,
@@ -122,16 +152,29 @@ export default function BulkSMS() {
       return [];
     }
 
-    const targetStudents = selectedClass
-      ? students
-      : students; // If no class selected, send to all loaded students
-
-    return targetStudents
+    return students
       .filter((s: any) => s.parent_phone)
       .map((s: any) => ({
         name: `${s.first_name} ${s.last_name}`,
         phone: s.parent_phone,
-        message: customMessage.replace('{name}', `${s.first_name} ${s.last_name}`).replace('{adm}', s.admission_number),
+        message: SMS_TEMPLATES.customMessage(
+          customMessage.replace('{name}', `${s.first_name} ${s.last_name}`).replace('{adm}', s.admission_number)
+        ),
+      }));
+  };
+
+  const buildAnnouncementMessages = (): Array<{ name: string; phone: string; message: string }> => {
+    if (!customMessage.trim()) {
+      toast.error('Please enter an announcement message');
+      return [];
+    }
+
+    return students
+      .filter((s: any) => s.parent_phone)
+      .map((s: any) => ({
+        name: `${s.first_name} ${s.last_name}`,
+        phone: s.parent_phone,
+        message: SMS_TEMPLATES.announcement(schoolName, customMessage),
       }));
   };
 
@@ -139,6 +182,8 @@ export default function BulkSMS() {
     let messages: Array<{ name: string; phone: string; message: string }> = [];
     if (smsType === 'results') {
       messages = await buildResultsMessages();
+    } else if (smsType === 'announcement') {
+      messages = buildAnnouncementMessages();
     } else {
       messages = buildCustomMessages();
     }
@@ -150,11 +195,6 @@ export default function BulkSMS() {
   const handleSend = async () => {
     if (preview.length === 0) {
       toast.error('Please preview messages first');
-      return;
-    }
-
-    if (!smsSettings?.sms_api_key) {
-      toast.error('SMS not configured. Please set up SMS credentials in School Settings → SMS Configuration.');
       return;
     }
 
@@ -171,10 +211,10 @@ export default function BulkSMS() {
       );
       setSummary(result);
       if (result.sent > 0) {
-        toast.success(`✅ ${result.sent} SMS messages sent successfully!`);
+        toast.success(`${result.sent} SMS messages sent successfully!`);
       }
       if (result.failed > 0) {
-        toast.warning(`⚠️ ${result.failed} messages failed to send.`);
+        toast.warning(`${result.failed} messages failed to send.`);
       }
     } catch (err: any) {
       toast.error('Bulk SMS failed: ' + err.message);
@@ -192,16 +232,14 @@ export default function BulkSMS() {
         <p className="text-sm text-[#666666]">Send results, announcements, and notifications to parents via SMS.</p>
       </div>
 
-      {/* SMS Config Warning */}
-      {!smsSettings?.sms_api_key && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 text-sm text-amber-900">
-          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
-          <div>
-            <p className="font-bold">SMS not configured</p>
-            <p>Please set up your Africa's Talking API credentials in <strong>School Settings → SMS Configuration</strong> to enable SMS sending.</p>
-          </div>
+      {/* SMS Status */}
+      <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex gap-3 text-sm text-green-800">
+        <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-600" />
+        <div>
+          <p className="font-bold">SMS Ready</p>
+          <p>SMS sending is configured and ready. Messages will be sent via SMSGate.</p>
         </div>
-      )}
+      </div>
 
       {/* SMS Type Selector */}
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
@@ -263,7 +301,8 @@ export default function BulkSMS() {
         {students.length > 0 && (
           <p className="text-xs text-green-600 mt-2">
             <Users className="w-3 h-3 inline mr-1" />
-            {students.filter((s: any) => s.parent_phone).length} parents with phone numbers in selected class
+            {students.filter((s: any) => s.parent_phone).length} parents with phone numbers
+            {selectedClass ? ' in selected class' : ' across all classes'}
           </p>
         )}
       </div>
@@ -272,12 +311,15 @@ export default function BulkSMS() {
       {(smsType === 'custom' || smsType === 'announcement') && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <h2 className="text-lg font-bold text-[#111111] mb-4 flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-[#2563EB]" /> Message
+            <MessageSquare className="w-5 h-5 text-[#2563EB]" /> {smsType === 'announcement' ? 'Announcement' : 'Message'}
           </h2>
           <textarea
             value={customMessage}
             onChange={e => setCustomMessage(e.target.value)}
-            placeholder="Type your message here. Use {name} for student name and {adm} for admission number."
+            placeholder={smsType === 'announcement'
+              ? "Type your school-wide announcement here..."
+              : "Type your message here. Use {name} for student name and {adm} for admission number."
+            }
             rows={4}
             className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
           />
@@ -285,7 +327,9 @@ export default function BulkSMS() {
             <p className="text-xs text-gray-500">
               Characters: {customMessage.length} | SMS parts: {Math.ceil(customMessage.length / 160)}
             </p>
-            <p className="text-xs text-gray-400">Tip: Use {'{name}'} and {'{adm}'} as placeholders</p>
+            {smsType === 'custom' && (
+              <p className="text-xs text-gray-400">Tip: Use {'{name}'} and {'{adm}'} as placeholders</p>
+            )}
           </div>
         </div>
       )}
@@ -302,7 +346,7 @@ export default function BulkSMS() {
         </button>
         <button
           onClick={handleSend}
-          disabled={sending || preview.length === 0 || !smsSettings?.sms_api_key}
+          disabled={sending || preview.length === 0}
           className="flex-1 flex items-center justify-center gap-2 bg-[#2563EB] text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors"
         >
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

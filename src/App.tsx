@@ -1,287 +1,117 @@
-import { Routes, Route, Navigate, useNavigate } from 'react-router';
-import { Toaster } from '@/components/ui/sonner';
-import { Suspense } from 'react';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import MainLayout from '@/components/layout/MainLayout';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import ErrorBoundary from '@/components/ErrorBoundary';
-import PWAInstallBanner from '@/components/PWAInstallBanner';
-import PWAFloatingButton from '@/components/PWAFloatingButton';
-import Home from '@/pages/Home';
-import GetStarted from '@/pages/GetStarted';
+import { Loader2 } from 'lucide-react';
+import { useEffect } from 'react';
+import { Toaster } from '@/components/ui/sonner';
+
+// ─── Auth Pages ──────────────────────────────────────────────
 import Login from '@/pages/auth/Login';
 import Register from '@/pages/auth/Register';
 import ForgotPassword from '@/pages/auth/ForgotPassword';
-import ResetPassword from '@/pages/auth/ResetPassword';
 
-// Master Admin pages
-import MasterAdminDashboard from '@/pages/dashboard/master-admin/Dashboard';
-import MasterAdminResellers from '@/pages/dashboard/master-admin/Resellers';
-import MasterAdminSchools from '@/pages/dashboard/master-admin/Schools';
-import MasterAdminStudents from '@/pages/dashboard/master-admin/Students';
-import MasterAdminPayments from '@/pages/dashboard/master-admin/Payments';
-import MasterAdminSettings from '@/pages/dashboard/master-admin/Settings';
-// Reseller Admin pages
-import ResellerDashboard from '@/pages/dashboard/reseller-admin/Dashboard';
-import ResellerSchools from '@/pages/dashboard/reseller-admin/Schools';
-import ResellerSchoolAdmins from '@/pages/dashboard/reseller-admin/SchoolAdmins';
-import ResellerPayments from '@/pages/dashboard/reseller-admin/Payments';
-import ResellerChangePassword from '@/pages/dashboard/reseller-admin/ChangePassword';
-// Dashboard pages
-import SuperAdminDashboard from '@/pages/dashboard/super-admin/Dashboard';
-import SuperAdminSchools from '@/pages/dashboard/super-admin/Schools';
-import SuperAdminAnalytics from '@/pages/dashboard/super-admin/Analytics';
-import SuperAdminSettings from '@/pages/dashboard/super-admin/Settings';
+// ─── Public Pages ────────────────────────────────────────────
+import Landing from '@/pages/Landing';
+
+// ─── School Admin Pages ──────────────────────────────────────
 import SchoolAdminDashboard from '@/pages/dashboard/school-admin/Dashboard';
 import SchoolAdminStudents from '@/pages/dashboard/school-admin/Students';
 import SchoolAdminTeachers from '@/pages/dashboard/school-admin/Teachers';
 import SchoolAdminClasses from '@/pages/dashboard/school-admin/Classes';
-import SchoolAdminFees from '@/pages/dashboard/school-admin/Fees';
-import SchoolAdminResults from '@/pages/dashboard/school-admin/Results';
-import SchoolAdminAnnouncements from '@/pages/dashboard/school-admin/Announcements';
 import SchoolAdminSubjects from '@/pages/dashboard/school-admin/Subjects';
-import SchoolAdminBranding from '@/pages/dashboard/school-admin/Branding';
-import SchoolAdminTimetableSetup from '@/pages/dashboard/school-admin/TimetableSetup';
-import SchoolAdminTimetableGenerate from '@/pages/dashboard/school-admin/TimetableGenerate';
-import SchoolAdminAssignTeachers from '@/pages/dashboard/school-admin/AssignTeachers';
 import SchoolAdminExams from '@/pages/dashboard/school-admin/Exams';
 import SchoolAdminAssessments from '@/pages/dashboard/school-admin/Assessments';
 import SchoolAdminAssignRoles from '@/pages/dashboard/school-admin/AssignRoles';
 import SchoolAdminBulkSMS from '@/pages/dashboard/school-admin/BulkSMS';
-import SchoolAdminSMSSettings from '@/pages/dashboard/school-admin/SMSSettings';
 import DeanOfStudiesDashboard from '@/pages/dashboard/dean-of-studies/Dashboard';
 import TeacherDashboard from '@/pages/dashboard/teacher/Dashboard';
 import TeacherResultsUpload from '@/pages/dashboard/teacher/ResultsUpload';
-import TeacherAttendance from '@/pages/dashboard/teacher/Attendance';
-import TeacherHomework from '@/pages/dashboard/teacher/Homework';
-import TeacherAnalytics from '@/pages/dashboard/teacher/Analytics';
 import TeacherStudents from '@/pages/dashboard/teacher/Students';
-import TeacherLessonPlan from '@/pages/dashboard/teacher/LessonPlan';
-import TeacherMySubjects from '@/pages/dashboard/teacher/MySubjects';
-import TeacherExamTimetable from '@/pages/dashboard/teacher/ExamTimetable';
-import TeacherCATs from '@/pages/dashboard/teacher/CATs';
-import ClassTeacherDashboard from '@/pages/dashboard/class-teacher/Dashboard';
-import SubjectTeacherDashboard from '@/pages/dashboard/subject-teacher/Dashboard';
-import StreamDashboard from '@/pages/dashboard/stream/Dashboard';
+import TeacherAnalytics from '@/pages/dashboard/teacher/Analytics';
 import StudentDashboard from '@/pages/dashboard/student/Dashboard';
 import StudentResults from '@/pages/dashboard/student/Results';
-import StudentFees from '@/pages/dashboard/student/Fees';
-import StudentAttendance from '@/pages/dashboard/student/Attendance';
-import StudentHomework from '@/pages/dashboard/student/Homework';
 import ParentDashboard from '@/pages/dashboard/parent/Dashboard';
-import ParentChildren from '@/pages/dashboard/parent/Children';
-import ParentFees from '@/pages/dashboard/parent/Fees';
-import ParentConferences from '@/pages/dashboard/parent/Conferences';
-import ParentChatbot from '@/pages/dashboard/parent/Chatbot';
-import ParentChildReportCard from '@/pages/dashboard/parent/ChildReportCard';
-import StudentReportCard from '@/pages/dashboard/student/ReportCard';
-import StudentChangePassword from '@/pages/dashboard/student/ChangePassword';
-import SchoolAdminChangePassword from '@/pages/dashboard/school-admin/ChangePassword';
-import TeacherChangePassword from '@/pages/dashboard/teacher/ChangePassword';
-import ParentChangePassword from '@/pages/dashboard/parent/ChangePassword';
+import ParentChild from '@/pages/dashboard/parent/Child';
 import TimetableView from '@/pages/dashboard/TimetableView';
-import TeacherCurriculumNavigator from '@/pages/dashboard/teacher/CurriculumNavigator';
-import TeacherProfile from '@/pages/dashboard/teacher/Profile';
-import SchoolAdminProfile from '@/pages/dashboard/school-admin/Profile';
-import ParentProfile from '@/pages/dashboard/parent/Profile';
-import ParentFeeTranscript from '@/pages/dashboard/parent/FeeTranscript';
+import ReportCard from '@/pages/dashboard/student/ReportCard';
+import CATs from '@/pages/dashboard/teacher/CATs';
 
-function LoadingSpinner() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F5F3EF]">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1A365D]" />
-    </div>
-  );
-}
+function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
 
-function LockedSchoolScreen({ reason }: { reason?: string | null }) {
-  const { signOut } = useAuth();
-  const navigate = useNavigate();
-  const handleLogout = async () => { await signOut(); navigate('/auth/login'); };
-  const reasonLabel = reason === 'payment_required' ? 'Payment Required'
-    : reason === 'subscription_expired' ? 'Subscription Expired'
-    : reason === 'trial_ended' ? 'Trial Period Ended'
-    : reason === 'account_review' ? 'Account Under Review'
-    : 'Access Restricted';
-  return (
-    <div className="min-h-screen bg-[#F5F3EF] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center">
-        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">School Access Locked</h1>
-        <p className="text-red-600 font-semibold mb-2">{reasonLabel}</p>
-        <p className="text-gray-500 text-sm mb-6">Your school&apos;s access to Kimatu Analytics has been temporarily restricted. Please contact our support team to resolve this.</p>
-        <div className="space-y-3">
-          <a href="https://wa.me/254114645757" target="_blank" rel="noopener noreferrer"
-            className="block w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">
-            Contact Support via WhatsApp — 0114 645 757
-          </a>
-          <a href="mailto:martinmakau123@gmail.com"
-            className="block w-full bg-[#1A365D] text-white py-3 rounded-xl font-medium hover:bg-[#2D4A7C] transition-colors">
-            Email: martinmakau123@gmail.com
-          </a>
-          <button onClick={handleLogout}
-            className="block w-full border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors">
-            Logout
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 mt-4">Kimatu Analytics — kimatu.company</p>
-      </div>
-    </div>
-  );
-}
-
-function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) {
-  const { user, loading, schoolData } = useAuth();
-  
   if (loading) {
-    return <LoadingSpinner />;
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-[#2563EB]" />
+      </div>
+    );
   }
-  
-  if (!user) return <Navigate to="/auth/login" replace />;
-  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
 
-  // Block school-level users (not resellers/super-admins) from locked schools
-  const schoolLevelRoles = ['school_admin', 'teacher', 'class_teacher', 'subject_teacher', 'student', 'parent'];
-  if (schoolLevelRoles.includes(user.role) && schoolData?.status === 'locked') {
-    return <LockedSchoolScreen reason={schoolData.locked_reason} />;
+  if (!user) {
+    return <Navigate to="/auth/login" state={{ from: location }} replace />;
   }
-  
-  return (
-    <ErrorBoundary>
-      <Suspense fallback={<LoadingSpinner />}>
-        <DashboardLayout>{children}</DashboardLayout>
-      </Suspense>
-    </ErrorBoundary>
-  );
-}
 
-function PublicRoute({ children }: { children: React.ReactNode }) {
-  return (
-    <ErrorBoundary>
-      <Suspense fallback={<LoadingSpinner />}>
-        <MainLayout>{children}</MainLayout>
-      </Suspense>
-    </ErrorBoundary>
-  );
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 function AppRoutes() {
   return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <Routes>
-      {/* Public routes */}
-      <Route path="/" element={<PublicRoute><Home /></PublicRoute>} />
-      <Route path="/get-started" element={<GetStarted />} />
+    <Routes>
+      {/* Public */}
+      <Route path="/" element={<Landing />} />
       <Route path="/auth/login" element={<Login />} />
       <Route path="/auth/register" element={<Register />} />
       <Route path="/auth/forgot-password" element={<ForgotPassword />} />
-      <Route path="/auth/reset-password" element={<ResetPassword />} />
-
-      {/* Master Super Admin routes */}
-      <Route path="/master-admin" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminDashboard /></ProtectedRoute>} />
-      <Route path="/master-admin/resellers" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminResellers /></ProtectedRoute>} />
-      <Route path="/master-admin/schools" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminSchools /></ProtectedRoute>} />
-      <Route path="/master-admin/students" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminStudents /></ProtectedRoute>} />
-      <Route path="/master-admin/payments" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminPayments /></ProtectedRoute>} />
-      <Route path="/master-admin/settings" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminSettings /></ProtectedRoute>} />
-      {/* Reseller Super Admin routes */}
-      <Route path="/reseller-admin" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerDashboard /></ProtectedRoute>} />
-      <Route path="/reseller-admin/schools" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerSchools /></ProtectedRoute>} />
-      <Route path="/reseller-admin/school-admins" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerSchoolAdmins /></ProtectedRoute>} />
-      <Route path="/reseller-admin/payments" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerPayments /></ProtectedRoute>} />
-      <Route path="/reseller-admin/change-password" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerChangePassword /></ProtectedRoute>} />
-      {/* Super Admin routes */}
-      <Route path="/super-admin" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminDashboard /></ProtectedRoute>} />
-      <Route path="/super-admin/schools" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminSchools /></ProtectedRoute>} />
-      <Route path="/super-admin/analytics" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminAnalytics /></ProtectedRoute>} />
-      <Route path="/super-admin/settings" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminSettings /></ProtectedRoute>} />
 
       {/* School Admin routes */}
-      <Route path="/school-admin" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminDashboard /></ProtectedRoute>} />
-      <Route path="/school-admin/stream-dashboard" element={<ProtectedRoute allowedRoles={['school_admin']}><StreamDashboard /></ProtectedRoute>} />
-      <Route path="/school-admin/students" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminStudents /></ProtectedRoute>} />
-      <Route path="/school-admin/teachers" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTeachers /></ProtectedRoute>} />
-      <Route path="/school-admin/classes" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminClasses /></ProtectedRoute>} />
-      <Route path="/school-admin/fees" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminFees /></ProtectedRoute>} />
-      <Route path="/school-admin/results" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminResults /></ProtectedRoute>} />
-      <Route path="/school-admin/announcements" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAnnouncements /></ProtectedRoute>} />
-      <Route path="/school-admin/subjects" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminSubjects /></ProtectedRoute>} />
-      <Route path="/school-admin/branding" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminBranding /></ProtectedRoute>} />
-      <Route path="/school-admin/timetable/setup" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTimetableSetup /></ProtectedRoute>} />
-      <Route path="/school-admin/timetable/generate" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminTimetableGenerate /></ProtectedRoute>} />
-      <Route path="/school-admin/timetable/assign" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignTeachers /></ProtectedRoute>} />
-      <Route path="/school-admin/teacher-assignments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignTeachers /></ProtectedRoute>} />
-      <Route path="/school-admin/change-password" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminChangePassword /></ProtectedRoute>} />
-      <Route path="/school-admin/profile" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminProfile /></ProtectedRoute>} />
-      <Route path="/school-admin/timetable/view" element={<ProtectedRoute allowedRoles={['school_admin']}><TimetableView /></ProtectedRoute>} />
-      <Route path="/school-admin/exams" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminExams /></ProtectedRoute>} />
-      <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssessments /></ProtectedRoute>} />
-      <Route path="/school-admin/assign-roles" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignRoles /></ProtectedRoute>} />
-      <Route path="/school-admin/bulk-sms" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminBulkSMS /></ProtectedRoute>} />
-      <Route path="/school-admin/sms-settings" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminSMSSettings /></ProtectedRoute>} />
-      <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DeanOfStudiesDashboard /></ProtectedRoute>} />
+      <Route path="/school-admin" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminDashboard /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/students" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminStudents /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/teachers" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminTeachers /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/classes" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminClasses /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/subjects" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminSubjects /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/exams" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminExams /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminAssessments /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/assign-roles" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminAssignRoles /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/school-admin/bulk-sms" element={<ProtectedRoute allowedRoles={['school_admin']}><DashboardLayout><SchoolAdminBulkSMS /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DashboardLayout><DeanOfStudiesDashboard /></DashboardLayout></ProtectedRoute>} />
 
       {/* Teacher routes */}
-      <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherDashboard /></ProtectedRoute>} />
-      <Route path="/teacher/class-dashboard" element={<ProtectedRoute allowedRoles={['teacher']}><ClassTeacherDashboard /></ProtectedRoute>} />
-      <Route path="/teacher/subject-dashboard" element={<ProtectedRoute allowedRoles={['teacher']}><SubjectTeacherDashboard /></ProtectedRoute>} />
-      <Route path="/teacher/results/upload" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherResultsUpload /></ProtectedRoute>} />
-      <Route path="/teacher/attendance" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherAttendance /></ProtectedRoute>} />
-      <Route path="/teacher/homework" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherHomework /></ProtectedRoute>} />
-      <Route path="/teacher/analytics" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherAnalytics /></ProtectedRoute>} />
-      <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherStudents /></ProtectedRoute>} />
-      <Route path="/teacher/lesson-plan" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherLessonPlan /></ProtectedRoute>} />
-      <Route path="/teacher/my-subjects" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherMySubjects /></ProtectedRoute>} />
-      <Route path="/teacher/timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TimetableView /></ProtectedRoute>} />
-      <Route path="/teacher/exam-timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherExamTimetable /></ProtectedRoute>} />
-      <Route path="/teacher/cats" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCATs /></ProtectedRoute>} />
-      <Route path="/teacher/change-password" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherChangePassword /></ProtectedRoute>} />
-      <Route path="/teacher/profile" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherProfile /></ProtectedRoute>} />
-      <Route path="/teacher/curriculum" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCurriculumNavigator /></ProtectedRoute>} />
+      <Route path="/teacher" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherDashboard /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/teacher/upload-results" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherResultsUpload /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherStudents /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/teacher/cats" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><CATs /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/teacher/analytics" element={<ProtectedRoute allowedRoles={['teacher']}><DashboardLayout><TeacherAnalytics /></DashboardLayout></ProtectedRoute>} />
 
       {/* Student routes */}
-      <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><StudentDashboard /></ProtectedRoute>} />
-      <Route path="/student/results" element={<ProtectedRoute allowedRoles={['student']}><StudentResults /></ProtectedRoute>} />
-      <Route path="/student/fees" element={<ProtectedRoute allowedRoles={['student']}><StudentFees /></ProtectedRoute>} />
-      <Route path="/student/attendance" element={<ProtectedRoute allowedRoles={['student']}><StudentAttendance /></ProtectedRoute>} />
-      <Route path="/student/timetable" element={<ProtectedRoute allowedRoles={['student']}><TimetableView /></ProtectedRoute>} />
-      <Route path="/student/homework" element={<ProtectedRoute allowedRoles={['student']}><StudentHomework /></ProtectedRoute>} />
-      <Route path="/student/report-card" element={<ProtectedRoute allowedRoles={['student']}><StudentReportCard /></ProtectedRoute>} />
-      <Route path="/student/change-password" element={<ProtectedRoute allowedRoles={['student']}><StudentChangePassword /></ProtectedRoute>} />
+      <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentDashboard /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/student/results" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><StudentResults /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/student/report-card" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><ReportCard /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/student/timetable" element={<ProtectedRoute allowedRoles={['student']}><DashboardLayout><TimetableView /></DashboardLayout></ProtectedRoute>} />
 
       {/* Parent routes */}
-      <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><ParentDashboard /></ProtectedRoute>} />
-      <Route path="/parent/children" element={<ProtectedRoute allowedRoles={['parent']}><ParentChildren /></ProtectedRoute>} />
-      <Route path="/parent/fees" element={<ProtectedRoute allowedRoles={['parent']}><ParentFees /></ProtectedRoute>} />
-      <Route path="/parent/conferences" element={<ProtectedRoute allowedRoles={['parent']}><ParentConferences /></ProtectedRoute>} />
-      <Route path="/parent/chatbot" element={<ProtectedRoute allowedRoles={['parent']}><ParentChatbot /></ProtectedRoute>} />
-      <Route path="/parent/report-card" element={<ProtectedRoute allowedRoles={['parent']}><ParentChildReportCard /></ProtectedRoute>} />
-      <Route path="/parent/change-password" element={<ProtectedRoute allowedRoles={['parent']}><ParentChangePassword /></ProtectedRoute>} />
-      <Route path="/parent/profile" element={<ProtectedRoute allowedRoles={['parent']}><ParentProfile /></ProtectedRoute>} />
-      <Route path="/parent/fee-transcript" element={<ProtectedRoute allowedRoles={['parent']}><ParentFeeTranscript /></ProtectedRoute>} />
-      <Route path="/parent/timetable" element={<ProtectedRoute allowedRoles={['parent']}><TimetableView /></ProtectedRoute>} />
+      <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentDashboard /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/parent/child" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><ParentChild /></DashboardLayout></ProtectedRoute>} />
+      <Route path="/parent/results" element={<ProtectedRoute allowedRoles={['parent']}><DashboardLayout><StudentResults /></DashboardLayout></ProtectedRoute>} />
 
-      {/* General routes */}
-      <Route path="/timetable" element={<ProtectedRoute allowedRoles={['school_admin', 'teacher', 'student', 'parent', 'super_admin', 'reseller_super_admin', 'master_super_admin']}><TimetableView /></ProtectedRoute>} />
+      {/* Shared timetable route */}
+      <Route path="/timetable" element={<ProtectedRoute><DashboardLayout><TimetableView /></DashboardLayout></ProtectedRoute>} />
 
-      {/* Catch all */}
+      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+    </Routes>
   );
 }
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <AuthProvider>
-        <AppRoutes />
-        <PWAInstallBanner />
-        <PWAFloatingButton />
-        <Toaster position="top-right" richColors closeButton />
-      </AuthProvider>
-    </ErrorBoundary>
+    <>
+      <AppRoutes />
+      <Toaster position="top-right" />
+    </>
   );
 }

@@ -1,16 +1,14 @@
 import { useState, useEffect } from 'react';
-import { supabaseUntyped } from '@/lib/supabase/client';
+import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  Plus, Trash2, Edit2, FileText, Calendar, Loader2,
-  CheckCircle2, BookOpen, Award, RefreshCw, X
-} from 'lucide-react';
+import { BookOpen, Plus, Pencil, Trash2, Loader2, CheckCircle, XCircle, GraduationCap, CalendarDays, Save, X, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 
 interface Assessment {
   id: string;
   name: string;
-  exam_type: string;
+  type: string;
   term_id: string | null;
   start_date: string | null;
   end_date: string | null;
@@ -19,347 +17,428 @@ interface Assessment {
   created_at: string;
 }
 
-interface Term {
-  id: string;
-  name: string;
-  academic_year: string;
-}
-
-const ASSESSMENT_TYPES = ['CAT', 'Exam', 'Mock', 'Pre-Mock', 'Revision Test', 'Assignment', 'Trial Exam', 'Custom'];
-
-const QUICK_NAMES = [
-  'CAT 1', 'CAT 2', 'CAT 3',
-  'Opener Exam', 'Midterm Exam', 'End Term Exam',
-  'Mock Exam', 'Pre-Mock Exam',
-  'Form 4 Trial Exam', 'Form 4 National Trial Exam',
-  'Holiday Assignment Test', 'Weekly Assessment 1',
-  'Weekly Assessment 2', 'Weekly Assessment 3',
-  'Revision Test 1', 'Revision Test 2',
-  'End of Year Assessment',
-];
-
-export default function Assessments() {
+export default function SchoolAdminAssessments() {
   const { user } = useAuth();
   const [assessments, setAssessments] = useState<Assessment[]>([]);
-  const [terms, setTerms] = useState<Term[]>([]);
+  const [terms, setTerms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
-    exam_type: 'CAT',
+    type: 'CAT',
     term_id: '',
     start_date: '',
     end_date: '',
     weightage: 40,
   });
+  const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [showInfo, setShowInfo] = useState(true);
 
   useEffect(() => {
-    if (user?.schoolId) fetchData();
+    if (user?.schoolId) {
+      fetchAssessments();
+      fetchTerms();
+    }
   }, [user?.schoolId]);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchAssessments = async () => {
     try {
-      const { data: examsData } = await supabaseUntyped
+      const { data, error } = await supabase
         .from('school_exams')
         .select('*')
         .eq('school_id', user?.schoolId)
         .order('created_at', { ascending: false });
-      setAssessments(examsData || []);
-
-      const { data: termsData } = await supabaseUntyped
-        .from('terms')
-        .select('id, name, academic_year')
-        .eq('school_id', user?.schoolId)
-        .order('academic_year', { ascending: false });
-      setTerms(termsData || []);
-    } catch {
+      if (error) throw error;
+      setAssessments(data || []);
+    } catch (err: any) {
       toast.error('Failed to load assessments');
     } finally {
       setLoading(false);
     }
   };
 
-  const resetForm = () => {
-    setForm({ name: '', exam_type: 'CAT', term_id: '', start_date: '', end_date: '', weightage: 40 });
-    setEditingId(null);
-    setShowForm(false);
+  const fetchTerms = async () => {
+    const { data } = await supabase
+      .from('terms')
+      .select('id, name, academic_year')
+      .eq('school_id', user?.schoolId)
+      .order('academic_year', { ascending: false });
+    setTerms(data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) { toast.error('Assessment name is required'); return; }
+    if (!form.name.trim() || !form.term_id) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
         school_id: user?.schoolId,
         name: form.name.trim(),
-        exam_type: form.exam_type,
+        type: form.type,
         term_id: form.term_id || null,
         start_date: form.start_date || null,
         end_date: form.end_date || null,
-        weightage: form.weightage || null,
-        status: 'active',
-        created_by: user?.id,
+        weightage: form.weightage,
+        status: 'upcoming',
       };
-
       if (editingId) {
-        const { error } = await supabaseUntyped.from('school_exams').update(payload).eq('id', editingId);
+        const { error } = await supabase.from('school_exams').update(payload).eq('id', editingId);
         if (error) throw error;
         toast.success('Assessment updated!');
       } else {
-        const { error } = await supabaseUntyped.from('school_exams').insert(payload);
+        const { error } = await supabase.from('school_exams').insert(payload);
         if (error) throw error;
-        toast.success(`Assessment "${form.name}" created!`);
+        toast.success('Assessment created!');
       }
       resetForm();
-      fetchData();
+      fetchAssessments();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save assessment');
-    } finally {
-      setSaving(false);
+      toast.error(err.message || 'Failed to save');
     }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('school_exams').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Assessment deleted');
+      setAssessments(prev => prev.filter(a => a.id !== id));
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+    setConfirmDelete(null);
+  };
+
+  const toggleStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'closed' : 'active';
+    setStatusUpdating(id);
+    try {
+      const { error } = await supabase.from('school_exams').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
+      setAssessments(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
+      toast.success(`Assessment ${newStatus === 'active' ? 'activated' : 'closed'}`);
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+    setStatusUpdating(null);
   };
 
   const handleEdit = (a: Assessment) => {
+    setEditingId(a.id);
     setForm({
       name: a.name,
-      exam_type: a.exam_type || 'CAT',
+      type: a.type || 'CAT',
       term_id: a.term_id || '',
       start_date: a.start_date || '',
       end_date: a.end_date || '',
       weightage: a.weightage || 40,
     });
-    setEditingId(a.id);
     setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete assessment "${name}"? This cannot be undone.`)) return;
-    try {
-      const { error } = await supabaseUntyped.from('school_exams').delete().eq('id', id);
-      if (error) throw error;
-      toast.success('Assessment deleted');
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete');
+  const resetForm = () => {
+    setForm({ name: '', type: 'CAT', term_id: '', start_date: '', end_date: '', weightage: 40 });
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case 'active': return <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Active</span>;
+      case 'closed': return <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">Closed</span>;
+      case 'upcoming': return <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Upcoming</span>;
+      default: return <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{status}</span>;
     }
   };
 
+  const typeBadge = (type: string) => {
+    switch (type) {
+      case 'CAT': return <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">CAT</span>;
+      case 'mid-term': return <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">Mid-Term</span>;
+      case 'end-term': return <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">End-Term</span>;
+      case 'assignment': return <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-medium">Assignment</span>;
+      default: return <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{type}</span>;
+    }
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-[#2563EB]" /></div>;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111] flex items-center gap-2">
-            <Award className="w-6 h-6 text-[#1A365D]" />
+          <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-[#1A365D]" />
             Assessments
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Create and manage any assessment with any name</p>
+          <p className="text-gray-500 text-sm mt-1">Create and manage school assessments, CATs, mid-terms, and end-term exams.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={fetchData} className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-            <RefreshCw className="w-4 h-4 text-gray-500" />
-          </button>
-          <button
-            onClick={() => { resetForm(); setShowForm(true); }}
-            className="flex items-center gap-2 bg-[#1A365D] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#2D4A7C] transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Create Assessment
-          </button>
-        </div>
+        <button
+          onClick={() => { resetForm(); setShowForm(!showForm); }}
+          className="flex items-center gap-2 bg-[#1A365D] text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-[#2D4A7C] transition-colors"
+        >
+          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          {showForm ? 'Cancel' : 'Add Assessment'}
+        </button>
       </div>
 
-      {/* Create / Edit Form */}
-      {showForm && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-bold text-gray-900">
-              {editingId ? 'Edit Assessment' : 'Create New Assessment'}
-            </h2>
-            <button onClick={resetForm} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
-              <X className="w-5 h-5 text-gray-400" />
-            </button>
+      {/* Info Banner */}
+      {showInfo && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex gap-3 text-sm text-blue-900">
+          <GraduationCap className="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-600" />
+          <div className="flex-1">
+            <p className="font-bold mb-1">About Assessments</p>
+            <p>Assessments are used to organize student evaluations. Each assessment has a weightage that determines how much it contributes to the final grade. Teachers will select an assessment when uploading marks.</p>
           </div>
-
-          {/* Quick Name Presets */}
-          {!editingId && (
-            <div className="mb-4">
-              <p className="text-xs text-gray-500 mb-2">Quick select a name:</p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_NAMES.map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setForm(p => ({ ...p, name: n }))}
-                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                      form.name === n
-                        ? 'bg-[#1A365D] text-white border-[#1A365D]'
-                        : 'border-gray-200 text-gray-600 hover:border-[#1A365D] hover:text-[#1A365D]'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Assessment Name *</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Form 4 Trial Exam, CAT 1, Mock Exams..."
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
-                <select
-                  value={form.exam_type}
-                  onChange={e => setForm(p => ({ ...p, exam_type: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                >
-                  {ASSESSMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Term (optional)</label>
-                <select
-                  value={form.term_id}
-                  onChange={e => setForm(p => ({ ...p, term_id: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                >
-                  <option value="">— No specific term —</option>
-                  {terms.map(t => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Weightage (%)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.weightage}
-                  onChange={e => setForm(p => ({ ...p, weightage: Number(e.target.value) }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={form.start_date}
-                  onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={form.end_date}
-                  onChange={e => setForm(p => ({ ...p, end_date: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex items-center gap-2 bg-[#1A365D] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#2D4A7C] transition-colors disabled:opacity-60"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                {saving ? 'Saving...' : editingId ? 'Update Assessment' : 'Create Assessment'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-6 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+          <button onClick={() => setShowInfo(false)} className="text-blue-400 hover:text-blue-600"><X className="w-4 h-4" /></button>
         </div>
       )}
 
-      {/* Assessments List */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-        <div className="p-5 border-b border-gray-100">
-          <h2 className="font-bold text-gray-900 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-[#1A365D]" />
-            All Assessments ({assessments.length})
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-[#1A365D]" />
-          </div>
-        ) : assessments.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <Award className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">No assessments yet</p>
-            <p className="text-xs mt-1">Create your first assessment using the button above</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {assessments.map(a => (
-              <div key={a.id} className="px-5 py-4 flex items-center gap-4">
-                <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center shrink-0">
-                  <BookOpen className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900">{a.name}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{a.exam_type}</span>
-                    {a.weightage && (
-                      <span className="text-xs text-gray-400">{a.weightage}%</span>
-                    )}
-                    {a.start_date && (
-                      <span className="text-xs text-gray-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {new Date(a.start_date).toLocaleDateString('en-KE')}
-                        {a.end_date && ` – ${new Date(a.end_date).toLocaleDateString('en-KE')}`}
-                      </span>
-                    )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      a.status === 'active' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {a.status || 'active'}
-                    </span>
+      {/* Assessment Form */}
+      <AnimatePresence>
+        {showForm && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">
+                {editingId ? 'Edit Assessment' : 'New Assessment'}
+              </h2>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Assessment Name *</label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                      placeholder="e.g. CAT 1, Mid-Term Exam, End-Term 2025"
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Assessment Type *</label>
+                    <select
+                      value={form.type}
+                      onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D] bg-white"
+                    >
+                      <option value="CAT">CAT (Continuous Assessment Test)</option>
+                      <option value="mid-term">Mid-Term Exam</option>
+                      <option value="end-term">End-Term Exam</option>
+                      <option value="assignment">Assignment</option>
+                      <option value="quiz">Quiz</option>
+                      <option value="project">Project</option>
+                      <option value="practical">Practical</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Term *</label>
+                    <select
+                      value={form.term_id}
+                      onChange={e => setForm(p => ({ ...p, term_id: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D] bg-white"
+                      required
+                    >
+                      <option value="">Select Term</option>
+                      {terms.map(t => (
+                        <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Weightage (%)</label>
+                    <input
+                      type="number"
+                      value={form.weightage}
+                      onChange={e => setForm(p => ({ ...p, weightage: parseInt(e.target.value) || 0 }))}
+                      min={0}
+                      max={100}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">How much this assessment contributes to the final grade</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                      <CalendarDays className="w-3.5 h-3.5" /> Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={form.start_date}
+                      onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                      <CalendarDays className="w-3.5 h-3.5" /> End Date
+                    </label>
+                    <input
+                      type="date"
+                      value={form.end_date}
+                      onChange={e => setForm(p => ({ ...p, end_date: e.target.value }))}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D]"
+                    />
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex gap-3 pt-2">
                   <button
-                    onClick={() => handleEdit(a)}
-                    className="p-2 hover:bg-blue-50 rounded-lg transition-colors text-blue-600"
-                    title="Edit"
+                    type="submit"
+                    disabled={saving}
+                    className="flex items-center gap-2 bg-[#1A365D] text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-[#2D4A7C] disabled:opacity-50"
                   >
-                    <Edit2 className="w-4 h-4" />
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {saving ? 'Saving...' : (editingId ? 'Update' : 'Create')} Assessment
                   </button>
                   <button
-                    onClick={() => handleDelete(a.id, a.name)}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-500"
-                    title="Delete"
+                    type="button"
+                    onClick={resetForm}
+                    className="px-6 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    Cancel
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              </form>
+            </div>
+          </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* Assessments List */}
+      <div className="bg-white rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Term</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Period</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Weight</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {assessments.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <BookOpen className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p className="font-medium">No assessments yet</p>
+                    <p className="text-xs mt-1">Click "Add Assessment" to create your first one.</p>
+                  </td>
+                </tr>
+              ) : (
+                assessments.map((a) => (
+                  <motion.tr
+                    key={a.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="px-6 py-4 font-medium text-gray-900">{a.name}</td>
+                    <td className="px-6 py-4">{typeBadge(a.type)}</td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {terms.find(t => t.id === a.term_id)?.name || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {a.start_date && a.end_date
+                        ? `${new Date(a.start_date).toLocaleDateString()} - ${new Date(a.end_date).toLocaleDateString()}`
+                        : '-'}
+                    </td>
+                    <td className="px-6 py-4 text-gray-900 font-semibold">{a.weightage}%</td>
+                    <td className="px-6 py-4">{statusBadge(a.status)}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => toggleStatus(a.id, a.status)}
+                          disabled={statusUpdating === a.id}
+                          className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                            a.status === 'active'
+                              ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                              : 'bg-green-50 text-green-600 hover:bg-green-100'
+                          }`}
+                        >
+                          {statusUpdating === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> :
+                            a.status === 'active' ? 'Close' : 'Activate'}
+                        </button>
+                        <button
+                          onClick={() => handleEdit(a)}
+                          className="text-xs px-3 py-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 font-medium"
+                        >
+                          <Pencil className="w-3 h-3 inline" /> Edit
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(a.id)}
+                          className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium"
+                        >
+                          <Trash2 className="w-3 h-3 inline" />
+                        </button>
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900">Delete Assessment?</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-6">
+                This action cannot be undone. Any marks associated with this assessment will also be affected.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDelete(confirmDelete)}
+                  className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

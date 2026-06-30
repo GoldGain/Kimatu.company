@@ -1,104 +1,39 @@
 import { useState, useEffect } from 'react';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit, Plus, BookOpen } from 'lucide-react';
+import { Upload, Loader2, CheckCircle, FileSpreadsheet, Download, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand } from '@/lib/grading';
-
-// ─── Pre-populated subjects by curriculum level ───────────────────────────────
-
-const PRE_PRIMARY_SUBJECTS = [
-  'Mathematics Activities',
-  'English Language Activities',
-  'Environment Activities',
-  'Creative Arts Activities',
-  'Religious Studies Activities',
-  'Kiswahili Activities',
-];
-
-const PRIMARY_SUBJECTS = [
-  'English Composition',
-  'English Grammar',
-  'Kiswahili Insha',
-  'Kiswahili Sarufi',
-  'Mathematics',
-  'Science and Technology',
-  'Social Studies',
-  'Religious Education',
-  'Creative Arts',
-  'Physical and Health Education',
-  'Indigenous Languages',
-];
-
-const JUNIOR_SUBJECTS = [
-  'English',
-  'Kiswahili',
-  'Mathematics',
-  'Integrated Science',
-  'Social Studies',
-  'Religious Education',
-  'Creative Arts and Sports',
-  'Life Skills',
-  'Agriculture',
-  'Business Studies',
-  'Computer Science',
-  'French',
-  'German',
-  'Arabic',
-];
-
-const SENIOR_SUBJECTS = [
-  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
-  'History', 'Geography', 'Business Studies', 'Agriculture', 'Computer Studies',
-  'Home Science', 'Physical Education', 'Religious Education', 'Community Service Learning',
-];
-
-const SUBJECTS_844 = [
-  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
-  'History', 'Geography', 'CRE', 'IRE', 'HRE', 'Business Studies',
-  'Agriculture', 'Computer Studies',
-];
-
-function getPresetSubjectsForBand(band: string): string[] {
-  if (band === '844') return SUBJECTS_844;
-  if (band === 'senior') return SENIOR_SUBJECTS;
-  if (band === 'junior') return JUNIOR_SUBJECTS;
-  if (band === 'pre-primary') return PRE_PRIMARY_SUBJECTS;
-  return PRIMARY_SUBJECTS; // primary (default)
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ProcessedRow {
+interface ClassRecord { id: string; name: string; stream?: string; curriculum?: string; level?: number; }
+interface SubjectRecord { id: string; name: string; }
+interface Student { id: string; admission_number: string; first_name: string; last_name: string; }
+interface TermRecord { id: string; name: string; academic_year: string; }
+interface ParsedRow {
   student_id: string;
-  name: string;
   admission_number: string;
+  first_name: string;
+  last_name: string;
   marks: number;
-  out_of: number;
-  percentage: number;
-  cbcGrade: ReturnType<typeof calculateResultGrades>['cbcGrade'];
-  grade844: ReturnType<typeof calculateResultGrades>['grade844'];
-  position?: number;
+  originalRow: Record<string, any>;
 }
 
-interface ManualRow {
-  student_id: string;
-  name: string;
-  admission_number: string;
-  marks: string; // string for input control
-}
+const SUBJECT_CHOICES = ['English', 'Mathematics', 'Kiswahili', 'Science', 'Social Studies', 'CRE', 'IRE', 'Home Science', 'Agriculture', 'Art & Craft', 'Music', 'Physical Education', 'Computer Studies', 'French', 'German', 'Business Studies', 'Geography', 'History', 'Biology', 'Chemistry', 'Physics', 'Literature'];
 
 export default function TeacherResultsUpload() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'manual' | 'csv'>('manual');
-  const [classes, setClasses] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [terms, setTerms] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
+
+  // ── Strict teacher assignment enforcement ─────────────────────────────────
+  const [teacherAssignments, setTeacherAssignments] = useState<Array<{ class_id: string; subject_id: string }>>([]);
+
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
+  const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
+  const [terms, setTerms] = useState<TermRecord[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [mode, setMode] = useState<'manual' | 'csv'>('manual');
+
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('');
@@ -107,245 +42,172 @@ export default function TeacherResultsUpload() {
   const [outOf, setOutOf] = useState(100);
 
   // Subject selection: 'db' = from DB, 'preset' = from pre-populated list, 'manual' = typed
-  const [subjectMode, setSubjectMode] = useState<'db' | 'preset' | 'manual'>('preset');
-  const [manualSubjectName, setManualSubjectName] = useState('');
-  const [savingManualSubject, setSavingManualSubject] = useState(false);
+  const [subjectSource, setSubjectSource] = useState<'db' | 'preset' | 'manual'>('db');
+  const [presetSubject, setPresetSubject] = useState('');
+  const [manualSubject, setManualSubject] = useState('');
 
-  // CSV mode
-  const [csvData, setCsvData] = useState<ProcessedRow[]>([]);
-  const [preview, setPreview] = useState(false);
-  // Manual mode
-  const [manualRows, setManualRows] = useState<ManualRow[]>([]);
-  const [manualPreview, setManualPreview] = useState<ProcessedRow[]>([]);
-  const [manualPreviewReady, setManualPreviewReady] = useState(false);
-  // Shared
-  const [uploading, setUploading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState('');
+  const [manualMarks, setManualMarks] = useState<Record<string, number>>({});
+  const [csvData, setCsvData] = useState<ParsedRow[]>([]);
+  const [csvFileName, setCsvFileName] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
       const schoolId = user?.schoolId ?? '';
+
+      // Get teacher record first
+      const { data: teacherData } = await supabaseUntyped
+        .from('teachers')
+        .select('id')
+        .eq('profile_id', user?.id)
+        .maybeSingle();
+
+      // Get teacher's subject assignments
+      const { data: assignments } = await supabase
+        .from('teacher_subject_assignments')
+        .select('class_id, subject_id')
+        .eq('teacher_id', teacherData?.id || '')
+        .eq('is_active', true);
+
+      const assignmentList = assignments || [];
+      setTeacherAssignments(assignmentList);
+
+      // Get all classes and subjects but we'll filter by assignments
       const [{ data: c }, { data: s }, { data: t }, { data: e }] = await Promise.all([
         supabase.from('classes').select('*').eq('school_id', schoolId).order('level'),
         supabase.from('subjects').select('*').eq('school_id', schoolId).order('name'),
         supabase.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
         supabaseUntyped.from('school_exams').select('*').eq('school_id', schoolId).eq('is_active', true).order('name'),
       ]);
-      setClasses(c || []);
-      setSubjects(s || []);
+
+      // Filter to only classes/subjects the teacher is assigned to
+      const assignedClassIds = [...new Set(assignmentList.map(a => a.class_id))];
+      const assignedSubjectIds = [...new Set(assignmentList.map(a => a.subject_id))];
+
+      setClasses((c || []).filter((cls: any) => assignedClassIds.includes(cls.id)));
+      setSubjects((s || []).filter((sub: any) => assignedSubjectIds.includes(sub.id)));
       setExams(e || []);
 
       // Auto-create default terms if none exist
       let termsData = t || [];
-      if (termsData.length === 0 && schoolId) {
-        const currentYear = new Date().getFullYear();
+      if (termsData.length === 0) {
+        const year = new Date().getFullYear();
         const defaultTerms = [
-          { school_id: schoolId, name: 'Term 1', term_number: 1, academic_year: String(currentYear), start_date: `${currentYear}-01-01`, end_date: `${currentYear}-04-15`, is_active: true },
-          { school_id: schoolId, name: 'Term 2', term_number: 2, academic_year: String(currentYear), start_date: `${currentYear}-05-01`, end_date: `${currentYear}-08-15`, is_active: false },
-          { school_id: schoolId, name: 'Term 3', term_number: 3, academic_year: String(currentYear), start_date: `${currentYear}-09-01`, end_date: `${currentYear}-12-15`, is_active: false },
+          { school_id: schoolId, name: 'Term 1', academic_year: String(year) },
+          { school_id: schoolId, name: 'Term 2', academic_year: String(year) },
+          { school_id: schoolId, name: 'Term 3', academic_year: String(year) },
         ];
-        const { data: insertedTerms, error: insertError } = await supabase.from('terms').insert(defaultTerms).select('*');
-        if (!insertError && insertedTerms) {
-          termsData = insertedTerms;
-          toast.success('Default terms (Term 1, Term 2, Term 3) created automatically');
-        }
+        const { data: createdTerms } = await supabase.from('terms').insert(defaultTerms).select();
+        termsData = createdTerms || [];
       }
       setTerms(termsData);
+
+      setLoading(false);
     };
-    fetchData();
+    if (user?.schoolId) fetchData();
   }, [user?.schoolId]);
 
+  // Fetch students when class is selected
   useEffect(() => {
-    if (!selectedClass) return;
+    if (!selectedClass) { setStudents([]); return; }
     const fetchStudents = async () => {
-      const { data } = await supabaseUntyped
+      const { data } = await supabase
         .from('students')
-        .select('id, first_name, last_name, admission_number')
+        .select('id, admission_number, first_name, last_name')
         .eq('class_id', selectedClass)
         .eq('is_active', true)
-        .order('first_name');
-      const studs = data || [];
-      setStudents(studs);
-      setManualRows(studs.map((s: any) => ({
-        student_id: s.id,
-        name: `${s.first_name} ${s.last_name}`,
-        admission_number: s.admission_number,
-        marks: '',
-      })));
-      setManualPreviewReady(false);
-      setManualPreview([]);
+        .order('admission_number');
+      setStudents(data || []);
     };
     fetchStudents();
-    // Reset subject selection when class changes
-    setSelectedSubject('');
-    setManualSubjectName('');
   }, [selectedClass]);
 
-  // ── Derived: current class data & band ──────────────────────────────────────
-  const currentClassData = classes.find((c: any) => c.id === selectedClass);
-  const currentBand = getSchoolLevelBand(currentClassData);
-  const currentGradeLabel = gradeDisplayLabel(currentBand);
-  const presetSubjects = getPresetSubjectsForBand(currentBand);
+  const currentClassData = classes.find(c => c.id === selectedClass);
+  const currentBand = currentClassData?.curriculum === '844' ? '844' : 'primary';
 
-  // DB subjects filtered to match the class curriculum
-  const dbSubjectsFiltered = subjects.filter((s: any) => {
-    if (!currentClassData) return true;
-    if (currentBand === '844') return s.curriculum === '844';
-    return s.curriculum === 'CBE';
-  });
+  // ─── CSV Upload ────────────────────────────────────────────────────────────
+  const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFileName(file.name);
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { toast.error('CSV must have a header row and at least one data row'); return; }
 
-  // ── Resolve the effective learning area name & id for submission ───────────────────
-  const getEffectiveSubjectId = () => {
-    if (subjectMode === 'db') return selectedSubject;
-    return selectedSubject; // preset also stores the DB id after save
-  };
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+    const admIdx = headers.findIndex(h => h.includes('admission') || h === 'adm' || h === 'reg_no');
+    const marksIdx = headers.findIndex(h => h.includes('marks') || h === 'score' || h === 'mark');
 
-  // Save a manually-typed subject to DB and select it
-  const saveManualSubject = async () => {
-    if (!manualSubjectName.trim()) { toast.error('Enter a learning area name'); return; }
-    setSavingManualSubject(true);
-    // Check if already exists
-    const existing = subjects.find(s => s.name.toLowerCase() === manualSubjectName.trim().toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
-    if (existing) {
-      setSelectedSubject(existing.id);
-      toast.info(`"${existing.name}" already exists — selected!`);
-      setSavingManualSubject(false);
+    if (admIdx === -1 || marksIdx === -1) {
+      toast.error('CSV must contain "admission_number" and "marks" columns');
       return;
     }
-    const { data, error } = await supabaseUntyped.from('subjects').insert([{
-      school_id: user?.schoolId,
-      name: manualSubjectName.trim(),
-      curriculum: currentBand === '844' ? '844' : 'CBE',
-      class_levels: [],
-    }]).select('*').single();
-    if (error) {
-      toast.error('Failed to save subject: ' + error.message);
-    } else {
-      toast.success(`Subject "${data.name}" saved and selected!`);
-      setSubjects(prev => [...prev, data]);
-      setSelectedSubject(data.id);
-      setManualSubjectName('');
-      setSubjectMode('preset');
+
+    const rows: ParsedRow[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      const admNo = cols[admIdx];
+      const marks = parseFloat(cols[marksIdx]);
+      const student = students.find(s => s.admission_number === admNo);
+      if (student) {
+        rows.push({ student_id: student.id, admission_number: admNo, first_name: student.first_name, last_name: student.last_name, marks: isNaN(marks) ? 0 : marks, originalRow: Object.fromEntries(headers.map((h, j) => [h, cols[j]])) });
+      }
     }
-    setSavingManualSubject(false);
+    setCsvData(rows);
+    toast.success(`${rows.length} records matched from CSV`);
   };
 
-  // When a preset learning area name is selected, find or create its DB record
-  const handlePresetSubjectSelect = async (name: string) => {
-    if (!name) { setSelectedSubject(''); return; }
-    // Try to find in DB
-    const existing = subjects.find(s => s.name.toLowerCase() === name.toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
-    if (existing) {
-      setSelectedSubject(existing.id);
-      return;
+  // ─── Download Template ─────────────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const header = 'admission_number,first_name,last_name,marks\n';
+    const rows = students.map(s => `${s.admission_number},${s.first_name},${s.last_name},\n`).join('');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `results_template_${selectedClass}_${selectedSubject}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ─── Manual Marks Table ────────────────────────────────────────────────────
+  const handleManualChange = (studentId: string, value: string) => {
+    const num = value === '' ? 0 : parseFloat(value);
+    setManualMarks(prev => ({ ...prev, [studentId]: isNaN(num) ? 0 : num }));
+  };
+
+  // ─── Resolve Selected Subject Name ─────────────────────────────────────────
+  const getSelectedSubjectName = () => {
+    if (subjectSource === 'db') return subjects.find(s => s.id === selectedSubject)?.name || '';
+    if (subjectSource === 'preset') return presetSubject;
+    return manualSubject.trim();
+  };
+
+  // ─── Upload ─────────────────────────────────────────────────────────────────
+  const handleUpload = async () => {
+    if (!selectedClass) { toast.error('Please select a class'); return; }
+    if (!selectedTerm) { toast.error('Please select a term'); return; }
+    const subjectName = getSelectedSubjectName();
+    if (!subjectName && !selectedSubject) { toast.error('Please select or enter a subject'); return; }
+
+    let subjectId = selectedSubject;
+    if (subjectSource !== 'db' || !subjectId) {
+      // Ensure subject exists in DB
+      const { data: existing } = await supabase.from('subjects').select('id').eq('school_id', user?.schoolId).ilike('name', subjectName).maybeSingle();
+      if (existing) { subjectId = existing.id; }
+      else {
+        const { data: created, error: subjErr } = await supabase.from('subjects').insert({ school_id: user?.schoolId, name: subjectName }).select('id').single();
+        if (subjErr) { toast.error('Failed to create subject'); return; }
+        subjectId = created.id;
+      }
     }
-    // Auto-create in DB so results can be linked
-    const { data, error } = await supabaseUntyped.from('subjects').insert([{
-      school_id: user?.schoolId,
-      name: name.trim(),
-      curriculum: currentBand === '844' ? '844' : 'CBE',
-      class_levels: [],
-    }]).select('*').single();
-    if (error) {
-      toast.error('Could not auto-create subject: ' + error.message);
-    } else {
-      setSubjects(prev => [...prev, data]);
-      setSelectedSubject(data.id);
-    }
-  };
 
-  // ── Manual Entry helpers ─────────────────────────────────────────────────────
-  const updateManualMark = (idx: number, value: string) => {
-    setManualRows(prev => {
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], marks: value };
-      return updated;
-    });
-    setManualPreviewReady(false);
-  };
+    const dataToSubmit: ParsedRow[] = mode === 'manual'
+      ? students.map(s => ({ student_id: s.id, admission_number: s.admission_number, first_name: s.first_name, last_name: s.last_name, marks: manualMarks[s.id] || 0, originalRow: {} }))
+      : csvData;
 
-  const calculateManualGrades = () => {
-    const filled = manualRows.filter(r => r.marks !== '' && !isNaN(parseFloat(r.marks)));
-    if (filled.length === 0) { toast.error('Please enter marks for at least one student'); return; }
-    const processed: ProcessedRow[] = filled.map(r => {
-      const marks = parseFloat(r.marks);
-      const percentage = Math.round((marks / outOf) * 100);
-      const grades = calculateResultGrades(percentage, currentClassData);
-      return {
-        student_id: r.student_id,
-        name: r.name,
-        admission_number: r.admission_number,
-        marks,
-        out_of: outOf,
-        percentage,
-        cbcGrade: grades.cbcGrade,
-        grade844: grades.grade844,
-      };
-    });
-    const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
-    sorted.forEach((row, i) => { row.position = i + 1; });
-    setManualPreview(sorted);
-    setManualPreviewReady(true);
-    toast.success(`Grades calculated for ${sorted.length} students!`);
-  };
+    if (dataToSubmit.length === 0) { toast.error('No data to upload'); return; }
 
-  // ── Download helpers ─────────────────────────────────────────────────────────
-  const getMainGrade = (row: ProcessedRow) => currentBand === '844' ? row.grade844.grade : row.cbcGrade.subLevel;
-  const getMainPoints = (row: ProcessedRow) => currentBand === '844' ? row.grade844.points : row.cbcGrade.points;
-
-  const downloadManualPDF = () => {
-    if (!manualPreview.length) return;
-    const doc = new jsPDF();
-    const subjectName = subjects.find(s => s.id === selectedSubject)?.name || 'Subject';
-    const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
-    const termName = terms.find(t => t.id === selectedTerm)?.name || 'Term';
-    doc.setFontSize(16);
-    doc.text('Kimatu Analytics - Results Report', 14, 15);
-    doc.setFontSize(11);
-    doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
-    doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
-    autoTable(doc, {
-      startY: 40,
-      head: [['Pos', 'Student Name', 'Adm #', 'Marks', 'Out Of', '%', currentGradeLabel, 'Points']],
-      body: manualPreview.map(row => [
-        row.position, row.name, row.admission_number, row.marks, row.out_of,
-        `${row.percentage}%`, getMainGrade(row), getMainPoints(row),
-      ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [37, 99, 235] },
-    });
-    doc.save(`results_${className}_${subjectName}.pdf`);
-  };
-
-  const downloadManualExcel = () => {
-    if (!manualPreview.length) return;
-    const subjectName = subjects.find(s => s.id === selectedSubject)?.name || 'Subject';
-    const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
-    const ws = XLSX.utils.json_to_sheet(manualPreview.map(row => ({
-      Position: row.position,
-      'Student Name': row.name,
-      'Admission #': row.admission_number,
-      Marks: row.marks,
-      'Out Of': row.out_of,
-      'Percentage (%)': row.percentage,
-      [currentGradeLabel]: getMainGrade(row),
-      Points: getMainPoints(row),
-      Descriptor: row.cbcGrade.descriptor,
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Results');
-    XLSX.writeFile(wb, `results_${className}_${subjectName}.xlsx`);
-  };
-
-  // ── Submit results ───────────────────────────────────────────────────────────
-  const handleSubmit = async (dataToSubmit: ProcessedRow[]) => {
-    if (!selectedClass || !selectedSubject || !selectedTerm) {
-      toast.error('Please select class, subject, and term');
-      return;
-    }
     setUploading(true);
-    setError('');
     try {
       const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
       const teacherId = teacherData?.id ?? '';
@@ -357,303 +219,118 @@ export default function TeacherResultsUpload() {
         school_id: user?.schoolId ?? '',
         student_id: row.student_id,
         class_id: selectedClass,
-        subject_id: selectedSubject,
+        subject_id: subjectId,
         teacher_id: teacherId,
         term_id: selectedTerm,
         exam_id: selectedExam || null,
         academic_year: new Date().getFullYear().toString(),
         curriculum: currentClassData?.curriculum || 'CBE',
         marks: row.marks,
-        out_of: row.out_of,
-        percentage: row.percentage,
-        converted_marks: row.percentage,
-        // For primary: sub-level is null (no EE1/ME1 etc.) and points are null
-        cbc_sublevel: isPrimaryClass ? null : (row.cbcGrade.subLevel || null),
-        cbc_grade: row.cbcGrade.grade,
-        cbc_points: isPrimaryClass ? null : row.cbcGrade.points,
-        cbc_descriptor: row.cbcGrade.descriptor,
-        grade_844: row.grade844.grade,
-        position: row.position,
-        status: 'submitted' as const,
-        submitted_at: new Date().toISOString(),
+        percentage: Math.round((row.marks / outOf) * 100),
+        cbc_grade: isPrimaryClass ? (row.marks >= 50 ? (row.marks >= 75 ? 'EE' : 'ME') : (row.marks >= 40 ? 'AE' : 'BE')) : null,
+        cbc_sublevel: isPrimaryClass ? null : (row.marks >= 50 ? (row.marks >= 75 ? 'EE1' : 'ME1') : (row.marks >= 40 ? 'AE1' : 'BE1')),
+        grade_844: currentBand === '844' ? (row.marks >= 80 ? 'A' : row.marks >= 75 ? 'A-' : row.marks >= 70 ? 'B+' : row.marks >= 65 ? 'B' : row.marks >= 60 ? 'B-' : row.marks >= 55 ? 'C+' : row.marks >= 50 ? 'C' : row.marks >= 45 ? 'C-' : row.marks >= 40 ? 'D+' : row.marks >= 35 ? 'D' : row.marks >= 30 ? 'D-' : 'E') : null,
+        points_844: currentBand === '844' ? (row.marks >= 80 ? 12 : row.marks >= 75 ? 11 : row.marks >= 70 ? 10 : row.marks >= 65 ? 9 : row.marks >= 60 ? 8 : row.marks >= 55 ? 7 : row.marks >= 50 ? 6 : row.marks >= 45 ? 5 : row.marks >= 40 ? 4 : row.marks >= 35 ? 3 : row.marks >= 30 ? 2 : 1) : null,
+        position: null,
+        class_position: null,
+        status: 'active',
       }));
 
-      const { error: insertError } = await supabaseUntyped.from('results').upsert(records, {
-        onConflict: 'student_id,subject_id,term_id',
-        ignoreDuplicates: false,
-      });
-      if (insertError) {
-        const { error: insertError2 } = await supabaseUntyped.from('results').insert(records);
-        if (insertError2) throw new Error(insertError2.message);
-      }
+      const { error: insertError } = await supabaseUntyped.from('results').insert(records);
+      if (insertError) throw new Error(insertError.message);
 
-      // Recalculate class positions
-      try {
-        const { data: allResults } = await supabaseUntyped
-          .from('results')
-          .select('id, student_id, marks, out_of')
-          .eq('class_id', selectedClass)
-          .eq('term_id', selectedTerm);
-        if (allResults && allResults.length > 0) {
-          const studentTotals: Record<string, { totalPct: number; count: number }> = {};
-          allResults.forEach((r: any) => {
-            const pct = r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0;
-            if (!studentTotals[r.student_id]) studentTotals[r.student_id] = { totalPct: 0, count: 0 };
-            studentTotals[r.student_id].totalPct += pct;
-            studentTotals[r.student_id].count += 1;
-          });
-          const ranked = Object.entries(studentTotals)
-            .map(([sid, v]) => ({ student_id: sid, avg: v.totalPct / v.count }))
-            .sort((a, b) => b.avg - a.avg);
-          for (let i = 0; i < ranked.length; i++) {
-            await supabaseUntyped
-              .from('results')
-              .update({ class_position: i + 1 })
-              .eq('student_id', ranked[i].student_id)
-              .eq('class_id', selectedClass)
-              .eq('term_id', selectedTerm);
-          }
-        }
-      } catch (posErr) {
-        console.warn('Position recalculation warning:', posErr);
-      }
-
-      setSuccess(true);
+      toast.success(`Uploaded ${records.length} results successfully!`);
+      setManualMarks({});
       setCsvData([]);
-      setPreview(false);
-      setManualPreview([]);
-      setManualPreviewReady(false);
-      setManualRows(prev => prev.map(r => ({ ...r, marks: '' })));
-      toast.success(`${records.length} results saved successfully! Class positions recalculated.`);
+      setCsvFileName('');
     } catch (err: any) {
-      setError(err.message);
       toast.error('Upload failed: ' + err.message);
     }
     setUploading(false);
   };
 
-  // ── CSV helpers ──────────────────────────────────────────────────────────────
-  const downloadTemplate = () => {
-    if (!students.length) { toast.error('Please select a class first'); return; }
-    const rows = students.map(s => ({
-      student_id: s.id,
-      name: `${s.first_name} ${s.last_name}`,
-      admission_number: s.admission_number,
-      marks: '',
-      out_of: outOf,
-    }));
-    const csv = Papa.unparse(rows);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `results_template_${selectedClass}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('Template downloaded!');
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError('');
-    Papa.parse(file, {
-      header: true,
-      complete: (results) => {
-        const valid = (results.data as any[]).filter((row: any) => row.student_id && row.marks !== '');
-        if (!valid.length) { setError('No valid rows found. Ensure marks column is filled.'); return; }
-        const processed: ProcessedRow[] = valid.map((row: any) => {
-          const marks = parseFloat(row.marks) || 0;
-          const rowOutOf = parseFloat(row.out_of) || outOf;
-          const percentage = Math.round((marks / rowOutOf) * 100);
-          const grades = calculateResultGrades(percentage, currentClassData);
-          return {
-            student_id: row.student_id,
-            name: row.name || '',
-            admission_number: row.admission_number || '',
-            marks,
-            out_of: rowOutOf,
-            percentage,
-            cbcGrade: grades.cbcGrade,
-            grade844: grades.grade844,
-          };
-        });
-        const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
-        sorted.forEach((row, i) => { row.position = i + 1; });
-        setCsvData(sorted);
-        setPreview(true);
-      },
-    });
-  };
-
-  const downloadPDF = () => {
-    const doc = new jsPDF();
-    const subjectName = subjects.find(s => s.id === selectedSubject)?.name || 'Subject';
-    const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
-    const termName = terms.find(t => t.id === selectedTerm)?.name || 'Term';
-    doc.setFontSize(16);
-    doc.text('Kimatu Analytics - Results Report', 14, 15);
-    doc.setFontSize(11);
-    doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
-    doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
-    autoTable(doc, {
-      startY: 40,
-      head: [['Pos', 'Student Name', 'Adm #', 'Marks', 'Out Of', '%', currentGradeLabel, 'Points']],
-      body: csvData.map(row => [
-        row.position, row.name, row.admission_number, row.marks, row.out_of,
-        `${row.percentage}%`, getMainGrade(row), getMainPoints(row),
-      ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [37, 99, 235] },
-    });
-    doc.save(`results_${className}_${subjectName}.pdf`);
-  };
-
-  const downloadExcel = () => {
-    const subjectName = subjects.find(s => s.id === selectedSubject)?.name || 'Subject';
-    const className = classes.find(c => c.id === selectedClass)?.name || 'Class';
-    const ws = XLSX.utils.json_to_sheet(csvData.map(row => ({
-      Position: row.position,
-      'Student Name': row.name,
-      'Admission #': row.admission_number,
-      Marks: row.marks,
-      'Out Of': row.out_of,
-      'Percentage (%)': row.percentage,
-      [currentGradeLabel]: getMainGrade(row),
-      Points: getMainPoints(row),
-      Descriptor: row.cbcGrade.descriptor,
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Results');
-    XLSX.writeFile(wb, `results_${className}_${subjectName}.xlsx`);
-  };
-
-  const gradeColor = (grade: string) => {
-    if (grade?.startsWith('EE') || grade === 'A' || grade === 'A-') return 'bg-green-100 text-green-700';
-    if (grade?.startsWith('ME') || grade.startsWith('B') || grade === 'C+') return 'bg-blue-100 text-blue-700';
-    if (grade?.startsWith('AE') || grade === 'C' || grade === 'C-' || grade.startsWith('D')) return 'bg-orange-100 text-orange-700';
-    return 'bg-red-100 text-red-700';
-  };
-
-  // Band label for display
-  const bandLabel = currentBand === '844' ? '8-4-4 (Form 1–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : currentBand === 'pre-primary' ? 'Pre-Primary CBE (PP1–PP2)' : 'Primary CBE (Gr 1–6)';
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-[#2563EB]" /></div>;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-[#111111]">Upload Results</h1>
-        <p className="text-sm text-[#666666]">Enter or upload student results with automatic Primary CBE, Junior CBE, Senior CBE, and 8-4-4 grading</p>
+        <h1 className="text-2xl font-black text-[#111111]">Upload Results</h1>
+        <p className="text-sm text-[#666666]">Enter or import student marks for your assigned subjects.</p>
       </div>
 
-      {success && (
-        <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center gap-3">
-          <CheckCircle className="w-5 h-5 text-green-600" />
-          <span className="text-sm text-green-700 font-medium">Results saved successfully!</span>
-          <button onClick={() => setSuccess(false)} className="ml-auto text-green-600 hover:text-green-800 text-sm">Enter More</button>
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600" />
-          <span className="text-sm text-red-700">{error}</span>
+      {/* Strict Assignment Info */}
+      {teacherAssignments.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-900">
+          <p className="font-semibold mb-1">Your Assigned Subjects & Classes</p>
+          <p className="text-xs text-blue-700">Only your assigned classes and subjects are shown below.</p>
         </div>
       )}
 
       {/* Step 1: Select Class, Subject, Term */}
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Subject &amp; Term</h3>
+        <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Subject & Term</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Class selector */}
+          {/* Class selector - filtered to assigned only */}
           <select
             value={selectedClass}
-            onChange={e => setSelectedClass(e.target.value)}
+            onChange={e => { setSelectedClass(e.target.value); setManualMarks({}); setCsvData([]); }}
             className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
           >
             <option value="">Select Class</option>
-            {classes.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.name}{c.stream ? ` (${c.stream})` : ''}</option>
-            ))}
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name}{c.stream ? ` (${c.stream})` : ''}</option>)}
           </select>
 
-          {/* Subject selector — smart, level-aware */}
-          <div className="space-y-1">
-            {selectedClass && (
-              <div className="flex items-center gap-1 mb-1">
-                <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">{bandLabel}</span>
-              </div>
+          {/* Subject selector - filtered to assigned only */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Subject Source</label>
+            <div className="flex gap-2 mb-2">
+              {[
+                { key: 'db', label: 'From List' },
+                { key: 'preset', label: 'Common' },
+                { key: 'manual', label: 'Custom' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setSubjectSource(key as any)}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                    subjectSource === key ? 'bg-[#2563EB] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {subjectSource === 'db' && (
+              <select
+                value={selectedSubject}
+                onChange={e => setSelectedSubject(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+              >
+                <option value="">Select Subject</option>
+                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             )}
-            {subjectMode !== 'manual' ? (
-              <div className="flex gap-2">
-                <select
-                  value={selectedSubject ? (subjects.find(s => s.id === selectedSubject)?.name || '') : ''}
-                  onChange={e => handlePresetSubjectSelect(e.target.value)}
-                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                  disabled={!selectedClass}
-                >
-                  <option value="">Select Subject</option>
-                  {/* Pre-populated subjects for this level */}
-                  {selectedClass && (
-                    <optgroup label={`Standard ${bandLabel} Subjects`}>
-                      {presetSubjects.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {/* DB subjects already added by admin */}
-                  {dbSubjectsFiltered.length > 0 && (
-                    <optgroup label="Other School Subjects">
-                      {dbSubjectsFiltered
-                        .filter(s => !presetSubjects.includes(s.name))
-                        .map((s: any) => (
-                          <option key={s.id} value={s.name}>{s.name}</option>
-                        ))}
-                    </optgroup>
-                  )}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setSubjectMode('manual')}
-                  title="Add subject manually"
-                  className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Other
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Type learning area name…"
-                  value={manualSubjectName}
-                  onChange={e => setManualSubjectName(e.target.value)}
-                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveManualSubject(); } }}
-                />
-                <button
-                  type="button"
-                  onClick={saveManualSubject}
-                  disabled={savingManualSubject}
-                  className="flex items-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-medium hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {savingManualSubject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSubjectMode('preset'); setManualSubjectName(''); }}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
+            {subjectSource === 'preset' && (
+              <select
+                value={presetSubject}
+                onChange={e => setPresetSubject(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+              >
+                <option value="">Select Subject</option>
+                {SUBJECT_CHOICES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
             )}
-            {selectedSubject && subjectMode !== 'manual' && (
-              <p className="text-xs text-green-600">✓ {subjects.find(s => s.id === selectedSubject)?.name || ''} selected</p>
+            {subjectSource === 'manual' && (
+              <input
+                type="text"
+                value={manualSubject}
+                onChange={e => setManualSubject(e.target.value)}
+                placeholder="Type subject name"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              />
             )}
           </div>
 
-          {/* Term selector */}
           <select
             value={selectedTerm}
             onChange={e => setSelectedTerm(e.target.value)}
@@ -690,229 +367,124 @@ export default function TeacherResultsUpload() {
               value={outOf}
               onChange={e => setOutOf(parseInt(e.target.value) || 100)}
               min={1}
-              max={1000}
+              max={100}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              placeholder="e.g. 30, 50, 100"
             />
           </div>
         </div>
-        {students.length > 0 && (
-          <p className="text-xs text-green-600 mt-2">{students.length} students found in this class</p>
-        )}
       </div>
 
-      {/* Step 2: Choose Entry Method */}
-      <div className="bg-white rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] overflow-hidden">
-        <div className="flex border-b border-gray-100">
-          <button
-            onClick={() => setActiveTab('manual')}
-            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'manual' ? 'text-[#2563EB] border-b-2 border-[#2563EB] bg-blue-50/50' : 'text-[#666666] hover:text-[#111111]'}`}
-          >
-            <ClipboardEdit className="w-4 h-4" />
-            Manual Entry (Type Marks)
-          </button>
-          <button
-            onClick={() => setActiveTab('csv')}
-            className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === 'csv' ? 'text-[#2563EB] border-b-2 border-[#2563EB] bg-blue-50/50' : 'text-[#666666] hover:text-[#111111]'}`}
-          >
-            <Upload className="w-4 h-4" />
-            CSV Upload
-          </button>
+      {/* Mode toggle */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setMode('manual')}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${mode === 'manual' ? 'bg-[#2563EB] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          Manual Entry
+        </button>
+        <button
+          onClick={() => setMode('csv')}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-[#2563EB] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          CSV Upload
+        </button>
+      </div>
+
+      {/* Manual Entry Table */}
+      {mode === 'manual' && selectedClass && (
+        <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+          <h3 className="font-semibold text-[#111111] mb-4">Step 2: Enter Marks</h3>
+          {students.length === 0 ? (
+            <p className="text-sm text-gray-500">No students found in this class.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="border-b">
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Admission</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Student</th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Marks (out of {outOf})</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {students.map((s, i) => (
+                      <tr key={s.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                        <td className="px-3 py-2 font-medium">{s.admission_number}</td>
+                        <td className="px-3 py-2">{s.first_name} {s.last_name}</td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="number"
+                            min={0}
+                            max={outOf}
+                            step={0.5}
+                            value={manualMarks[s.id] || ''}
+                            onChange={e => handleManualChange(s.id, e.target.value)}
+                            placeholder="—"
+                            className="w-20 text-center border border-gray-200 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]/30"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
+      )}
 
-        {/* ── MANUAL ENTRY TAB ── */}
-        {activeTab === 'manual' && (
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-[#111111]">
-                {students.length > 0 ? `Enter marks for ${students.length} students (out of ${outOf})` : 'Select a class to load students'}
-              </h3>
-              {manualPreviewReady && (
-                <div className="flex items-center gap-2">
-                  <button onClick={downloadManualPDF} className="flex items-center gap-1 text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200">
-                    <Download className="w-3 h-3" /> PDF
-                  </button>
-                  <button onClick={downloadManualExcel} className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-lg hover:bg-green-200">
-                    <Download className="w-3 h-3" /> Excel
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {students.length === 0 ? (
-              <div className="text-center py-8 text-sm text-[#666666]">
-                Select a class above to load students for manual mark entry.
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100 bg-gray-50">
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">#</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Student Name</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Adm #</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks (out of {outOf})</th>
-                        {manualPreviewReady && (
-                          <>
-                            <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                            <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{currentGradeLabel}</th>
-                            <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>
-                            <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Rank</th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {manualRows.map((row, idx) => {
-                        const previewRow = manualPreview.find(p => p.student_id === row.student_id);
-                        return (
-                          <tr key={row.student_id} className="border-b border-gray-50 hover:bg-gray-50">
-                            <td className="py-2 px-3 text-gray-400">{idx + 1}</td>
-                            <td className="py-2 px-3 font-medium">{row.name}</td>
-                            <td className="py-2 px-3 text-gray-500">{row.admission_number}</td>
-                            <td className="py-2 px-3">
-                              <input
-                                type="number"
-                                min={0}
-                                max={outOf}
-                                value={row.marks}
-                                onChange={e => updateManualMark(idx, e.target.value)}
-                                placeholder={`0 - ${outOf}`}
-                                className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] text-center"
-                              />
-                            </td>
-                            {manualPreviewReady && previewRow && (
-                              <>
-                                <td className="py-2 px-3 font-semibold">{previewRow.percentage}%</td>
-                                <td className="py-2 px-3">
-                                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(getMainGrade(previewRow))}`}>
-                                    {getMainGrade(previewRow)}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3">{getMainPoints(previewRow)}</td>
-                                <td className="py-2 px-3">
-                                  {previewRow.position === 1 && <span className="text-yellow-500 font-bold">🥇 1st</span>}
-                                  {previewRow.position === 2 && <span className="text-gray-400 font-bold">🥈 2nd</span>}
-                                  {previewRow.position === 3 && <span className="text-orange-400 font-bold">🥉 3rd</span>}
-                                  {(previewRow.position || 0) > 3 && <span className="text-gray-500">#{previewRow.position}</span>}
-                                </td>
-                              </>
-                            )}
-                            {manualPreviewReady && !previewRow && (
-                              <td colSpan={4} className="py-2 px-3 text-xs text-gray-400 italic">No marks entered</td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <button
-                    onClick={calculateManualGrades}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-orange-600"
-                  >
-                    <ClipboardEdit className="w-4 h-4" />
-                    Calculate Grades &amp; Preview
-                  </button>
-                  {manualPreviewReady && (
-                    <button
-                      onClick={() => handleSubmit(manualPreview)}
-                      disabled={uploading}
-                      className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
-                    >
-                      {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                      {uploading ? 'Saving...' : `Submit ${manualPreview.length} Results to Database`}
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
+      {/* CSV Upload */}
+      {mode === 'csv' && (
+        <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
+          <h3 className="font-semibold text-[#111111] mb-4">Step 2: Upload CSV</h3>
+          <div className="flex flex-col sm:flex-row items-start gap-4">
+            <label className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium cursor-pointer hover:bg-[#1d4ed8]">
+              <Upload className="w-4 h-4" />
+              Choose CSV File
+              <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
+            </label>
+            <button onClick={downloadTemplate} className="flex items-center gap-2 text-sm text-[#2563EB] hover:underline">
+              <Download className="w-4 h-4" /> Download Template
+            </button>
           </div>
-        )}
-
-        {/* ── CSV UPLOAD TAB ── */}
-        {activeTab === 'csv' && (
-          <div className="p-6 space-y-6">
-            <div>
-              <h3 className="font-semibold text-[#111111] mb-3">Step 2: Download CSV Template</h3>
-              <button
-                onClick={downloadTemplate}
-                disabled={!students.length}
-                className="flex items-center gap-2 bg-gray-100 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50"
-              >
-                <Download className="w-4 h-4" /> Download CSV Template ({students.length} students)
-              </button>
+          {csvFileName && <p className="text-xs text-gray-500 mt-2">Selected: {csvFileName}</p>}
+          {csvData.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="border-b">
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Admission</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Marks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {csvData.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">{row.admission_number}</td>
+                      <td className="px-3 py-2">{row.first_name} {row.last_name}</td>
+                      <td className="px-3 py-2 text-center font-medium">{row.marks}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          )}
+        </div>
+      )}
 
-            <div>
-              <h3 className="font-semibold text-[#111111] mb-3">Step 3: Upload Filled Template</h3>
-              <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-[#2563EB] transition-colors">
-                <Upload className="w-8 h-8 text-gray-400 mx-auto mb-3" />
-                <p className="text-sm text-[#666666] mb-3">Drag and drop your CSV file here, or click to browse</p>
-                <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" id="csv-upload" />
-                <label htmlFor="csv-upload" className="inline-flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] cursor-pointer">
-                  <FileText className="w-4 h-4" /> Select CSV File
-                </label>
-              </div>
-            </div>
-
-            {preview && csvData.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-[#111111]">Step 4: Preview &amp; Submit ({csvData.length} students ranked)</h3>
-                  <div className="flex items-center gap-2">
-                    <button onClick={downloadPDF} className="flex items-center gap-1 text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200"><Download className="w-3 h-3" /> PDF</button>
-                    <button onClick={downloadExcel} className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-lg hover:bg-green-200"><Download className="w-3 h-3" /> Excel</button>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100 bg-gray-50">
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Rank</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Student</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Out Of</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{currentGradeLabel}</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {csvData.map((row, i) => (
-                        <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                          <td className="py-2 px-3">
-                            {row.position === 1 && <span className="text-yellow-500 font-bold">🥇 1st</span>}
-                            {row.position === 2 && <span className="text-gray-400 font-bold">🥈 2nd</span>}
-                            {row.position === 3 && <span className="text-orange-400 font-bold">🥉 3rd</span>}
-                            {(row.position || 0) > 3 && <span className="text-gray-500">#{row.position}</span>}
-                          </td>
-                          <td className="py-2 px-3 font-medium">{row.name}</td>
-                          <td className="py-2 px-3">{row.marks}</td>
-                          <td className="py-2 px-3">{row.out_of}</td>
-                          <td className="py-2 px-3 font-semibold">{row.percentage}%</td>
-                          <td className="py-2 px-3"><span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(getMainGrade(row))}`}>{getMainGrade(row)}</span></td>
-                          <td className="py-2 px-3">{getMainPoints(row)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mt-4 flex gap-3">
-                  <button onClick={() => handleSubmit(csvData)} disabled={uploading} className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
-                    {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                    {uploading ? 'Uploading...' : 'Submit Results to Database'}
-                  </button>
-                  <button onClick={() => { setCsvData([]); setPreview(false); }} className="border border-gray-200 px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Upload Button */}
+      <button
+        onClick={handleUpload}
+        disabled={uploading || (!selectedClass) || (!selectedTerm)}
+        className="w-full flex items-center justify-center gap-2 bg-[#2563EB] text-white px-6 py-3 rounded-xl text-sm font-bold hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors"
+      >
+        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+        {uploading ? 'Uploading...' : `Upload ${mode === 'manual' ? students.filter(s => manualMarks[s.id]).length : csvData.length} Results`}
+      </button>
     </div>
   );
 }
