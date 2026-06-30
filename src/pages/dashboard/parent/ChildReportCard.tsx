@@ -378,7 +378,7 @@ export default function ParentChildReportCard() {
       const myBestSubjects = classBestList.filter(b => b.studentId === selectedChild.id);
       const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
       const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
-      addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
+      await addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       doc.text('Kimatu Analytics | Support: support@kimatu.company', 105, 285, { align: 'center' });

@@ -468,14 +468,59 @@ export async function addStudentPhotoToPDF(
 }
 
 // ── Add Signatures to PDF ────────────────────────────────────────────────────
-export function addSignaturesToPDF(
+// Helper: load any image URL (data: or remote) into a PNG data URL via canvas
+async function loadImageAsDataUrl(url: string): Promise<string | null> {
+  const renderToCanvas = (src: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), 8000);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        clearTimeout(timer);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 200;
+        canvas.height = img.naturalHeight || 80;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+      img.src = src;
+    });
+
+  try {
+    if (url.startsWith('data:')) return await renderToCanvas(url);
+    // Try fetching with CORS
+    const fetchUrl = url.split('?')[0];
+    let blob: Blob | null = null;
+    try { const r = await fetch(fetchUrl, { mode: 'cors' }); if (r.ok) blob = await r.blob(); } catch { /* ignore */ }
+    if (!blob) { try { const r = await fetch(fetchUrl); if (r.ok) blob = await r.blob(); } catch { /* ignore */ } }
+    if (blob) {
+      const blobUrl = URL.createObjectURL(blob);
+      try { return await renderToCanvas(blobUrl); } finally { URL.revokeObjectURL(blobUrl); }
+    }
+    return await renderToCanvas(url);
+  } catch {
+    return null;
+  }
+}
+
+export async function addSignaturesToPDF(
   doc: jsPDF,
   signatures: SignatureInfo,
   y: number,
   schoolInfo?: SchoolInfo
 ) {
-  const hasPrincipalSig = signatures.principal_signature_url && signatures.principal_signature_url.startsWith('data:');
-  const hasTeacherSig = signatures.teacher_signature_url && signatures.teacher_signature_url.startsWith('data:');
+  // Support both data: URLs and remote URLs for signatures
+  const teacherDataUrl = signatures.teacher_signature_url
+    ? await loadImageAsDataUrl(signatures.teacher_signature_url)
+    : null;
+  const principalDataUrl = signatures.principal_signature_url
+    ? await loadImageAsDataUrl(signatures.principal_signature_url)
+    : null;
+
+  const hasTeacherSig = !!teacherDataUrl;
+  const hasPrincipalSig = !!principalDataUrl;
 
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
@@ -486,7 +531,7 @@ export function addSignaturesToPDF(
 
     if (hasTeacherSig) {
       try {
-        doc.addImage(signatures.teacher_signature_url!, 'PNG', 14, y + 3, 45, 16);
+        doc.addImage(teacherDataUrl!, 'PNG', 14, y + 3, 45, 16);
       } catch {
         doc.setDrawColor(150, 150, 155);
         doc.line(14, y + 16, 60, y + 16);
@@ -502,7 +547,7 @@ export function addSignaturesToPDF(
 
     if (hasPrincipalSig) {
       try {
-        doc.addImage(signatures.principal_signature_url!, 'PNG', 120, y + 3, 45, 16);
+        doc.addImage(principalDataUrl!, 'PNG', 120, y + 3, 45, 16);
       } catch {
         doc.setDrawColor(150, 150, 155);
         doc.line(120, y + 16, 165, y + 16);

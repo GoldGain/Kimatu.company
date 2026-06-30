@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
-import { sendSMS } from '@/lib/sms';
+import { sendSMS, SMS_TEMPLATES } from '@/lib/sms';
 
 // Kenya counties list
 const KENYA_COUNTIES = [
@@ -204,9 +204,18 @@ export default function SchoolAdminStudents() {
       // Send welcome SMS to parent if phone is available
       if (formData.parent_phone) {
         try {
-          const studentFullName = `${formData.first_name} ${formData.last_name}`;
-          const smsMsg = `Welcome to Kimatu Analytics! Student ${studentFullName} (Adm: ${formData.admission_number}) has been registered. Student login: ${studentEmail} | Password: ${studentPassword}. Parent login: ${formData.parent_email || 'N/A'} | Password: Parent@2025. Please change passwords after first login. - Kimatu Analytics`;
-          await sendSMS(formData.parent_phone, smsMsg);
+          // SMS 1: Parent welcome with login details
+          await sendSMS(
+            formData.parent_phone,
+            SMS_TEMPLATES.welcomeParent(formData.parent_email || formData.parent_phone),
+            user?.schoolId
+          );
+          // SMS 2: Student login credentials sent to parent
+          await sendSMS(
+            formData.parent_phone,
+            SMS_TEMPLATES.welcomeStudent(studentEmail, formData.admission_number),
+            user?.schoolId
+          );
         } catch (smsErr) {
           console.warn('Welcome SMS failed:', smsErr);
         }

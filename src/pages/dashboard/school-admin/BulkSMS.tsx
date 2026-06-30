@@ -237,7 +237,7 @@ export default function BulkSMS() {
         <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-600" />
         <div>
           <p className="font-bold">SMS Ready</p>
-          <p>SMS sending is configured and ready. Messages will be sent via SMSGate.</p>
+          <p>SMS sending is configured and ready. Messages will be sent via Olympus SMS (Sender: PROCALL).</p>
         </div>
       </div>
 

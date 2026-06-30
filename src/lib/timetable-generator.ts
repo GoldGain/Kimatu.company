@@ -21,6 +21,8 @@ export interface TimetableConfig {
   second_break_end: string;
   lunch_start: string;
   lunch_end: string;
+  activities_start?: string;
+  activities_end?: string;
   activities?: Record<string, string>;
 }
 
@@ -202,12 +204,19 @@ export function generateSlots(config: TimetableConfig): TimetableSlot[] {
   currentMinutes += duration;
 
   // ACTIVITIES (after lesson 8)
+  // Use configured activities_start/end if provided, otherwise fall back to computed time
+  const activitiesStart = config?.activities_start
+    ? safeString(config.activities_start, minutesToTime(currentMinutes))
+    : minutesToTime(currentMinutes);
+  const activitiesEnd = config?.activities_end
+    ? safeString(config.activities_end, minutesToTime(currentMinutes + duration))
+    : minutesToTime(currentMinutes + duration);
   slots.push({
     slot_order: 12,
     label: 'ACTIVITIES',
     slot_type: 'activities',
-    start_time: minutesToTime(currentMinutes),
-    end_time: minutesToTime(currentMinutes + duration),
+    start_time: activitiesStart,
+    end_time: activitiesEnd,
   });
 
   console.log('Generated slots:', slots.map(s => `${s.slot_order}: ${s.label} (${s.start_time}-${s.end_time})`));

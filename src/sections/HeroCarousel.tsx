@@ -9,10 +9,11 @@ const heroImages = [
   { src: '/images/hero3.jpg', alt: 'Students focused on computers in a modern digital literacy lab' },
   { src: '/images/hero4.jpg', alt: 'Beautiful modern school campus with world-class facilities' },
   { src: '/images/hero5.jpg', alt: 'Happy students celebrating academic achievements with certificates and trophies' },
+  { src: '/images/hero6.jpg', alt: 'Diverse students in school uniforms studying together in a modern library' },
 ];
 
 const featureBullets = [
-  { icon: BookOpen, text: 'CBE & 8-4-4 Curriculum Support (Form 3 & 4 only)', color: '#D4AF37' },
+  { icon: BookOpen, text: 'CBE & 8-4-4 Curriculum Support', color: '#D4AF37' },
   { icon: GraduationCap, text: 'Pre-Primary to Senior School', color: '#60A5FA' },
   { icon: Award, text: 'Real-Time Collaboration & Analytics', color: '#4ADE80' },
 ];
@@ -42,12 +43,12 @@ export default function HeroCarousel() {
     setCurrentIndex((prev) => (prev + 1) % heroImages.length);
   }, []);
 
-  // Auto-advance carousel
+  // Auto-advance carousel every 4 seconds
   useEffect(() => {
     if (isPaused) return;
     const interval = setInterval(() => {
       nextSlide();
-    }, 5000);
+    }, 4000);
     return () => clearInterval(interval);
   }, [isPaused, nextSlide]);
 
@@ -58,39 +59,41 @@ export default function HeroCarousel() {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* Background Image Carousel with Ken Burns */}
+      {/* Background Image Carousel - full screen cover */}
       <AnimatePresence mode="sync">
         <motion.div
           key={currentIndex}
-          className="absolute inset-0"
+          className="absolute inset-0 w-full h-full"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 1.2, ease: 'easeInOut' }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
         >
           <motion.img
             src={heroImages[currentIndex].src}
             alt={heroImages[currentIndex].alt}
-            className="absolute inset-0 w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full"
+            style={{ objectFit: 'cover', objectPosition: 'center' }}
             initial={{ scale: 1 }}
-            animate={{ scale: 1.05 }}
-            transition={{ duration: 6, ease: 'easeOut' }}
+            animate={{ scale: 1.04 }}
+            transition={{ duration: 5, ease: 'easeOut' }}
             onError={(e) => {
               const target = e.currentTarget;
               target.style.display = 'none';
               if (target.parentElement) {
-                target.parentElement.style.background = 'linear-gradient(135deg, #1A365D 0%, #2D4A7C 50%, #1A365D 100%)';
+                target.parentElement.style.background =
+                  'linear-gradient(135deg, #1A365D 0%, #2D4A7C 50%, #1A365D 100%)';
               }
             }}
           />
         </motion.div>
       </AnimatePresence>
 
-      {/* Dark Gradient Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30 z-[1]" />
+      {/* Dark Gradient Overlay for text readability */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/25 z-[1]" />
       <div className="absolute inset-0 bg-gradient-to-r from-black/40 via-transparent to-black/40 z-[1]" />
 
-      {/* Subtle animated particles/dots for depth */}
+      {/* Subtle animated particles for depth */}
       <div className="absolute inset-0 z-[2] opacity-20">
         {[...Array(20)].map((_, i) => (
           <motion.div
@@ -100,10 +103,7 @@ export default function HeroCarousel() {
               left: `${(i * 17 + 5) % 100}%`,
               top: `${(i * 23 + 10) % 100}%`,
             }}
-            animate={{
-              opacity: [0.2, 0.8, 0.2],
-              scale: [1, 1.5, 1],
-            }}
+            animate={{ opacity: [0.2, 0.8, 0.2], scale: [1, 1.5, 1] }}
             transition={{
               duration: 3 + (i % 3),
               repeat: Infinity,
@@ -134,6 +134,7 @@ export default function HeroCarousel() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.3 }}
             className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold text-white mb-4 tracking-tight leading-none"
+            style={{ textShadow: '0 4px 20px rgba(0,0,0,0.6)' }}
           >
             Kimatu Analytics
           </motion.h1>
@@ -144,7 +145,7 @@ export default function HeroCarousel() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.45 }}
             className="text-2xl sm:text-3xl md:text-4xl font-bold mb-6"
-            style={{ color: '#D4AF37' }}
+            style={{ color: '#D4AF37', textShadow: '0 2px 12px rgba(0,0,0,0.5)' }}
           >
             Smarter Schools, Brighter Futures
           </motion.p>
@@ -155,6 +156,7 @@ export default function HeroCarousel() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.55 }}
             className="text-lg md:text-xl text-gray-200 mb-8 max-w-2xl mx-auto leading-relaxed"
+            style={{ textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}
           >
             School Analytics Simplified — Manage learners, learning areas, assessments, fees, and report cards all in one place.
           </motion.p>
@@ -236,7 +238,9 @@ export default function HeroCarousel() {
               { value: '98%', label: 'Satisfaction' },
             ].map((stat, i) => (
               <div key={i} className="text-center">
-                <div className="text-2xl md:text-3xl font-bold text-white">{stat.value}</div>
+                <div className="text-2xl md:text-3xl font-bold text-white" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>
+                  {stat.value}
+                </div>
                 <div className="text-sm text-gray-400">{stat.label}</div>
               </div>
             ))}
@@ -254,10 +258,10 @@ export default function HeroCarousel() {
             aria-label={`Go to slide ${index + 1}`}
           >
             <div
-              className={`w-3 h-3 rounded-full transition-all duration-300 ${
+              className={`rounded-full transition-all duration-300 ${
                 index === currentIndex
-                  ? 'bg-white scale-110'
-                  : 'bg-white/40 hover:bg-white/60'
+                  ? 'bg-white w-6 h-3 scale-110'
+                  : 'bg-white/40 hover:bg-white/60 w-3 h-3'
               }`}
             />
             {index === currentIndex && (
@@ -271,9 +275,16 @@ export default function HeroCarousel() {
         ))}
       </div>
 
+      {/* Slide counter */}
+      <div className="absolute bottom-8 right-8 z-20 hidden md:flex items-center gap-2">
+        <span className="text-white/70 text-sm font-medium">
+          {currentIndex + 1} / {heroImages.length}
+        </span>
+      </div>
+
       {/* Scroll Indicator */}
       <motion.div
-        className="absolute bottom-8 right-8 z-20 hidden md:flex flex-col items-center gap-2"
+        className="absolute bottom-8 left-8 z-20 hidden md:flex flex-col items-center gap-2"
         animate={{ y: [0, 8, 0] }}
         transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
       >

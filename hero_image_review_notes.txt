@@ -1,0 +1,16 @@
+Hero image review notes for Kimatu landing page carousel
+
+Reviewed files:
+- /home/ubuntu/kimatu/public/images/hero1.jpg: 2560x1440, strong classroom scene with two students and tablet analytics screen. Good quality and suitable for carousel.
+- /home/ubuntu/kimatu/public/images/hero2.jpg: 2560x1440, teacher presenting analytics dashboard to students. Good quality and suitable for carousel.
+- /home/ubuntu/kimatu/public/images/hero3.jpg: 2560x1440, students using desktop computers in a digital literacy lab. Good quality and suitable for carousel.
+- /home/ubuntu/kimatu/public/images/hero4.jpg: 2560x1440, modern school campus exterior. Good quality and suitable for carousel.
+- /home/ubuntu/kimatu/public/images/hero5.jpg: 2560x1440, happy students celebrating achievement with certificates and trophy. Good quality and suitable for carousel.
+
+Summary:
+- Existing hero1-hero5 images are already high-resolution and visually strong.
+- A sixth matching image is still needed to meet the user's 6-image requirement.
+- Carousel implementation should use these images with full-screen cover display, dark overlay, strong text contrast, smooth 4-second auto-slide, and clickable dot navigation.
+- Need to verify whether the current hero section file path should remain src/sections/HeroCarousel.tsx or be moved/aliased to src/components/HeroCarousel.tsx depending on existing imports.
+
+Saved on: 2026-06-30

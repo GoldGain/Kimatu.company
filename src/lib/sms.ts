@@ -1,38 +1,52 @@
-// SMSGate Cloud API - Direct integration
-// Credentials are hardcoded as per system configuration
-const SMSGATE_API_URL = 'https://api.sms-gate.app/3rdparty/v1/messages';
-const SMSGATE_USERNAME = '7KTHKG';
-const SMSGATE_PASSWORD = 'cvnjmdrrpq5q7m';
-const SMSGATE_SENDER = 'Kimatu Analytics';
-
-// Helper: build Basic auth header
-const buildAuthHeader = () => {
-  return 'Basic ' + btoa(`${SMSGATE_USERNAME}:${SMSGATE_PASSWORD}`);
-};
+// Olympus SMS API - Direct integration
+// Provider: Olympus SMS (OTS)
+// Endpoint: https://sms.ots.co.ke/api/v3/sms/send
+const OLYMPUS_API_URL = 'https://sms.ots.co.ke/api/v3/sms/send';
+const OLYMPUS_API_TOKEN = '3682|HN95vYSLpT8BcOjhWYj7gBVOXTSp1B3UsZFbtByfbfef70cf';
+const OLYMPUS_SENDER_ID = 'PROCALL';
 
 /**
- * Send a single SMS via SMSGate Cloud API
+ * Send a single SMS via Olympus SMS API
+ * IMPORTANT: Uses plain text only - no emojis, no special characters, no Unicode
  */
-export async function sendSMS(phone: string, message: string, _schoolId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  // Normalize phone number - ensure it starts with 254 or +
-  let normalizedPhone = phone.trim();
+export async function sendSMS(
+  phone: string,
+  message: string,
+  _schoolId?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  // Normalize phone number - must start with 254, no leading 0, no +
+  let normalizedPhone = phone.trim().replace(/\s+/g, '');
+  if (normalizedPhone.startsWith('+')) {
+    normalizedPhone = normalizedPhone.substring(1);
+  }
   if (normalizedPhone.startsWith('0')) {
     normalizedPhone = '254' + normalizedPhone.substring(1);
   }
-  if (!normalizedPhone.startsWith('+')) {
-    normalizedPhone = '+' + normalizedPhone;
+  if (!normalizedPhone.startsWith('254')) {
+    normalizedPhone = '254' + normalizedPhone;
   }
 
-  const response = await fetch(SMSGATE_API_URL, {
+  // Strip any non-plain-text characters to ensure clean SMS
+  const cleanMessage = message
+    .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII
+    .replace(/\u2014/g, '-')       // em-dash to hyphen
+    .replace(/\u2013/g, '-')       // en-dash to hyphen
+    .replace(/\u2018|\u2019/g, "'") // smart quotes
+    .replace(/\u201C|\u201D/g, '"') // smart double quotes
+    .trim();
+
+  const response = await fetch(OLYMPUS_API_URL, {
     method: 'POST',
     headers: {
-      'Authorization': buildAuthHeader(),
+      'Authorization': `Bearer ${OLYMPUS_API_TOKEN}`,
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
     },
     body: JSON.stringify({
-      message: message,
-      phoneNumbers: [normalizedPhone],
-      senderId: SMSGATE_SENDER,
+      recipient: normalizedPhone,
+      sender_id: OLYMPUS_SENDER_ID,
+      type: 'plain',
+      message: cleanMessage,
     }),
   });
 
@@ -42,11 +56,11 @@ export async function sendSMS(phone: string, message: string, _schoolId?: string
   }
 
   const result = await response.json();
-  return { success: true, messageId: result.messageId || result.id };
+  return { success: true, messageId: result.data?.id || result.id || result.message_id };
 }
 
 /**
- * Send bulk SMS to multiple recipients via SMSGate
+ * Send bulk SMS to multiple recipients via Olympus SMS
  * Returns a summary of successes and failures
  */
 export async function sendBulkSMS(
@@ -69,46 +83,58 @@ export async function sendBulkSMS(
     }
     if (onProgress) onProgress(i + 1, recipients.length);
     // Small delay to avoid rate limiting
-    if (i < recipients.length - 1) await new Promise(r => setTimeout(r, 200));
+    if (i < recipients.length - 1) await new Promise(r => setTimeout(r, 300));
   }
 
   return { sent, failed, errors };
 }
 
-// ─── SMS Message Templates ────────────────────────────────────────────────────
+// ─── SMS Message Templates (plain text only - no emojis, no special chars) ────
 
 export const SMS_TEMPLATES = {
   welcomeSchoolAdmin: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour School Admin account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: SchoolAdmin@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nWelcome to Kimatu Analytics!\n\nYour School Admin account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: SchoolAdmin@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login.\n\nSmarter Schools, Brighter Futures`,
 
   welcomeTeacher: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour Teacher account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Teacher@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nWelcome to Kimatu Analytics!\n\nYour Teacher account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Teacher@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login.\n\nSmarter Schools, Brighter Futures`,
 
   welcomeParent: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Parent,\n\nYour Parent account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Parent@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nDear Parent,\n\nYour Parent account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Parent@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login.\n\nSmarter Schools, Brighter Futures`,
 
   welcomeStudent: (email: string, admissionNumber: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Student,\n\nYour Student account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: ${admissionNumber}@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nDear Student,\n\nYour Student account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: ${admissionNumber}@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login.\n\nSmarter Schools, Brighter Futures`,
 
   welcomeReseller: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour Reseller account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: 123456789\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nWelcome to Kimatu Analytics!\n\nYour Reseller account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: 123456789\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login.\n\nSmarter Schools, Brighter Futures`,
 
   passwordResetOTP: (otp: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nPassword Reset Request\n\nYour OTP verification code is: ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nPassword Reset Request\n\nYour OTP verification code is: ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.\n\nSmarter Schools, Brighter Futures`,
 
   passwordResetSuccess: () =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nPassword Reset Successful\n\nYour password has been changed successfully.\n\nIf you did not make this change, please contact support immediately.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\nPassword Reset Successful\n\nYour password has been changed successfully.\n\nIf you did not make this change, please contact support immediately.\n\nSmarter Schools, Brighter Futures`,
 
-  resultsToParent: (studentName: string, className: string, subjects: Array<{ name: string; marks: number; grade: string }>, totalPoints: number, totalPossible: number, rank: number, totalStudents: number, comment: string) => {
-    const subjectLines = subjects.slice(0, 5).map(s => `${s.name}: ${s.marks}% - ${s.grade}`).join('\n');
-    return `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Parent,\n\nResults for ${studentName} - ${className}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nTotal Points: ${totalPoints}/${totalPossible}\nClass Rank: ${rank}/${totalStudents}\n\nTeacher Comment:\n${comment.substring(0, 100)}${comment.length > 100 ? '...' : ''}\n\nView Full Results:\nhttps://kimatu.company/login\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`;
+  resultsToParent: (
+    studentName: string,
+    className: string,
+    subjects: Array<{ name: string; marks: number; grade: string }>,
+    totalPoints: number,
+    totalPossible: number,
+    rank: number,
+    totalStudents: number,
+    _comment: string
+  ) => {
+    const subjectLines = subjects
+      .slice(0, 5)
+      .map(s => `${s.name}: ${s.marks}% - ${s.grade}`)
+      .join('\n');
+    return `KIMATU ANALYTICS\n\nDear Parent,\n\nResults for ${studentName} - ${className}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nTotal Points: ${totalPoints}/${totalPossible}\nClass Rank: ${rank}/${totalStudents}\n\nView Full Results: https://kimatu.company/login\n\nSmarter Schools, Brighter Futures`;
   },
 
   announcement: (schoolName: string, message: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\n${schoolName} Announcement\n\n${message}\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\n${schoolName} Announcement\n\n${message}\n\nSmarter Schools, Brighter Futures`,
 
   customMessage: (message: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\n${message}\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `KIMATU ANALYTICS\n\n${message}\n\nSmarter Schools, Brighter Futures`,
 };
 
 /**
@@ -125,13 +151,14 @@ export function getDefaultPassword(role: string, admissionNumber?: string): stri
   }
 }
 
-// ─── Legacy functions for backward compatibility ──────────────────────────────
+// ─── OTP-based password reset helpers ────────────────────────────────────────
 
 /**
- * Request a password reset OTP via SMS
- * Uses Supabase Edge Function - kept for compatibility
+ * Request a password reset OTP via SMS using Supabase Edge Function
  */
-export async function requestPasswordResetOTP(phone: string): Promise<{ success: boolean; message: string }> {
+export async function requestPasswordResetOTP(
+  phone: string
+): Promise<{ success: boolean; message: string }> {
   const { supabase } = await import('./supabase/client');
   const { data: { session } } = await supabase.auth.getSession();
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -159,7 +186,6 @@ export async function verifyPasswordResetOTP(
   phone: string,
   otp: string
 ): Promise<{ success: boolean; user_id: string; message: string }> {
-  const { supabase } = await import('./supabase/client');
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -185,7 +211,6 @@ export async function resetPasswordWithOTP(
   otp: string,
   newPassword: string
 ): Promise<{ success: boolean; message: string }> {
-  const { supabase } = await import('./supabase/client');
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 

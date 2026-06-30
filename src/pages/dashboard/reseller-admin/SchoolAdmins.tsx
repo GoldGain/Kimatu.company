@@ -4,6 +4,7 @@ import { createScopedUser } from '@/lib/supabase/createUser';
 import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Edit, Trash2, Search, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { sendSMS, SMS_TEMPLATES } from '@/lib/sms';
 
 const DEFAULT_SCHOOL_ADMIN_PASSWORD = 'SchoolAdmin@2025';
 
@@ -146,6 +147,17 @@ export default function ResellerSchoolAdmins() {
         toast.success(
           `✅ School Admin created! Login: ${form.email} | Password: ${DEFAULT_SCHOOL_ADMIN_PASSWORD}`
         );
+        // Send SMS welcome message if phone number provided
+        if (form.phone?.trim()) {
+          try {
+            await sendSMS(
+              form.phone.trim(),
+              SMS_TEMPLATES.welcomeSchoolAdmin(form.email)
+            );
+          } catch (smsErr) {
+            console.warn('SMS welcome failed (non-critical):', smsErr);
+          }
+        }
       }
 
       setShowForm(false);

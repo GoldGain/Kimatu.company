@@ -18,6 +18,8 @@ interface FrontendConfig {
   second_break_end: string;
   lunch_start: string;
   lunch_end: string;
+  activities_start?: string;
+  activities_end?: string;
   activities: Record<string, string>;
 }
 
@@ -32,6 +34,8 @@ const mapLevelConfigToFrontend = (dbConfig: any, dbActivities: Record<string, st
   second_break_end: dbConfig.second_break_end?.slice(0, 5) || '12:20',
   lunch_start: dbConfig.lunch_start?.slice(0, 5) || '12:50',
   lunch_end: dbConfig.lunch_end?.slice(0, 5) || '13:30',
+  activities_start: dbConfig.activities_start?.slice(0, 5) || undefined,
+  activities_end: dbConfig.activities_end?.slice(0, 5) || undefined,
   activities: dbActivities,
 });
 

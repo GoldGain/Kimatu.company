@@ -845,7 +845,7 @@ export default function SchoolAdminResults() {
 
         // Signatures
         const sigY = commentY + 42;
-        addSignaturesToPDF(doc, signatures, sigY, schoolInfo);
+        await addSignaturesToPDF(doc, signatures, sigY, schoolInfo);
 
         doc.setFontSize(7); doc.setTextColor(150, 150, 150);
         doc.text(`Page ${idx + 1} of ${totalStudents} | Kimatu Analytics School Management System`, 105, 290, { align: 'center' });

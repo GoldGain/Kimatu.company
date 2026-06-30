@@ -347,7 +347,7 @@ export default function StudentReportCard() {
       const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
 
       // Signatures
-      addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
+      await addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
 
       // Footer
       doc.setFontSize(8);

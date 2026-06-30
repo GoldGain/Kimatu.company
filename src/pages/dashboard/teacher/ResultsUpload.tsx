@@ -201,6 +201,17 @@ export default function TeacherResultsUpload() {
       }
     }
 
+    // ── Strict assignment enforcement: verify teacher is assigned to this class+subject ──
+    if (teacherAssignments.length > 0) {
+      const isAssigned = teacherAssignments.some(
+        a => a.class_id === selectedClass && a.subject_id === subjectId
+      );
+      if (!isAssigned) {
+        toast.error('You are not assigned to teach this subject in this class. Please contact your school administrator.');
+        return;
+      }
+    }
+
     const dataToSubmit: ParsedRow[] = mode === 'manual'
       ? students.map(s => ({ student_id: s.id, admission_number: s.admission_number, first_name: s.first_name, last_name: s.last_name, marks: manualMarks[s.id] || 0, originalRow: {} }))
       : csvData;

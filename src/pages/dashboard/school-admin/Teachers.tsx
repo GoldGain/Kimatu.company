@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { createScopedUser } from '@/lib/supabase/createUser';
+import { sendSMS, SMS_TEMPLATES } from '@/lib/sms';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTeachers } from '@/hooks/useSupabaseData';
 import { Search, Plus, Loader2, KeyRound, Pencil, Trash2, X } from 'lucide-react';
@@ -99,6 +100,18 @@ export default function SchoolAdminTeachers() {
       }]);
       if (teacherError) throw new Error(`Teacher record failed: ${teacherError.message}`);
       toast.success(`Teacher ${teacherNumberLabel} added. Login: ${formData.email.trim().toLowerCase()} | Password: ${DEFAULT_TEACHER_PASSWORD}`);
+      // Send SMS welcome message if phone number provided
+      if (formData.phone.trim()) {
+        try {
+          await sendSMS(
+            formData.phone.trim(),
+            SMS_TEMPLATES.welcomeTeacher(formData.email.trim().toLowerCase()),
+            user.schoolId
+          );
+        } catch (smsErr) {
+          console.warn('SMS welcome failed (non-critical):', smsErr);
+        }
+      }
       setShowAdd(false);
       setFormData({ first_name: '', last_name: '', email: '', phone: '', gender: '' as GenderType, qualification: '', specialization: '', tsc_number: '' });
       refetch();

@@ -4,6 +4,7 @@ import { createScopedUser } from '@/lib/supabase/createUser';
 import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Reseller } from '@/types/database';
+import { sendSMS, SMS_TEMPLATES } from '@/lib/sms';
 
 const DEFAULT_RESELLER_PASSWORD = '123456789';
 
@@ -95,6 +96,17 @@ export default function MasterAdminResellers() {
         if (rErr) throw rErr;
         
         toast.success(`✅ Reseller created! Login: ${form.email} | Password: ${DEFAULT_RESELLER_PASSWORD}`);
+        // Send SMS welcome message if phone number provided
+        if (form.phone.trim()) {
+          try {
+            await sendSMS(
+              form.phone.trim(),
+              SMS_TEMPLATES.welcomeReseller(form.email)
+            );
+          } catch (smsErr) {
+            console.warn('SMS welcome failed (non-critical):', smsErr);
+          }
+        }
       }
       setShowForm(false);
       setEditingId(null);
