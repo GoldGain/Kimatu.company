@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase/client';
 import {
   LayoutDashboard,
   BookOpen,
@@ -14,11 +13,17 @@ import {
   LogOut,
   X,
   Menu,
-  ChevronDown,
-  ChevronUp,
   User,
   Bell,
   Palette,
+  CreditCard,
+  Calendar,
+  Library,
+  ClipboardList,
+  School,
+  Award,
+  Zap,
+  TrendingUp,
 } from 'lucide-react';
 
 interface NavItem {
@@ -28,7 +33,7 @@ interface NavItem {
   children?: { label: string; path: string }[];
 }
 
-// Navigation config for each user role
+// Navigation config for each user role - ALL paths must exist in App.tsx
 const navConfig: Record<string, NavItem[]> = {
   school_admin: [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin' },
@@ -36,19 +41,19 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Teachers', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/teachers' },
     { label: 'Classes', icon: <BookOpen className="w-5 h-5" />, path: '/school-admin/classes' },
     { label: 'Subjects', icon: <FileText className="w-5 h-5" />, path: '/school-admin/subjects' },
-    { label: 'Exams', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/exams' },
+    { label: 'Exams', icon: <Award className="w-5 h-5" />, path: '/school-admin/exams' },
     { label: 'Assessments', icon: <FileText className="w-5 h-5" />, path: '/school-admin/assessments' },
-    { label: 'Results', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/results' },
+    { label: 'Results', icon: <TrendingUp className="w-5 h-5" />, path: '/school-admin/results' },
     { label: 'Report Cards', icon: <FileText className="w-5 h-5" />, path: '/school-admin/report-cards' },
-    { label: 'Fee Manager', icon: <BookOpen className="w-5 h-5" />, path: '/school-admin/fees' },
-    { label: 'Attendance', icon: <Users className="w-5 h-5" />, path: '/school-admin/attendance' },
-    { label: 'Library', icon: <BookOpen className="w-5 h-5" />, path: '/school-admin/library' },
-    { label: 'Timetable', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/timetable' },
+    { label: 'Fee Manager', icon: <CreditCard className="w-5 h-5" />, path: '/school-admin/fees' },
+    { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/school-admin/attendance' },
+    { label: 'Library', icon: <Library className="w-5 h-5" />, path: '/school-admin/library' },
+    { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/timetable/setup' },
     { label: 'Assign Teachers', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/assign-teachers' },
     { label: 'Assign Roles', icon: <Users className="w-5 h-5" />, path: '/school-admin/assign-roles' },
     { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/stream-dashboard' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
-    { label: 'Branding & Notifications', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
+    { label: 'Branding', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
     { label: 'Bulk SMS', icon: <MessageSquare className="w-5 h-5" />, path: '/school-admin/bulk-sms' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/school-admin/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/school-admin/change-password' },
@@ -57,32 +62,36 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/teacher' },
     { label: 'Upload Results', icon: <FileText className="w-5 h-5" />, path: '/teacher/upload-results' },
     { label: 'My Students', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
-    { label: 'CATs', icon: <FileText className="w-5 h-5" />, path: '/teacher/cats' },
+    { label: 'CATs', icon: <Award className="w-5 h-5" />, path: '/teacher/cats' },
     { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/analytics' },
-    { label: 'Timetable', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/timetable' },
+    { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/teacher/timetable' },
     { label: 'Assignments', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/assignments' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/teacher/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/teacher/change-password' },
   ],
   student: [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/student' },
-    { label: 'My Results', icon: <BarChart3 className="w-5 h-5" />, path: '/student/results' },
+    { label: 'My Results', icon: <TrendingUp className="w-5 h-5" />, path: '/student/results' },
     { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/student/report-card' },
-    { label: 'Timetable', icon: <BarChart3 className="w-5 h-5" />, path: '/student/timetable' },
+    { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/student/timetable' },
     { label: 'Assignments', icon: <BookOpen className="w-5 h-5" />, path: '/student/assignments' },
-    { label: 'Fee Info', icon: <BookOpen className="w-5 h-5" />, path: '/student/fees' },
-    { label: 'Library', icon: <BookOpen className="w-5 h-5" />, path: '/student/library' },
+    { label: 'Homework', icon: <BookOpen className="w-5 h-5" />, path: '/student/homework' },
+    { label: 'Fee Info', icon: <CreditCard className="w-5 h-5" />, path: '/student/fees' },
+    { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/student/attendance' },
+    { label: 'Library', icon: <Library className="w-5 h-5" />, path: '/student/library' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/student/profile' },
+    { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/student/change-password' },
   ],
   parent: [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/parent' },
-    { label: 'My Child', icon: <Users className="w-5 h-5" />, path: '/parent/child' },
-    { label: 'Results', icon: <BarChart3 className="w-5 h-5" />, path: '/parent/results' },
-    { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/parent/report-card' },
-    { label: 'Fee Info', icon: <BookOpen className="w-5 h-5" />, path: '/parent/fees' },
-    { label: 'Attendance', icon: <Users className="w-5 h-5" />, path: '/parent/attendance' },
+    { label: 'My Children', icon: <Users className="w-5 h-5" />, path: '/parent/children' },
+    { label: 'Results', icon: <TrendingUp className="w-5 h-5" />, path: '/parent/results' },
+    { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/parent/child-report-card' },
+    { label: 'Fee Info', icon: <CreditCard className="w-5 h-5" />, path: '/parent/fees' },
+    { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/parent/attendance' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/parent/announcements' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/parent/profile' },
+    { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/parent/change-password' },
   ],
 };
 
