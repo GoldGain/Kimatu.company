@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { 
   ArrowLeft, 
   School, 
@@ -181,7 +181,7 @@ I'd like to start my FREE 3-month trial!`;
                 <h1 className="text-2xl md:text-3xl font-bold mb-2" style={{ color: '#1A365D' }}>
                   Choose Your Plan
                 </h1>
-                <p className="text-gray-600">Select the plan that best fits your school&apos;s needs</p>
+                <p className="text-gray-600">Select the plan that best fits your school's needs</p>
               </div>
 
               {/* Billing Toggle */}
