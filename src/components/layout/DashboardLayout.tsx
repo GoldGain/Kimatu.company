@@ -32,6 +32,7 @@ import {
   Share2,
   DollarSign,
   Building2,
+  TrendingUp,
 } from 'lucide-react';
 
 interface NavItem {
