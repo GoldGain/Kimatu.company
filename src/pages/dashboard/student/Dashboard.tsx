@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { Award, CreditCard, ClipboardList, Clock, BookOpen, Bell } from 'lucide-react';
 import PhotoZoomModal from '@/components/PhotoZoomModal';
 

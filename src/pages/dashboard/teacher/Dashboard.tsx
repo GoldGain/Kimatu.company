@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { Upload, ClipboardList, BookOpen, Users, Clock, Trophy, FileText, Eye, BarChart3 } from 'lucide-react';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';

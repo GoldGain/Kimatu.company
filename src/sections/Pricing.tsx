@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { Check, Star, MessageCircle, Calculator, School, Users, Building2, CreditCard } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { initializePayment, calculatePaymentAmount, generatePaymentReference } from '@/lib/paystack';
 import { toast } from 'sonner';
 

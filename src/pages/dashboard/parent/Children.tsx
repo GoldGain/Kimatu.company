@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { Award, ClipboardList, Lock, CreditCard, CheckCircle, Loader2 } from 'lucide-react';

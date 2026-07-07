@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, Smartphone } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { usePWA } from '@/hooks/usePWA';

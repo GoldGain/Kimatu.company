@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, MessageCircle } from 'lucide-react';
 
 export default function CTA() {

@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useNavigate } from 'react-router';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';

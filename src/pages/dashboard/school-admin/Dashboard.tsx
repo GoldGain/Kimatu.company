@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight, Eye, TrendingUp, ArrowUpRight, MessageSquare } from 'lucide-react';
 import PromoteToNextTermModal from '@/components/PromoteToNextTermModal';
 

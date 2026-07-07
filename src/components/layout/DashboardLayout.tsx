@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
 import PhotoZoomModal from '@/components/PhotoZoomModal';

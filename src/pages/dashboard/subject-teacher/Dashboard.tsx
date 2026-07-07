@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BookOpen, Users, Upload, Loader2, BarChart3, TrendingUp, ChevronDown, ChevronUp, Award } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getSchoolLevelBand } from '@/lib/grading';
 import MarksEntryProgress from '@/components/MarksEntryProgress';
