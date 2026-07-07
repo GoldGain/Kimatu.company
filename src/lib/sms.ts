@@ -1,114 +1,168 @@
-// SMSGate Cloud API - Direct integration
-// Credentials are hardcoded as per system configuration
-const SMSGATE_API_URL = 'https://api.sms-gate.app/3rdparty/v1/messages';
-const SMSGATE_USERNAME = '7KTHKG';
-const SMSGATE_PASSWORD = 'cvnjmdrrpq5q7m';
-const SMSGATE_SENDER = 'Kimatu Analytics';
+// ─── Olympus SMS API Integration ─────────────────────────────────────────────
+// Using Olympus SMS with PROCALL sender ID
 
-// Helper: build Basic auth header
-const buildAuthHeader = () => {
-  return 'Basic ' + btoa(`${SMSGATE_USERNAME}:${SMSGATE_PASSWORD}`);
-};
+const OLYMPUS_API_URL = 'https://sms.ots.co.ke/api/v3/sms/send';
+const OLYMPUS_API_TOKEN = '3682|HN95vYSLpT8BcOjhWYj7gBVOXTSp1B3UsZFbtByfbfef70cf';
+const DEFAULT_SENDER_ID = 'PROCALL';
 
-/**
- * Send a single SMS via SMSGate Cloud API
- */
-export async function sendSMS(phone: string, message: string, _schoolId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  // Normalize phone number - ensure it starts with 254 or +
-  let normalizedPhone = phone.trim();
-  if (normalizedPhone.startsWith('0')) {
-    normalizedPhone = '254' + normalizedPhone.substring(1);
-  }
-  if (!normalizedPhone.startsWith('+')) {
-    normalizedPhone = '+' + normalizedPhone;
-  }
+interface SMSPayload {
+  recipient: string;   // Format: 254XXXXXXXXX
+  sender_id: string;   // Sender ID for SMS
+  type: 'plain';       // Must be "plain"
+  message: string;     // Plain text only, no emojis
+}
 
-  const response = await fetch(SMSGATE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': buildAuthHeader(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      message: message,
-      phoneNumbers: [normalizedPhone],
-      senderId: SMSGATE_SENDER,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`SMS sending failed: ${response.status} - ${errorText}`);
-  }
-
-  const result = await response.json();
-  return { success: true, messageId: result.messageId || result.id };
+interface SMSResponse {
+  success: boolean;
+  message?: string;
+  data?: any;
+  error?: string;
 }
 
 /**
- * Send bulk SMS to multiple recipients via SMSGate
- * Returns a summary of successes and failures
+ * Send a single SMS via Olympus SMS API
+ * @param phone - Phone number in format 254XXXXXXXXX
+ * @param message - Plain text message (no emojis or special characters)
  */
-export async function sendBulkSMS(
-  recipients: Array<{ phone: string; message: string }>,
-  schoolId?: string,
-  onProgress?: (sent: number, total: number) => void
-): Promise<{ sent: number; failed: number; errors: string[] }> {
-  let sent = 0;
-  let failed = 0;
-  const errors: string[] = [];
-
-  for (let i = 0; i < recipients.length; i++) {
-    const { phone, message } = recipients[i];
-    try {
-      await sendSMS(phone, message, schoolId);
-      sent++;
-    } catch (err: any) {
-      failed++;
-      errors.push(`${phone}: ${err.message}`);
+export async function sendSMS(phone: string, message: string): Promise<SMSResponse> {
+  try {
+    // Normalize phone to 254XXXXXXXXX format
+    let normalizedPhone = phone.trim().replace(/\s/g, '');
+    if (normalizedPhone.startsWith('0')) {
+      normalizedPhone = '254' + normalizedPhone.slice(1);
     }
-    if (onProgress) onProgress(i + 1, recipients.length);
-    // Small delay to avoid rate limiting
-    if (i < recipients.length - 1) await new Promise(r => setTimeout(r, 200));
-  }
+    if (normalizedPhone.startsWith('+')) {
+      normalizedPhone = normalizedPhone.slice(1);
+    }
 
-  return { sent, failed, errors };
+    // Strip emojis and special characters that cause encoding issues
+    const cleanMessage = message.replace(/[^\w\s.,;:!?@#$%&*()\-+=/[\]{}|<>~^`\n]/g, '');
+
+    const payload: SMSPayload = {
+      recipient: normalizedPhone,
+      sender_id: DEFAULT_SENDER_ID,
+      type: 'plain',
+      message: cleanMessage,
+    };
+
+    const response = await fetch(OLYMPUS_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OLYMPUS_API_TOKEN}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      return { success: true, message: 'SMS sent successfully', data };
+    } else {
+      return { success: false, error: data.message || `HTTP ${response.status}` };
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to send SMS' };
+  }
 }
 
-// ─── SMS Message Templates ────────────────────────────────────────────────────
+/**
+ * Send bulk SMS to multiple recipients
+ * @param recipients - Array of phone numbers
+ * @param message - Plain text message
+ */
+export async function sendBulkSMS(recipients: string[], message: string): Promise<SMSResponse> {
+  const results: any[] = [];
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const phone of recipients) {
+    const result = await sendSMS(phone, message);
+    if (result.success) {
+      successCount++;
+    } else {
+      failCount++;
+    }
+    results.push({ phone, ...result });
+  }
+
+  return {
+    success: failCount === 0,
+    message: `Sent: ${successCount}, Failed: ${failCount}`,
+    data: results,
+  };
+}
+
+// ─── Welcome SMS Messages ────────────────────────────────────────────────────
+
+export function generateWelcomeSMS(
+  firstName: string,
+  role: string,
+  email: string,
+  password: string,
+  schoolName?: string
+): string {
+  const schoolLine = schoolName ? ` at ${schoolName}` : '';
+  return `Welcome to Kimatu Analytics${schoolLine}!\n\nHello ${firstName}, your ${role} account has been created.\n\nLogin: ${email}\nPassword: ${password}\nPortal: https://kimatu.company\n\nPlease change your password after first login.`;
+}
+
+export function generateResultsSMS(
+  parentName: string,
+  studentName: string,
+  termName: string,
+  average: string,
+  position?: string
+): string {
+  const posLine = position ? `\nPosition: ${position}` : '';
+  return `Kimatu Analytics: Results Notification\n\nDear ${parentName},\n${studentName}'s ${termName} results are now available.\nAverage: ${average}%${posLine}\n\nLogin to view full report: https://kimatu.company`;
+}
+
+export function generateAnnouncementSMS(
+  schoolName: string,
+  message: string
+): string {
+  return `Kimatu Analytics: ${schoolName}\n\n${message}`;
+}
+
+export function generatePasswordResetSMS(otp: string): string {
+  return `Kimatu Analytics: Password Reset\n\nYour OTP code is: ${otp}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore.`;
+}
+
+// ─── Legacy compatible functions ─────────────────────────────────────────────
 
 export const SMS_TEMPLATES = {
-  welcomeSchoolAdmin: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour School Admin account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: SchoolAdmin@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+  welcomeSchoolAdmin: (email: string, password?: string) =>
+    generateWelcomeSMS('Admin', 'School Admin', email, password || 'SchoolAdmin@2025'),
 
-  welcomeTeacher: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour Teacher account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Teacher@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+  welcomeTeacher: (email: string, password?: string) =>
+    generateWelcomeSMS('Teacher', 'Teacher', email, password || 'Teacher@2025'),
 
-  welcomeParent: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Parent,\n\nYour Parent account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: Parent@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+  welcomeParent: (email: string, password?: string) =>
+    generateWelcomeSMS('Parent', 'Parent', email, password || 'Parent@2025'),
 
   welcomeStudent: (email: string, admissionNumber: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Student,\n\nYour Student account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: ${admissionNumber}@2025\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    generateWelcomeSMS('Learner', 'Student', email, `${admissionNumber}@2025`),
 
   welcomeReseller: (email: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nWelcome to Kimatu Analytics!\n\nYour Reseller account has been created successfully.\n\nLogin Details:\nUsername: ${email}\nPassword: 123456789\n\nLogin: https://kimatu.company/login\n\nIMPORTANT: Please change your password after first login for security.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    generateWelcomeSMS('Reseller', 'Reseller', email, '123456789'),
 
   passwordResetOTP: (otp: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nPassword Reset Request\n\nYour OTP verification code is: ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    generatePasswordResetSMS(otp),
 
   passwordResetSuccess: () =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nPassword Reset Successful\n\nYour password has been changed successfully.\n\nIf you did not make this change, please contact support immediately.\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    'Kimatu Analytics: Your password has been reset successfully. If you did not make this change, contact support.',
 
   resultsToParent: (studentName: string, className: string, subjects: Array<{ name: string; marks: number; grade: string }>, totalPoints: number, totalPossible: number, rank: number, totalStudents: number, comment: string) => {
     const subjectLines = subjects.slice(0, 5).map(s => `${s.name}: ${s.marks}% - ${s.grade}`).join('\n');
-    return `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\nDear Parent,\n\nResults for ${studentName} - ${className}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nTotal Points: ${totalPoints}/${totalPossible}\nClass Rank: ${rank}/${totalStudents}\n\nTeacher Comment:\n${comment.substring(0, 100)}${comment.length > 100 ? '...' : ''}\n\nView Full Results:\nhttps://kimatu.company/login\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`;
+    return `Kimatu Analytics\n\nResults for ${studentName} - ${className}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nTotal Points: ${totalPoints}/${totalPossible}\nClass Rank: ${rank}/${totalStudents}\n\nView Full Results:\nhttps://kimatu.company`;
   },
 
   announcement: (schoolName: string, message: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\n${schoolName} Announcement\n\n${message}\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    generateAnnouncementSMS(schoolName, message),
 
   customMessage: (message: string) =>
-    `KIMATU ANALYTICS\n━━━━━━━━━━━━━━━━━━━━\n${message}\n\nSmarter Schools, Brighter Futures\n━━━━━━━━━━━━━━━━━━━━`,
+    `Kimatu Analytics\n\n${message}`,
 };
 
 /**
@@ -129,7 +183,6 @@ export function getDefaultPassword(role: string, admissionNumber?: string): stri
 
 /**
  * Request a password reset OTP via SMS
- * Uses Supabase Edge Function - kept for compatibility
  */
 export async function requestPasswordResetOTP(phone: string): Promise<{ success: boolean; message: string }> {
   const { supabase } = await import('./supabase/client');

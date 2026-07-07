@@ -48,6 +48,10 @@ import SchoolAdminExams from '@/pages/dashboard/school-admin/Exams';
 import SchoolAdminAssessments from '@/pages/dashboard/school-admin/Assessments';
 import SchoolAdminAssignRoles from '@/pages/dashboard/school-admin/AssignRoles';
 import SchoolAdminBulkSMS from '@/pages/dashboard/school-admin/BulkSMS';
+import SchoolAdminViewLearners from '@/pages/dashboard/school-admin/ViewLearners';
+import SchoolAdminPromoteClass from '@/pages/dashboard/school-admin/PromoteClass';
+import SchoolAdminMarksOverview from '@/pages/dashboard/school-admin/MarksOverview';
+import SchoolAdminCommunicate from '@/pages/dashboard/school-admin/Communicate';
 import DeanOfStudiesDashboard from '@/pages/dashboard/dean-of-studies/Dashboard';
 import TeacherDashboard from '@/pages/dashboard/teacher/Dashboard';
 import TeacherResultsUpload from '@/pages/dashboard/teacher/ResultsUpload';
@@ -59,6 +63,9 @@ import TeacherLessonPlan from '@/pages/dashboard/teacher/LessonPlan';
 import TeacherMySubjects from '@/pages/dashboard/teacher/MySubjects';
 import TeacherExamTimetable from '@/pages/dashboard/teacher/ExamTimetable';
 import TeacherCATs from '@/pages/dashboard/teacher/CATs';
+import TeacherUploadPapers from '@/pages/dashboard/teacher/UploadPapers';
+import TeacherViewMarks from '@/pages/dashboard/teacher/ViewMarks';
+import TeacherAssessmentProgress from '@/pages/dashboard/teacher/AssessmentProgress';
 import ClassTeacherDashboard from '@/pages/dashboard/class-teacher/Dashboard';
 import SubjectTeacherDashboard from '@/pages/dashboard/subject-teacher/Dashboard';
 import StreamDashboard from '@/pages/dashboard/stream/Dashboard';
@@ -75,6 +82,7 @@ import ParentChatbot from '@/pages/dashboard/parent/Chatbot';
 import ParentChildReportCard from '@/pages/dashboard/parent/ChildReportCard';
 import StudentReportCard from '@/pages/dashboard/student/ReportCard';
 import StudentChangePassword from '@/pages/dashboard/student/ChangePassword';
+import StudentPortfolio from '@/pages/dashboard/student/Portfolio';
 import SchoolAdminChangePassword from '@/pages/dashboard/school-admin/ChangePassword';
 import TeacherChangePassword from '@/pages/dashboard/teacher/ChangePassword';
 import ParentChangePassword from '@/pages/dashboard/parent/ChangePassword';
@@ -219,6 +227,10 @@ function AppRoutes() {
       <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssessments /></ProtectedRoute>} />
       <Route path="/school-admin/assign-roles" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminAssignRoles /></ProtectedRoute>} />
       <Route path="/school-admin/bulk-sms" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminBulkSMS /></ProtectedRoute>} />
+      <Route path="/school-admin/view-learners" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminViewLearners /></ProtectedRoute>} />
+      <Route path="/school-admin/promote-class" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminPromoteClass /></ProtectedRoute>} />
+      <Route path="/school-admin/marks-overview" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminMarksOverview /></ProtectedRoute>} />
+      <Route path="/school-admin/communicate" element={<ProtectedRoute allowedRoles={['school_admin']}><SchoolAdminCommunicate /></ProtectedRoute>} />
       <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher', 'school_admin']}><DeanOfStudiesDashboard /></ProtectedRoute>} />
 
       {/* Teacher routes */}
@@ -235,6 +247,9 @@ function AppRoutes() {
       <Route path="/teacher/timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TimetableView /></ProtectedRoute>} />
       <Route path="/teacher/exam-timetable" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherExamTimetable /></ProtectedRoute>} />
       <Route path="/teacher/cats" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCATs /></ProtectedRoute>} />
+      <Route path="/teacher/upload-papers" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherUploadPapers /></ProtectedRoute>} />
+      <Route path="/teacher/view-marks" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherViewMarks /></ProtectedRoute>} />
+      <Route path="/teacher/assessment-progress" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherAssessmentProgress /></ProtectedRoute>} />
       <Route path="/teacher/change-password" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherChangePassword /></ProtectedRoute>} />
       <Route path="/teacher/profile" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherProfile /></ProtectedRoute>} />
       <Route path="/teacher/curriculum" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherCurriculumNavigator /></ProtectedRoute>} />
@@ -247,6 +262,7 @@ function AppRoutes() {
       <Route path="/student/timetable" element={<ProtectedRoute allowedRoles={['student']}><TimetableView /></ProtectedRoute>} />
       <Route path="/student/homework" element={<ProtectedRoute allowedRoles={['student']}><StudentHomework /></ProtectedRoute>} />
       <Route path="/student/report-card" element={<ProtectedRoute allowedRoles={['student']}><StudentReportCard /></ProtectedRoute>} />
+      <Route path="/student/portfolio" element={<ProtectedRoute allowedRoles={['student']}><StudentPortfolio /></ProtectedRoute>} />
       <Route path="/student/change-password" element={<ProtectedRoute allowedRoles={['student']}><StudentChangePassword /></ProtectedRoute>} />
 
       {/* Parent routes */}

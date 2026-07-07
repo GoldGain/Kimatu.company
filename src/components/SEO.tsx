@@ -6,7 +6,7 @@
  * Usage:
  *   <SEO
  *     title="Teacher Dashboard | Kimatu Analytics"
- *     description="Manage your classes, upload results, and track student performance."
+ *     description="Manage your classes, upload results, and track learner performance."
  *     path="/teacher"
  *   />
  */
@@ -26,8 +26,8 @@ interface SEOProps {
 const SITE_NAME = 'Kimatu Analytics';
 const BASE_URL = 'https://kimatu.company';
 const DEFAULT_DESCRIPTION =
-  "Kimatu Analytics is Kenya's leading school management system. Manage learners, learning areas, assessments, fees, and report cards. Supports CBE and 8-4-4 curricula for Pre-Primary, Primary, Junior, and Senior schools.";
-const DEFAULT_IMAGE = `${BASE_URL}/kimatu-logo-full.png`;
+  "Kimatu Analytics is Kenya's leading intelligent school management platform. Manage learners, learning areas, assessments, fees, and report cards.";
+const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
 
 export default function SEO({
   title,
@@ -38,76 +38,90 @@ export default function SEO({
   noindex = false,
   structuredData,
 }: SEOProps) {
-  const fullTitle = title
-    ? title.includes(SITE_NAME)
-      ? title
-      : `${title} | ${SITE_NAME}`
-    : `${SITE_NAME} — Smarter Schools, Brighter Futures`;
+  const fullTitle = title ? `${title} | ${SITE_NAME}` : `${SITE_NAME} — Kenya's Intelligent School Management Platform`;
   const canonicalUrl = `${BASE_URL}${path}`;
 
   useEffect(() => {
-    // ── Title ──────────────────────────────────────────────────────────────────
+    // Title
     document.title = fullTitle;
 
-    // ── Helper: set or create a <meta> tag ────────────────────────────────────
+    // Helper: set or create a <meta> tag
     const setMeta = (selector: string, content: string) => {
       let el = document.querySelector<HTMLMetaElement>(selector);
       if (!el) {
         el = document.createElement('meta');
-        // Parse attribute from selector, e.g. [name="description"] → name="description"
-        const match = selector.match(/\[(\w+)="([^"]+)"\]/);
-        if (match) el.setAttribute(match[1], match[2]);
+        if (selector.includes('property=')) {
+          const propMatch = selector.match(/property="([^"]+)"/);
+          el.setAttribute('property', propMatch ? propMatch[1] : '');
+        } else if (selector.includes('name=')) {
+          const nameMatch = selector.match(/name="([^"]+)"/);
+          el.setAttribute('name', nameMatch ? nameMatch[1] : '');
+        }
         document.head.appendChild(el);
       }
       el.setAttribute('content', content);
     };
 
-    // ── Helper: set or create a <link> tag ────────────────────────────────────
-    const setLink = (rel: string, href: string) => {
-      let el = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
-      if (!el) {
-        el = document.createElement('link');
-        el.setAttribute('rel', rel);
-        document.head.appendChild(el);
-      }
-      el.setAttribute('href', href);
+    // Standard meta
+    setMeta('meta[name="description"]', description);
+    setMeta('meta[name="robots"]', noindex ? 'noindex,nofollow' : 'index,follow');
+    setMeta('meta[name="keywords"]', 'Kimatu, Kimatu Analytics, Kimatu Schools, Kimatu Results, school management system Kenya, intelligent school management, CBE Kenya, competency based education, learner results portal, Kenya school portal, Kimatu School Management, 8-4-4 curriculum, school system Kenya');
+
+    // Canonical
+    let canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute('href', canonicalUrl);
+
+    // Open Graph
+    setMeta('meta[property="og:title"]', fullTitle);
+    setMeta('meta[property="og:description"]', description);
+    setMeta('meta[property="og:url"]', canonicalUrl);
+    setMeta('meta[property="og:type"]', type);
+    setMeta('meta[property="og:image"]', image);
+    setMeta('meta[property="og:site_name"]', SITE_NAME);
+    setMeta('meta[property="og:locale"]', 'en_KE');
+
+    // Twitter Card
+    setMeta('meta[name="twitter:card"]', 'summary_large_image');
+    setMeta('meta[name="twitter:title"]', fullTitle);
+    setMeta('meta[name="twitter:description"]', description);
+    setMeta('meta[name="twitter:image"]', image);
+
+    // JSON-LD Structured Data
+    const defaultSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'WebApplication',
+      name: SITE_NAME,
+      url: BASE_URL,
+      description: DEFAULT_DESCRIPTION,
+      applicationCategory: 'EducationApplication',
+      operatingSystem: 'Web',
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'KES',
+      },
+      author: {
+        '@type': 'Organization',
+        name: 'Kimatu Analytics',
+        url: BASE_URL,
+      },
+      keywords: 'Kimatu, Kimatu Analytics, school management Kenya, intelligent education, learner results, report card, CBE, 8-4-4',
     };
 
-    // ── Basic meta ─────────────────────────────────────────────────────────────
-    setMeta('[name="description"]', description);
-    setMeta('[name="robots"]', noindex ? 'noindex,nofollow' : 'index,follow');
-    setMeta('[name="author"]', SITE_NAME);
-    setMeta('[name="keywords"]', 'Kimatu, Analytics, School Management, CBE, 8-4-4, Kenya, Education, School System, Learner Management, Report Cards, Fee Management');
-    setLink('canonical', canonicalUrl);
-
-    // ── Open Graph ─────────────────────────────────────────────────────────────
-    setMeta('[property="og:title"]', fullTitle);
-    setMeta('[property="og:description"]', description);
-    setMeta('[property="og:url"]', canonicalUrl);
-    setMeta('[property="og:type"]', type);
-    setMeta('[property="og:image"]', image);
-    setMeta('[property="og:site_name"]', SITE_NAME);
-    setMeta('[property="og:locale"]', 'en_KE');
-
-    // ── Twitter Card ───────────────────────────────────────────────────────────
-    setMeta('[name="twitter:card"]', 'summary_large_image');
-    setMeta('[name="twitter:title"]', fullTitle);
-    setMeta('[name="twitter:description"]', description);
-    setMeta('[name="twitter:image"]', image);
-    setMeta('[name="twitter:url"]', canonicalUrl);
-
-    // ── JSON-LD Structured Data ────────────────────────────────────────────────
-    if (structuredData) {
-      const id = 'seo-structured-data';
-      let script = document.getElementById(id) as HTMLScriptElement | null;
-      if (!script) {
-        script = document.createElement('script');
-        script.id = id;
-        script.type = 'application/ld+json';
-        document.head.appendChild(script);
-      }
-      script.textContent = JSON.stringify(structuredData);
+    const schemaData = structuredData || defaultSchema;
+    let ldScript = document.querySelector<HTMLScriptElement>('script[data-seo="kimatu-analytics"]');
+    if (!ldScript) {
+      ldScript = document.createElement('script');
+      ldScript.setAttribute('type', 'application/ld+json');
+      ldScript.setAttribute('data-seo', 'kimatu-analytics');
+      document.head.appendChild(ldScript);
     }
+    ldScript.textContent = JSON.stringify(schemaData);
   }, [fullTitle, description, canonicalUrl, image, type, noindex, structuredData]);
 
   return null;

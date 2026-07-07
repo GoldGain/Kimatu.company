@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { Link } from 'react-router';
-import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight, Eye, TrendingUp, ArrowUpRight, MessageSquare } from 'lucide-react';
 import PromoteToNextTermModal from '@/components/PromoteToNextTermModal';
 
 interface SchoolStats {
@@ -81,7 +81,7 @@ export default function SchoolAdminDashboard() {
   };
 
   const statCards = [
-    { label: 'Students', value: stats.totalStudents, icon: <Users className="w-5 h-5" />, color: 'bg-blue-500', link: '/school-admin/students' },
+    { label: 'Learners', value: stats.totalStudents, icon: <Users className="w-5 h-5" />, color: 'bg-blue-500', link: '/school-admin/view-learners' },
     { label: 'Teachers', value: stats.totalTeachers, icon: <Users className="w-5 h-5" />, color: 'bg-green-500', link: '/school-admin/teachers' },
     { label: 'Classes', value: stats.totalClasses, icon: <BookOpen className="w-5 h-5" />, color: 'bg-purple-500', link: '/school-admin/classes' },
     { label: 'Fee Collection', value: `Ksh ${(stats.feeCollection / 1000).toFixed(0)}K`, icon: <CreditCard className="w-5 h-5" />, color: 'bg-orange-500', link: '/school-admin/fees' },
@@ -138,10 +138,13 @@ export default function SchoolAdminDashboard() {
           <h3 className="font-semibold text-[#111111] mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'Add Student', icon: <Users className="w-4 h-4" />, link: '/school-admin/students', color: 'bg-blue-50 text-blue-600' },
+              { label: 'View Learners', icon: <Eye className="w-4 h-4" />, link: '/school-admin/view-learners', color: 'bg-blue-50 text-blue-600' },
               { label: 'Add Teacher', icon: <Users className="w-4 h-4" />, link: '/school-admin/teachers', color: 'bg-green-50 text-green-600' },
               { label: 'Record Payment', icon: <CreditCard className="w-4 h-4" />, link: '/school-admin/fees', color: 'bg-orange-50 text-orange-600' },
               { label: 'Post Announcement', icon: <Bell className="w-4 h-4" />, link: '/school-admin/announcements', color: 'bg-purple-50 text-purple-600' },
+              { label: 'Marks Overview', icon: <TrendingUp className="w-4 h-4" />, link: '/school-admin/marks-overview', color: 'bg-cyan-50 text-cyan-600' },
+              { label: 'Promote Class', icon: <ArrowUpRight className="w-4 h-4" />, link: '/school-admin/promote-class', color: 'bg-pink-50 text-pink-600' },
+              { label: 'Communicate', icon: <MessageSquare className="w-4 h-4" />, link: '/school-admin/communicate', color: 'bg-indigo-50 text-indigo-600' },
             ].map((action, i) => (
               <Link key={i} to={action.link} className={`flex items-center gap-2 p-3 rounded-xl ${action.color} hover:opacity-80 transition-opacity text-sm font-medium`}>
                 {action.icon} {action.label}
