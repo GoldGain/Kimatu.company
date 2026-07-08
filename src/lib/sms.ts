@@ -73,11 +73,24 @@ export async function sendSMS(phone: string, message: string): Promise<SMSRespon
  * @param message - Plain text message
  */
 export async function sendBulkSMS(recipients: string[], message: string): Promise<SMSResponse> {
+  // Validate inputs
+  if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+    return { success: false, error: 'No recipients provided' };
+  }
+  if (!message || message.trim().length === 0) {
+    return { success: false, error: 'Message is empty' };
+  }
+
   const results: any[] = [];
   let successCount = 0;
   let failCount = 0;
 
   for (const phone of recipients) {
+    if (!phone || typeof phone !== 'string') {
+      failCount++;
+      results.push({ phone: phone || 'invalid', success: false, error: 'Invalid phone number' });
+      continue;
+    }
     const result = await sendSMS(phone, message);
     if (result.success) {
       successCount++;

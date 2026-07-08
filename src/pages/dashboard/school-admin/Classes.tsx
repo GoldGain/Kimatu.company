@@ -51,6 +51,7 @@ export default function SchoolAdminClasses() {
   const [selectedPreset, setSelectedPreset] = useState('');
   const [stream, setStream] = useState('');
   const [capacity, setCapacity] = useState(40);
+  const [academicYear, setAcademicYear] = useState(new Date().getFullYear().toString());
 
   // Edit state
   const [editingClass, setEditingClass] = useState<any | null>(null);
@@ -75,6 +76,7 @@ export default function SchoolAdminClasses() {
         curriculum: preset.curriculum,
         stream: stream.trim() || null,
         capacity: capacity || 40,
+        academic_year: academicYear || new Date().getFullYear().toString(),
         school_id: user?.schoolId,
         is_active: true,
       }]);
@@ -85,6 +87,7 @@ export default function SchoolAdminClasses() {
       setSelectedPreset('');
       setStream('');
       setCapacity(40);
+      setAcademicYear(new Date().getFullYear().toString());
       refetch();
     } catch (err: any) {
       toast.error('Failed to add class: ' + err.message);
@@ -264,6 +267,21 @@ export default function SchoolAdminClasses() {
               <label className="block text-xs text-gray-500 mb-1">Stream <span className="text-gray-400">(optional)</span></label>
               <input placeholder="e.g. A, B, East, North" value={stream} onChange={e => setStream(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
               <p className="text-xs text-gray-400 mt-1">Leave blank if no streams</p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Academic Year *</label>
+              <select
+                value={academicYear}
+                onChange={e => setAcademicYear(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+                required
+              >
+                {[...Array(5)].map((_, i) => {
+                  const year = (new Date().getFullYear() + i).toString();
+                  return <option key={year} value={year}>{year}</option>;
+                })}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">e.g., 2026 for Grade 7 2026</p>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Capacity</label>

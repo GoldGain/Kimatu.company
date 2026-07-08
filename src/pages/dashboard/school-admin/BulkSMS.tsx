@@ -203,18 +203,36 @@ export default function BulkSMS() {
     setProgress({ sent: 0, total: preview.length });
 
     try {
-      const recipients = preview.map(p => ({ phone: p.phone, message: p.message }));
-      const result = await sendBulkSMS(
-        recipients,
-        user?.schoolId,
-        (sent, total) => setProgress({ sent, total })
-      );
-      setSummary(result);
-      if (result.sent > 0) {
-        toast.success(`${result.sent} SMS messages sent successfully!`);
+      // Extract phone numbers from preview
+      const recipients = preview.map(p => p.phone).filter((phone): phone is string => !!phone && phone.length > 0);
+      if (recipients.length === 0) {
+        toast.error('No valid recipients found');
+        setSending(false);
+        return;
       }
-      if (result.failed > 0) {
-        toast.warning(`${result.failed} messages failed to send.`);
+
+      // Use the first message as template (custom messages are personalized)
+      const message = preview[0]?.message || '';
+      const result = await sendBulkSMS(recipients, message);
+
+      // Parse result
+      const sentMatch = result.message?.match(/Sent:\s*(\d+)/);
+      const failedMatch = result.message?.match(/Failed:\s*(\d+)/);
+      const sentCount = sentMatch ? parseInt(sentMatch[1]) : 0;
+      const failedCount = failedMatch ? parseInt(failedMatch[1]) : 0;
+
+      setSummary({
+        sent: sentCount,
+        failed: failedCount,
+        errors: result.success ? [] : [result.error || 'Unknown error'],
+      });
+      setProgress({ sent: sentCount, total: preview.length });
+
+      if (sentCount > 0) {
+        toast.success(`${sentCount} SMS messages sent successfully!`);
+      }
+      if (failedCount > 0) {
+        toast.warning(`${failedCount} messages failed to send.`);
       }
     } catch (err: any) {
       toast.error('Bulk SMS failed: ' + err.message);

@@ -12,10 +12,12 @@ interface TeacherAssignment {
   teacher_number: number;
   class_id: string;
   class_name: string;
+  class_level: number | null;
   subject_id: string;
   subject_name: string;
   lessons_per_week: number;
   is_priority: boolean;
+  academic_year: string | null;
 }
 
 interface Teacher {
@@ -53,6 +55,7 @@ export default function AssignTeachers() {
     subject_id: '',
     lessons_per_week: 5,
     is_priority: false,
+    academic_year: new Date().getFullYear().toString(),
   });
   const [workloadDistribution, setWorkloadDistribution] = useState<LessonDistribution[]>([]);
   const [unavailableDays, setUnavailableDays] = useState<Day[]>([]);
@@ -103,9 +106,9 @@ export default function AssignTeachers() {
     const { data, error: ae } = await supabase
       .from('teacher_subject_assignments')
       .select(`
-        id, teacher_id, class_id, subject_id, lessons_per_week, is_priority,
+        id, teacher_id, class_id, subject_id, lessons_per_week, is_priority, academic_year,
         teachers(first_name, last_name, teacher_number),
-        classes(name),
+        classes(name, level),
         subjects(name)
       `)
       .eq('school_id', user?.schoolId)
@@ -120,10 +123,12 @@ export default function AssignTeachers() {
       teacher_number: a.teachers?.teacher_number || 0,
       class_id: a.class_id,
       class_name: a.classes?.name || '',
+      class_level: a.classes?.level || null,
       subject_id: a.subject_id,
       subject_name: a.subjects?.name || '',
       lessons_per_week: a.lessons_per_week || 5,
       is_priority: a.is_priority || false,
+      academic_year: a.academic_year || null,
     }));
     setAssignments(mapped.sort((a, b) => a.teacher_number - b.teacher_number));
   };
@@ -149,13 +154,13 @@ export default function AssignTeachers() {
           is_priority: formData.is_priority,
           assigned_by_admin: true,
           is_active: true,
-          academic_year: '2026',
+          academic_year: formData.academic_year,
         }, { onConflict: 'teacher_id,class_id,subject_id' });
 
       if (insertError) throw insertError;
 
       setSuccess('Assignment saved successfully!');
-      setFormData({ teacher_id: '', class_id: '', subject_id: '', lessons_per_week: 5, is_priority: false });
+      setFormData({ teacher_id: '', class_id: '', subject_id: '', lessons_per_week: 5, is_priority: false, academic_year: new Date().getFullYear().toString() });
       await fetchAssignments();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -244,8 +249,25 @@ export default function AssignTeachers() {
                 >
                   <option value="">Select class...</option>
                   {classes.map((c) => (
-                    <option key={c.id} value={c.id}>Grade {c.name}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.level !== null ? `(Grade ${c.level})` : ''}
+                    </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Academic Year</label>
+                <select
+                  value={formData.academic_year}
+                  onChange={(e) => setFormData({ ...formData, academic_year: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {[...Array(5)].map((_, i) => {
+                    const year = (new Date().getFullYear() + i).toString();
+                    return <option key={year} value={year}>{year}</option>;
+                  })}
                 </select>
               </div>
 
@@ -364,7 +386,9 @@ export default function AssignTeachers() {
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">#</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Teacher</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Class</th>
+                    <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Level</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Learning Area</th>
+                    <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Year</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Lessons</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Priority</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Del</th>
@@ -373,7 +397,7 @@ export default function AssignTeachers() {
                 <tbody>
                   {assignments.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-10 text-center text-gray-400 text-sm">
+                      <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
                         No assignments yet. Add one using the form.
                       </td>
                     </tr>
@@ -386,8 +410,12 @@ export default function AssignTeachers() {
                           </span>
                         </td>
                         <td className="px-4 py-3 font-semibold text-gray-900">{a.teacher_name}</td>
-                        <td className="px-4 py-3 text-gray-700">Grade {a.class_name}</td>
+                        <td className="px-4 py-3 text-gray-700">{a.class_name}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">
+                          {a.class_level !== null ? `Grade ${a.class_level}` : '—'}
+                        </td>
                         <td className="px-4 py-3 text-gray-700">{a.subject_name}</td>
+                        <td className="px-4 py-3 text-center text-gray-500 text-xs">{a.academic_year || '—'}</td>
                         <td className="px-4 py-3 text-center text-gray-700">{a.lessons_per_week}</td>
                         <td className="px-4 py-3 text-center">
                           {a.is_priority ? (

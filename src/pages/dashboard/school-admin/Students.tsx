@@ -9,7 +9,8 @@ import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
-import { sendSMS } from '@/lib/sms';
+import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
+import { deleteStudentAccount } from '@/lib/deleteAccount';
 
 // Kenya counties list
 const KENYA_COUNTIES = [
@@ -261,6 +262,40 @@ export default function SchoolAdminStudents() {
     if (!editingStudent) return;
     setSaving(true);
     try {
+      // Check if parent email was added or changed
+      const oldParentEmail = editingStudent.parent_email || '';
+      const newParentEmail = editForm.parent_email.trim();
+      let parentId = editingStudent.parent_id || null;
+
+      // If parent email is provided and different from before, create/update parent account
+      if (newParentEmail && newParentEmail !== oldParentEmail) {
+        try {
+          parentId = await ensureParentAccount(newParentEmail, editForm.parent_name);
+          // Link parent to student
+          if (parentId && editingStudent.id) {
+            const { error: linkError } = await supabaseUntyped
+              .from('parent_student_links')
+              .upsert({ parent_id: parentId, student_id: editingStudent.id }, { onConflict: 'parent_id,student_id' });
+            if (linkError) console.warn('parent_student_links upsert warning:', linkError.message);
+
+            // Send welcome SMS to parent
+            if (editForm.parent_phone) {
+              try {
+                const studentFullName = `${editForm.first_name} ${editForm.last_name}`;
+                const smsMsg = `Welcome to Kimatu Analytics! You have been linked as a parent for ${studentFullName}. Login: ${newParentEmail} | Password: Parent@2025. Portal: https://kimatu.company. Please change your password after first login.`;
+                await sendSMS(editForm.parent_phone, smsMsg);
+              } catch (smsErr) {
+                console.warn('Parent welcome SMS failed:', smsErr);
+              }
+            }
+            toast.success('Parent account created and linked successfully!');
+          }
+        } catch (parentError: any) {
+          console.warn('Parent account creation warning:', parentError.message);
+          toast.warning(`Student updated but parent account issue: ${parentError.message}`);
+        }
+      }
+
       const { error } = await supabaseUntyped.from('students').update({
         first_name: editForm.first_name.trim(),
         middle_name: editForm.middle_name.trim() || null,
@@ -269,7 +304,8 @@ export default function SchoolAdminStudents() {
         stream: editForm.stream || null,
         parent_name: editForm.parent_name.trim() || null,
         parent_phone: editForm.parent_phone.trim() || null,
-        parent_email: editForm.parent_email.trim() || null,
+        parent_email: newParentEmail || null,
+        parent_id: parentId,
         gender: editForm.gender || null,
         date_of_birth: editForm.date_of_birth || null,
         boarding_status: editForm.boarding_status || null,
@@ -305,9 +341,8 @@ export default function SchoolAdminStudents() {
     if (!deletingStudent) return;
     setDeleting(true);
     try {
-      const { error } = await supabaseUntyped.from('students').delete().eq('id', deletingStudent.id);
-      if (error) throw new Error(error.message);
-      toast.success(`Student "${deletingStudent.first_name} ${deletingStudent.last_name}" deleted.`);
+      await deleteStudentAccount(deletingStudent.id, deletingStudent.profile_id);
+      toast.success(`Student "${deletingStudent.first_name} ${deletingStudent.last_name}" deleted from database and authentication.`);
       setDeletingStudent(null);
       refetch();
     } catch (err: any) {

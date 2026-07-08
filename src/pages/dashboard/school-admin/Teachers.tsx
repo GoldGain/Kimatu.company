@@ -7,6 +7,8 @@ import { useTeachers } from '@/hooks/useSupabaseData';
 import { Search, Plus, Loader2, KeyRound, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
+import { deleteTeacherAccount } from '@/lib/deleteAccount';
+import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
 
 const DEFAULT_TEACHER_PASSWORD = 'Teacher@2025';
 
@@ -98,6 +100,21 @@ export default function SchoolAdminTeachers() {
         teacher_number: actualNextTeacherNumber,
       }]);
       if (teacherError) throw new Error(`Teacher record failed: ${teacherError.message}`);
+      // Send welcome SMS if phone is provided
+      if (formData.phone?.trim()) {
+        try {
+          const welcomeMsg = generateWelcomeSMS(
+            formData.first_name.trim(),
+            'Teacher',
+            formData.email.trim().toLowerCase(),
+            DEFAULT_TEACHER_PASSWORD,
+          );
+          await sendSMS(formData.phone.trim(), welcomeMsg);
+        } catch (smsErr) {
+          console.warn('Welcome SMS failed:', smsErr);
+        }
+      }
+
       toast.success(`Teacher ${teacherNumberLabel} added. Login: ${formData.email.trim().toLowerCase()} | Password: ${DEFAULT_TEACHER_PASSWORD}`);
       setShowAdd(false);
       setFormData({ first_name: '', last_name: '', email: '', phone: '', gender: '' as GenderType, qualification: '', specialization: '', tsc_number: '' });
@@ -153,9 +170,8 @@ export default function SchoolAdminTeachers() {
     if (!deletingTeacher) return;
     setDeleting(true);
     try {
-      const { error } = await supabaseUntyped.from('teachers').delete().eq('id', deletingTeacher.id);
-      if (error) throw new Error(error.message);
-      toast.success(`Teacher "${deletingTeacher.first_name} ${deletingTeacher.last_name}" deleted.`);
+      await deleteTeacherAccount(deletingTeacher.id, deletingTeacher.profile_id);
+      toast.success(`Teacher "${deletingTeacher.first_name} ${deletingTeacher.last_name}" deleted from database and authentication.`);
       setDeletingTeacher(null);
       refetch();
     } catch (err: any) {
