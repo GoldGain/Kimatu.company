@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
-import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
+import { sendSMS } from '@/lib/sms';
 import { deleteStudentAccount } from '@/lib/deleteAccount';
 
 // Kenya counties list
@@ -75,6 +75,7 @@ export default function SchoolAdminStudents() {
     first_name: '', middle_name: '', last_name: '',
     class_id: '', stream: '',
     parent_name: '', parent_phone: '', parent_email: '',
+    student_email: '',
     gender: '' as GenderType, date_of_birth: '',
     boarding_status: 'Day', relationship_to_learner: '',
     home_county: '', home_sub_county: '', nationality: 'Kenyan',
@@ -235,6 +236,7 @@ export default function SchoolAdminStudents() {
       parent_name: s.parent_name || '',
       parent_phone: s.parent_phone || '',
       parent_email: s.parent_email || '',
+      student_email: s.email || s.student_email || '',
       gender: (s.gender || '') as GenderType,
       date_of_birth: s.date_of_birth || '',
       boarding_status: s.boarding_status || 'Day',
@@ -306,6 +308,7 @@ export default function SchoolAdminStudents() {
         parent_phone: editForm.parent_phone.trim() || null,
         parent_email: newParentEmail || null,
         parent_id: parentId,
+        email: editForm.student_email.trim() || null,
         gender: editForm.gender || null,
         date_of_birth: editForm.date_of_birth || null,
         boarding_status: editForm.boarding_status || null,
@@ -691,6 +694,7 @@ export default function SchoolAdminStudents() {
                 <div><label className={labelCls}>Parent Name</label><input value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className={inputCls} /></div>
                 <div><label className={labelCls}>Parent Phone</label><input value={editForm.parent_phone} onChange={e => setEditForm({...editForm, parent_phone: e.target.value})} className={inputCls} /></div>
                 <div><label className={labelCls}>Parent Email</label><input type="email" value={editForm.parent_email} onChange={e => setEditForm({...editForm, parent_email: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Student Email</label><input type="email" placeholder="student@email.com" value={editForm.student_email} onChange={e => setEditForm({...editForm, student_email: e.target.value})} className={inputCls} /></div>
                 <div>
                   <label className={labelCls}>Relationship to Learner</label>
                   <select value={editForm.relationship_to_learner} onChange={e => setEditForm({...editForm, relationship_to_learner: e.target.value})} className={selectCls}>
