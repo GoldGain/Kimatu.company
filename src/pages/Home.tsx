@@ -1,1 +1,64 @@
-aW1wb3J0IEhlcm9DYXJvdXNlbCBmcm9tICdAL3NlY3Rpb25zL0hlcm9DYXJvdXNlbCc7CmltcG9ydCBGZWF0dXJlcyBmcm9tICdAL3NlY3Rpb25zL0ZlYXR1cmVzJzsKaW1wb3J0IFByaWNpbmcgZnJvbSAnQC9zZWN0aW9ucy9QcmljaW5nJzsKaW1wb3J0IEhvd0l0V29ya3MgZnJvbSAnQC9zZWN0aW9ucy9Ib3dJdFdvcmtzJzsKaW1wb3J0IFRlc3RpbW9uaWFscyBmcm9tICdAL3NlY3Rpb25zL1Rlc3RpbW9uaWFscyc7CmltcG9ydCBGQVEgZnJvbSAnQC9zZWN0aW9ucy9GQVEnOwppbXBvcnQgQ1RBIGZyb20gJ0Avc2VjdGlvbnMvQ1RBJzsKaW1wb3J0IFdoYXRzQXBwQnV0dG9uIGZyb20gJ0AvY29tcG9uZW50cy9XaGF0c0FwcEJ1dHRvbic7CmltcG9ydCB7IHVzZVBXQSB9IGZyb20gJ0AvaG9va3MvdXNlUFdBJzsKaW1wb3J0IHsgU21hcnRwaG9uZSB9IGZyb20gJ2x1Y2lkZS1yZWFjdCc7CmltcG9ydCBTRU8gZnJvbSAnQC9jb21wb25lbnRzL1NFTyc7CgpleHBvcnQgZGVmYXVsdCBmdW5jdGlvbiBIb21lKCkgewogIGNvbnN0IHsgaXNJbnN0YWxsYWJsZSwgaXNJbnN0YWxsZWQsIGluc3RhbGwgfSA9IHVzZVBXQSgpOwoKICBjb25zdCBoYW5kbGVJbnN0YWxsQ2xpY2sgPSBhc3luYyAoKSA9PiB7CiAgICBpZiAoaXNJbnN0YWxsZWQpIHsKICAgICAgYWxlcnQoJ0tpbWF0dSBBbmFseXRpY3MgaXMgYWxyZWFkeSBpbnN0YWxsZWQgb24geW91ciBkZXZpY2UhJyk7CiAgICAgIHJldHVybjsKICAgIH0KICAgIGF3YWl0IGluc3RhbGwoKTsKICB9OwoKICByZXR1cm4gKAogICAgPD4KICAgICAgPFNFTwogICAgICAgIHRpdGxlPSJLaW1hdHUgQW5hbHl0aWNzIC0gU21hcnRlciBTY2hvb2xzLCBCcmlnaHRlciBGdXR1cmVzIgogICAgICAgIGRlc2NyaXB0aW9uPSJLaW1hdHUgQW5hbHl0aWNzIGlzIEtlbnlhJ3MgbGVhZGluZyBzY2hvb2wgbWFuYWdlbWVudCBzeXN0ZW0uIE1hbmFnZSBsZWFybmVycywgbGVhcm5pbmcgYXJlYXMsIGFzc2Vzc21lbnRzLCBmZWVzLCBhbmQgcmVwb3J0IGNhcmRzLiBTdXBwb3J0cyBDQkUgYW5kIDgtNC00IGN1cnJpY3VsYSBmb3IgUHJlLVByaW1hcnksIFByaW1hcnksIEp1bmlvciwgYW5kIFNlbmlvciBzY2hvb2xzLiIKICAgICAgICBwYXRoPSIvIgogICAgICAgIHN0cnVjdHVyZWREYXRhPXt7CiAgICAgICAgICAnQGNvbnRleHQnOiAnaHR0cHM6Ly9zY2hlbWEub3JnJywKICAgICAgICAgICdAdHlwZSc6ICdXZWJBcHBsaWNhdGlvbicsCiAgICAgICAgICBuYW1lOiAnS2ltYXR1IEFuYWx5dGljcycsCiAgICAgICAgICBhbHRlcm5hdGVOYW1lOiAnS2ltYXR1JywKICAgICAgICAgIHVybDogJ2h0dHBzOi8va2ltYXR1LmNvbXBhbnknLAogICAgICAgICAgc2xvZ2FuOiAnU21hcnRlciBTY2hvb2xzLCBCcmlnaHRlciBGdXR1cmVzJywKICAgICAgICAgIGRlc2NyaXB0aW9uOiAnS2VueWFcJ3MgbGVhZGluZyBzY2hvb2wgbWFuYWdlbWVudCBzeXN0ZW0gZm9yIHN0dWRlbnQgcmVzdWx0cywgcmVwb3J0IGNhcmRzLCBmZWUgbWFuYWdlbWVudCwgYW5kIHBlcmZvcm1hbmNlIHRyYWNraW5nLiBTdXBwb3J0cyBDQkUgYW5kIDgtNC00IGN1cnJpY3VsYS4nLAogICAgICAgICAgYXBwbGljYXRpb25DYXRlZ29yeTogJ0VkdWNhdGlvbkFwcGxpY2F0aW9uJywKICAgICAgICAgIG9wZXJhdGluZ1N5c3RlbTogJ1dlYicsCiAgICAgICAgICBpbkxhbmd1YWdlOiAnZW4tS0UnLAogICAgICAgICAgb2ZmZXJzOiB7ICdAdHlwZSc6ICdPZmZlcicsIHByaWNlOiAnMCcsIHByaWNlQ3VycmVuY3k6ICdLRVMnLCBkZXNjcmlwdGlvbjogJ0ZyZWUgdHJpYWwgYXZhaWxhYmxlIGZvciAzIG1vbnRocycgfSwKICAgICAgICAgIGF1dGhvcjogeyAnQHR5cGUnOiAnT3JnYW5pemF0aW9uJywgbmFtZTogJ0tpbWF0dSBBbmFseXRpY3MnLCB1cmw6ICdodHRwczovL2tpbWF0dS5jb21wYW55JyB9LAogICAgICAgICAga2V5d29yZHM6ICdLaW1hdHUsIEFuYWx5dGljcywgU2Nob29sIE1hbmFnZW1lbnQsIENCRSwgOC00LTQsIEtlbnlhLCBFZHVjYXRpb24sIFNjaG9vbCBTeXN0ZW0sIExlYXJuZXIgTWFuYWdlbWVudCcsCiAgICAgICAgfX0KICAgICAgLz4KICAgICAge2lzSW5zdGFsbGFibGUgJiYgKAogICAgICAgIDxidXR0b24KICAgICAgICAgIG9uQ2xpY2s9e2hhbmRsZUluc3RhbGxDbGlja30KICAgICAgICAgIGNsYXNzTmFtZT0iZml4ZWQgYm90dG9tLTQgcmlnaHQtNCBiZy1ncmVlbi02MDAgdGV4dC13aGl0ZSBweC02IHB5LTMgcm91bmRlZC1mdWxsIHNoYWRvdy1sZyB6LTUwIGZsZXggaXRlbXMtY2VudGVyIGdhcC0yIGZvbnQtbWVkaXVtIGhvdmVyOmJnLWdyZWVuLTcwMCB0cmFuc2l0aW9uLWNvbG9ycyBhbmltYXRlLWluIHNsaWRlLWluLWZyb20tYm90dG9tLTQiCiAgICAgICAgPgogICAgICAgICAgPFNtYXJ0cGhvbmUgY2xhc3NOYW1lPSJ3LTQgaC00IiAvPiBEb3dubG9hZCBBcHAKICAgICAgICA8L2J1dHRvbj4KICAgICAgKX0KICAgICAgPEhlcm9DYXJvdXNlbCAvPgogICAgICA8RmVhdHVyZXMgLz4KICAgICAgPFByaWNpbmcgLz4KICAgICAgPEhvd0l0V29ya3MgLz4KICAgICAgPFRlc3RpbW9uaWFscyAvPgogICAgICA8RkFRIC8+CiAgICAgIDxDVEEgLz4KICAgICAgPFdoYXRzQXBwQnV0dG9uIC8+CiAgICA8Lz4KICApOwp9Cg==
+import HeroCarousel from '@/sections/HeroCarousel';
+import Features from '@/sections/Features';
+import Pricing from '@/sections/Pricing';
+import HowItWorks from '@/sections/HowItWorks';
+import Testimonials from '@/sections/Testimonials';
+import FAQ from '@/sections/FAQ';
+import CTA from '@/sections/CTA';
+import WhatsAppButton from '@/components/WhatsAppButton';
+import { usePWA } from '@/hooks/usePWA';
+import { Smartphone } from 'lucide-react';
+import SEO from '@/components/SEO';
+
+export default function Home() {
+  const { isInstallable, isInstalled, install } = usePWA();
+
+  const handleInstallClick = async () => {
+    if (isInstalled) {
+      alert('Kimatu Analytics is already installed on your device!');
+      return;
+    }
+    await install();
+  };
+
+  return (
+    <>
+      <SEO
+        title="Kimatu Analytics - Smarter Schools, Brighter Futures"
+        description="Kimatu Analytics is Kenya's leading school management system. Manage learners, learning areas, assessments, fees, and report cards. Supports CBE and 8-4-4 curricula for Pre-Primary, Primary, Junior, and Senior schools."
+        path="/"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebApplication',
+          name: 'Kimatu Analytics',
+          alternateName: 'Kimatu',
+          url: 'https://kimatu.company',
+          slogan: 'Smarter Schools, Brighter Futures',
+          description: 'Kenya\'s leading school management system for student results, report cards, fee management, and performance tracking. Supports CBE and 8-4-4 curricula.',
+          applicationCategory: 'EducationApplication',
+          operatingSystem: 'Web',
+          inLanguage: 'en-KE',
+          offers: { '@type': 'Offer', price: '0', priceCurrency: 'KES', description: 'Free trial available for 3 months' },
+          author: { '@type': 'Organization', name: 'Kimatu Analytics', url: 'https://kimatu.company' },
+          keywords: 'Kimatu, Analytics, School Management, CBE, 8-4-4, Kenya, Education, School System, Learner Management',
+        }}
+      />
+      {isInstallable && (
+        <button
+          onClick={handleInstallClick}
+          className="fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-full shadow-lg z-50 flex items-center gap-2 font-medium hover:bg-green-700 transition-colors animate-in slide-in-from-bottom-4"
+        >
+          <Smartphone className="w-4 h-4" /> Download App
+        </button>
+      )}
+      <HeroCarousel />
+      <Features />
+      <Pricing />
+      <HowItWorks />
+      <Testimonials />
+      <FAQ />
+      <CTA />
+      <WhatsAppButton />
+    </>
+  );
+}
