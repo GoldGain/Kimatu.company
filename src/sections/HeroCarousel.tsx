@@ -42,7 +42,7 @@ export default function HeroCarousel() {
     setCurrentIndex((prev) => (prev + 1) % heroImages.length);
   }, []);
 
-  // Auto-advance carousel
+  // Auto-advance carousel every 5 seconds
   useEffect(() => {
     if (isPaused) return;
     const interval = setInterval(() => {
@@ -58,53 +58,46 @@ export default function HeroCarousel() {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* RIGHT-TO-LEFT SLIDING CAROUSEL */}
-      <div className="absolute inset-0 flex">
-        <AnimatePresence initial={false} mode="popLayout">
+      {/* SMOOTH RIGHT-TO-LEFT SLIDING CAROUSEL */}
+      <div className="absolute inset-0">
+        <AnimatePresence initial={false} mode="wait">
           {heroImages.map((image, index) => (
-            <motion.div
-              key={index}
-              className="absolute inset-0 flex-shrink-0"
-              initial={{
-                x: index === currentIndex ? '100%' : index < currentIndex ? '-100%' : '100%',
-                opacity: 0
-              }}
-              animate={{
-                x: index === currentIndex ? '0%' : index < currentIndex ? '-100%' : '100%',
-                opacity: index === currentIndex ? 1 : 0
-              }}
-              exit={{
-                x: index === currentIndex ? '0%' : index < currentIndex ? '-100%' : '100%',
-                opacity: 0
-              }}
-              transition={{
-                x: { duration: 0.8, ease: 'easeInOut' },
-                opacity: { duration: 0.6, ease: 'easeInOut' }
-              }}
-            >
-              <img
-                src={image.src}
-                alt={image.alt}
-                className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => {
-                  const target = e.currentTarget;
-                  target.style.display = 'none';
-                  if (target.parentElement) {
-                    target.parentElement.style.background = 'linear-gradient(135deg, #1A365D 0%, #2D4A7C 50%, #1A365D 100%)';
-                  }
+            index === currentIndex && (
+              <motion.div
+                key={index}
+                className="absolute inset-0"
+                initial={{ x: '100%', opacity: 0 }}
+                animate={{ x: '0%', opacity: 1 }}
+                exit={{ x: '-100%', opacity: 0 }}
+                transition={{
+                  x: { duration: 0.9, ease: 'easeInOut' },
+                  opacity: { duration: 0.8, ease: 'easeInOut' }
                 }}
-              />
-            </motion.div>
+              >
+                <img
+                  src={image.src}
+                  alt={image.alt}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    target.style.display = 'none';
+                    if (target.parentElement) {
+                      target.parentElement.style.background = 'linear-gradient(135deg, #1A365D 0%, #2D4A7C 50%, #1A365D 100%)';
+                    }
+                  }}
+                />
+              </motion.div>
+            )
           ))}
         </AnimatePresence>
       </div>
 
-      {/* Dark Gradient Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30 z-[1]" />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/40 via-transparent to-black/40 z-[1]" />
+      {/* LIGHT GRADIENT OVERLAY - Reduced darkness for bright images */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/20 to-transparent z-[1]" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-black/20 z-[1]" />
 
       {/* Subtle animated particles/dots for depth */}
-      <div className="absolute inset-0 z-[2] opacity-20">
+      <div className="absolute inset-0 z-[2] opacity-15">
         {[...Array(20)].map((_, i) => (
           <motion.div
             key={i}
@@ -114,7 +107,7 @@ export default function HeroCarousel() {
               top: `${(i * 23 + 10) % 100}%`,
             }}
             animate={{
-              opacity: [0.2, 0.8, 0.2],
+              opacity: [0.1, 0.6, 0.1],
               scale: [1, 1.5, 1],
             }}
             transition={{
@@ -167,7 +160,7 @@ export default function HeroCarousel() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.55 }}
-            className="text-lg md:text-xl text-gray-200 mb-8 max-w-2xl mx-auto leading-relaxed"
+            className="text-lg md:text-xl text-gray-100 mb-8 max-w-2xl mx-auto leading-relaxed"
           >
             School Analytics Simplified. Manage learners, learning areas, assessments, fees, and report cards all in one place.
           </motion.p>
@@ -180,7 +173,7 @@ export default function HeroCarousel() {
             className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 mb-10"
           >
             {featureBullets.map((bullet, i) => (
-              <div key={i} className="flex items-center gap-2 text-gray-300">
+              <div key={i} className="flex items-center gap-2 text-gray-100">
                 <div
                   className="w-2.5 h-2.5 rounded-full animate-pulse"
                   style={{ backgroundColor: bullet.color, animationDelay: `${i * 0.3}s` }}
@@ -236,24 +229,24 @@ export default function HeroCarousel() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 1 }}
+            transition={{ duration: 0.7, delay: 0.85 }}
             className="flex flex-wrap items-center justify-center gap-8 mt-12"
           >
             <span className="text-white text-center">
               <span className="block text-2xl font-bold">2,000+</span>
-              <span className="text-sm text-gray-300">Schools</span>
+              <span className="text-sm text-gray-200">Schools</span>
             </span>
             <span className="text-white text-center">
               <span className="block text-2xl font-bold">500K+</span>
-              <span className="text-sm text-gray-300">Learners</span>
+              <span className="text-sm text-gray-200">Learners</span>
             </span>
             <span className="text-white text-center">
               <span className="block text-2xl font-bold">50K+</span>
-              <span className="text-sm text-gray-300">Teachers</span>
+              <span className="text-sm text-gray-200">Teachers</span>
             </span>
             <span className="text-white text-center">
               <span className="block text-2xl font-bold">98%</span>
-              <span className="text-sm text-gray-300">Satisfaction</span>
+              <span className="text-sm text-gray-200">Satisfaction</span>
             </span>
           </motion.div>
 
