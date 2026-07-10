@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const heroImages = [
-  { src: '/images/hero1.jpg', alt: 'Students collaborating on analytics dashboard in a modern classroom' },
-  { src: '/images/hero2.jpg', alt: 'Teacher presenting student performance analytics on smartboard' },
-  { src: '/images/hero3.jpg', alt: 'Students focused on computers in a modern digital literacy lab' },
-  { src: '/images/hero4.jpg', alt: 'Beautiful modern school campus with world-class facilities' },
-  { src: '/images/hero5.jpg', alt: 'Happy students celebrating academic achievements with certificates and trophies' },
+  { src: '/images/hero1.jpg', alt: 'African students using technology in a modern classroom' },
+  { src: '/images/hero2.jpg', alt: 'Happy African students learning together in a bright classroom' },
+  { src: '/images/hero3.jpg', alt: 'African students collaborating and studying together' },
+  { src: '/images/hero4.jpg', alt: 'African students in school uniforms engaged in learning' },
+  { src: '/images/hero5.jpg', alt: 'Smart African students celebrating academic success' },
 ];
 
 const featureBullets = [
@@ -58,7 +58,7 @@ export default function HeroCarousel() {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* SMOOTH RIGHT-TO-LEFT SLIDING CAROUSEL */}
+      {/* PERFECT RIGHT-TO-LEFT SLIDING CAROUSEL - NO OVERLAYS */}
       <div className="absolute inset-0">
         <AnimatePresence initial={false} mode="wait">
           {heroImages.map((image, index) => (
@@ -66,12 +66,11 @@ export default function HeroCarousel() {
               <motion.div
                 key={index}
                 className="absolute inset-0"
-                initial={{ x: '100%', opacity: 0 }}
-                animate={{ x: '0%', opacity: 1 }}
-                exit={{ x: '-100%', opacity: 0 }}
+                initial={{ x: '100%' }}
+                animate={{ x: '0%' }}
+                exit={{ x: '-100%' }}
                 transition={{
-                  x: { duration: 0.9, ease: 'easeInOut' },
-                  opacity: { duration: 0.8, ease: 'easeInOut' }
+                  x: { duration: 0.95, ease: 'easeInOut' },
                 }}
               >
                 <img
@@ -92,33 +91,9 @@ export default function HeroCarousel() {
         </AnimatePresence>
       </div>
 
-      {/* LIGHT GRADIENT OVERLAY - Reduced darkness for bright images */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/20 to-transparent z-[1]" />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-black/20 z-[1]" />
-
-      {/* Subtle animated particles/dots for depth */}
-      <div className="absolute inset-0 z-[2] opacity-15">
-        {[...Array(20)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-1 h-1 bg-white rounded-full"
-            style={{
-              left: `${(i * 17 + 5) % 100}%`,
-              top: `${(i * 23 + 10) % 100}%`,
-            }}
-            animate={{
-              opacity: [0.1, 0.6, 0.1],
-              scale: [1, 1.5, 1],
-            }}
-            transition={{
-              duration: 3 + (i % 3),
-              repeat: Infinity,
-              delay: i * 0.15,
-              ease: 'easeInOut',
-            }}
-          />
-        ))}
-      </div>
+      {/* MINIMAL OVERLAY - ONLY FOR TEXT READABILITY */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/20 to-transparent z-[1]" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-transparent to-black/30 z-[1]" />
 
       {/* Content Overlay */}
       <div className="relative z-10 flex items-center justify-center h-full px-4">
@@ -139,7 +114,7 @@ export default function HeroCarousel() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.3 }}
-            className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold text-white mb-4 tracking-tight leading-none"
+            className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold text-white mb-4 tracking-tight leading-none drop-shadow-lg"
           >
             Kimatu Analytics
           </motion.h1>
@@ -149,7 +124,7 @@ export default function HeroCarousel() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.45 }}
-            className="text-2xl sm:text-3xl md:text-4xl font-bold mb-6"
+            className="text-2xl sm:text-3xl md:text-4xl font-bold mb-6 drop-shadow-md"
             style={{ color: '#D4AF37' }}
           >
             Smarter Schools, Brighter Futures
@@ -160,7 +135,7 @@ export default function HeroCarousel() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.55 }}
-            className="text-lg md:text-xl text-gray-100 mb-8 max-w-2xl mx-auto leading-relaxed"
+            className="text-lg md:text-xl text-white mb-8 max-w-2xl mx-auto leading-relaxed drop-shadow-md"
           >
             School Analytics Simplified. Manage learners, learning areas, assessments, fees, and report cards all in one place.
           </motion.p>
@@ -173,7 +148,7 @@ export default function HeroCarousel() {
             className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 mb-10"
           >
             {featureBullets.map((bullet, i) => (
-              <div key={i} className="flex items-center gap-2 text-gray-100">
+              <div key={i} className="flex items-center gap-2 text-white drop-shadow-md">
                 <div
                   className="w-2.5 h-2.5 rounded-full animate-pulse"
                   style={{ backgroundColor: bullet.color, animationDelay: `${i * 0.3}s` }}
@@ -229,24 +204,24 @@ export default function HeroCarousel() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.85 }}
+            transition={{ duration: 0.7, delay: 1 }}
             className="flex flex-wrap items-center justify-center gap-8 mt-12"
           >
-            <span className="text-white text-center">
+            <span className="text-white text-center drop-shadow-md">
               <span className="block text-2xl font-bold">2,000+</span>
-              <span className="text-sm text-gray-200">Schools</span>
+              <span className="text-sm text-gray-100">Schools</span>
             </span>
-            <span className="text-white text-center">
+            <span className="text-white text-center drop-shadow-md">
               <span className="block text-2xl font-bold">500K+</span>
-              <span className="text-sm text-gray-200">Learners</span>
+              <span className="text-sm text-gray-100">Learners</span>
             </span>
-            <span className="text-white text-center">
+            <span className="text-white text-center drop-shadow-md">
               <span className="block text-2xl font-bold">50K+</span>
-              <span className="text-sm text-gray-200">Teachers</span>
+              <span className="text-sm text-gray-100">Teachers</span>
             </span>
-            <span className="text-white text-center">
+            <span className="text-white text-center drop-shadow-md">
               <span className="block text-2xl font-bold">98%</span>
-              <span className="text-sm text-gray-200">Satisfaction</span>
+              <span className="text-sm text-gray-100">Satisfaction</span>
             </span>
           </motion.div>
 
