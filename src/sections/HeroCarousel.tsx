@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const heroImages = [
-  { src: '/images/hero1.jpg', alt: 'African students using technology in a modern classroom' },
-  { src: '/images/hero2.jpg', alt: 'Happy African students learning together in a bright classroom' },
-  { src: '/images/hero3.jpg', alt: 'African students collaborating and studying together' },
-  { src: '/images/hero4.jpg', alt: 'African students in school uniforms engaged in learning' },
-  { src: '/images/hero5.jpg', alt: 'Smart African students celebrating academic success' },
+  { src: '/images/hero1.jpg', alt: 'Professional Kenyan students collaborating with technology in a modern classroom' },
+  { src: '/images/hero2.jpg', alt: 'Kenyan students engaged in hands-on learning with engineering projects' },
+  { src: '/images/hero3.jpg', alt: 'Bright Kenyan classroom with students using digital technology for education' },
+  { src: '/images/hero4.jpg', alt: 'Advanced digital learning environment in Kenya with students and tablets' },
+  { src: '/images/hero5.jpg', alt: 'Kenyan students in modern tech-enabled classroom with collaborative learning' },
 ];
 
 const featureBullets = [
@@ -58,7 +58,7 @@ export default function HeroCarousel() {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      {/* PERFECT RIGHT-TO-LEFT SLIDING CAROUSEL - NO OVERLAYS */}
+      {/* SMOOTH RIGHT-TO-LEFT CAROUSEL WITH BRIGHT IMAGES */}
       <div className="absolute inset-0">
         <AnimatePresence initial={false} mode="wait">
           {heroImages.map((image, index) => (
@@ -70,7 +70,7 @@ export default function HeroCarousel() {
                 animate={{ x: '0%' }}
                 exit={{ x: '-100%' }}
                 transition={{
-                  x: { duration: 0.95, ease: 'easeInOut' },
+                  x: { duration: 0.9, ease: 'easeInOut' },
                 }}
               >
                 <img
@@ -91,9 +91,9 @@ export default function HeroCarousel() {
         </AnimatePresence>
       </div>
 
-      {/* MINIMAL OVERLAY - ONLY FOR TEXT READABILITY */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/20 to-transparent z-[1]" />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-transparent to-black/30 z-[1]" />
+      {/* SUBTLE OVERLAY - REFERENCE SITE STYLE */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-black/40 z-[1]" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/25 via-transparent to-black/25 z-[1]" />
 
       {/* Content Overlay */}
       <div className="relative z-10 flex items-center justify-center h-full px-4">
