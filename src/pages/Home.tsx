@@ -1,4 +1,4 @@
-import LandingCarousel from '@/components/LandingCarousel';
+import HeroCarousel from '@/sections/HeroCarousel';
 import Features from '@/sections/Features';
 import Pricing from '@/sections/Pricing';
 import HowItWorks from '@/sections/HowItWorks';
@@ -51,7 +51,7 @@ export default function Home() {
           <Smartphone className="w-4 h-4" /> Download App
         </button>
       )}
-      <LandingCarousel />
+      <HeroCarousel />
       <Features />
       <Pricing />
       <HowItWorks />

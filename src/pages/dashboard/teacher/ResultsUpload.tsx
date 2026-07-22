@@ -221,8 +221,8 @@ export default function TeacherResultsUpload() {
   };
 
   // ── Download helpers ─────────────────────────────────────────────────────────
-  const getMainGrade = (row: ProcessedRow) => row.cbcGrade.subLevel;
-  const getMainPoints = (row: ProcessedRow) => row.cbcGrade.points;
+  const getMainGrade = (row: ProcessedRow) => row.cbcGrade?.subLevel || row.cbcGrade?.grade || '—';
+  const getMainPoints = (row: ProcessedRow) => row.cbcGrade?.points ?? 0;
 
   const downloadManualPDF = () => {
     if (!manualPreview.length) return;

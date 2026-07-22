@@ -1,11 +1,11 @@
 /**
  * bestPerSubject.ts
- * Helper to compute the best-performing student per subject from raw results.
- * Used across Teacher Dashboard, School Admin Results, Student Report Card,
+ * Helper to compute the best-performing learner per learning area from raw results.
+ * Used across Teacher Dashboard, School Admin Results, Learner Report Card,
  * and Parent Child Report Card.
  */
 
-import { calculateCompetencyGrade, calculate844Grade, getSchoolLevelBand } from './grading';
+import { calculateCompetencyGrade, getSchoolLevelBand } from './grading';
 import type { SchoolLevelBand } from './grading';
 
 export interface BestInSubject {
@@ -13,13 +13,13 @@ export interface BestInSubject {
   studentId: string;
   studentName: string;
   percentage: number;
-  gradeLabel: string;   // e.g. "EE1", "ME", "A"
+  gradeLabel: string;   // e.g. "EE1", "ME"
   points: number | null; // null for Primary
 }
 
 /**
  * Given an array of raw result rows (each with students, subjects, percentage/marks/out_of),
- * and optional classData for band detection, returns the best student per subject.
+ * and optional classData for band detection, returns the best learner per learning area.
  *
  * @param rawResults  Array of result records from Supabase
  * @param classData   Optional class object with curriculum/grade_level/level/name
@@ -29,7 +29,6 @@ export function computeBestPerSubject(
   classData?: { curriculum?: string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }
 ): BestInSubject[] {
   const band: SchoolLevelBand = getSchoolLevelBand(classData);
-  const is844 = band === '844';
   const isPrimary = band === 'primary';
 
   // Group results by subject
@@ -67,18 +66,9 @@ export function computeBestPerSubject(
         ? `${topRow.students.first_name || ''} ${topRow.students.last_name || ''}`.trim()
         : topRow.student_name || 'Unknown';
 
-    let gradeLabel: string;
-    let points: number | null;
-
-    if (is844) {
-      const g = calculate844Grade(topPct);
-      gradeLabel = g.grade;
-      points = g.points;
-    } else {
-      const g = calculateCompetencyGrade(topPct, isPrimary ? 'primary' : band);
-      gradeLabel = g.subLevel;
-      points = isPrimary ? null : g.points;
-    }
+    const g = calculateCompetencyGrade(topPct, isPrimary ? 'primary' : (band as any) === '844' ? 'junior' : band);
+    const gradeLabel = g?.subLevel || g?.grade || '—';
+    const points = isPrimary ? null : (g?.points ?? null);
 
     best.push({
       subjectName,
@@ -96,9 +86,9 @@ export function computeBestPerSubject(
 }
 
 /**
- * Returns the subjects in which a specific student is the best performer.
+ * Returns the learning areas in which a specific learner is the best performer.
  *
- * @param studentId   The student's ID to check
+ * @param studentId   The learner's ID to check
  * @param bestList    Output of computeBestPerSubject()
  */
 export function getStudentBestSubjects(studentId: string, bestList: BestInSubject[]): BestInSubject[] {

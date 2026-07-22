@@ -1,5 +1,5 @@
-export type Curriculum = 'CBE' | '844';
-export type SchoolLevelBand = 'pre-primary' | 'primary' | 'junior' | 'senior' | '844';
+export type Curriculum = 'CBE';
+export type SchoolLevelBand = 'primary' | 'junior' | 'senior';
 
 export interface CompetencyGrade {
   subLevel: string;
@@ -9,31 +9,22 @@ export interface CompetencyGrade {
   band: SchoolLevelBand;
 }
 
-export interface NumericGrade844 {
-  grade: string;
-  points: number;
-  descriptor: string;
-  band: '844';
-}
-
 function normalizePercentage(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }): SchoolLevelBand {
-  const curriculum = String(classData?.curriculum || 'CBE').toUpperCase();
-  if (curriculum === '844' || curriculum === '8-4-4') return '844';
-
   // Use grade_level first (new column), fall back to level (legacy)
   const rawLevel = classData?.grade_level ?? classData?.level;
   const parsedLevel = typeof rawLevel === 'number' ? rawLevel : parseInt(String(rawLevel || '').replace(/[^0-9]/g, ''), 10);
 
-  // Pre-Primary: PP1 (grade_level -1) and PP2 (grade_level 0)
-  if (Number.isFinite(parsedLevel) && parsedLevel < 1) return 'pre-primary';
+  // PP1 and PP2 are also primary
+  const name = String(classData?.name || '').toLowerCase();
+  if (/pp1|pp2|pre.?primary/i.test(name)) return 'primary';
 
-  // Primary School: Grades 1-6 — marks only, no points
-  if (Number.isFinite(parsedLevel) && parsedLevel >= 1 && parsedLevel <= 6) return 'primary';
+  // Primary School: PP1, PP2, Grades 1-6 — marks only, no points
+  if (Number.isFinite(parsedLevel) && parsedLevel >= 0 && parsedLevel <= 6) return 'primary';
 
   // Junior School: Grades 7-9 — 8-level scale with points
   if (Number.isFinite(parsedLevel) && parsedLevel >= 7 && parsedLevel <= 9) return 'junior';
@@ -42,15 +33,14 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
   if (Number.isFinite(parsedLevel) && parsedLevel >= 10 && parsedLevel <= 12) return 'senior';
 
   // Fallback: parse from class name
-  const name = String(classData?.name || '').toLowerCase();
-  if (/pp1|pp2|pre.?primary/.test(name)) return 'pre-primary';
   if (/senior|grade\s*1[012]|\b1[012]\b/.test(name)) return 'senior';
   if (/junior|jss|grade\s*[789]|\b[789]\b/.test(name)) return 'junior';
+  if (/pp1|pp2|pre.?primary|grade\s*[1-6]/i.test(name)) return 'primary';
   return 'primary';
 }
 
 /**
- * PRIMARY SCHOOL (Grades 1-6): MARKS ONLY — NO points shown to users.
+ * PRIMARY SCHOOL (PP1, PP2, Grades 1-6): MARKS ONLY — NO points shown to users.
  * EE: 75-100%, ME: 41-74%, AE: 21-40%, BE: 1-20%
  *
  * JUNIOR SCHOOL (Grades 7-9): 8-level scale WITH points.
@@ -61,14 +51,6 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
  */
 export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 'primary'): CompetencyGrade {
   const percentage = normalizePercentage(score);
-
-  if (band === 'pre-primary') {
-    // Pre-Primary (PP1, PP2): 4 competency descriptors, NO points shown, NO sub-level.
-    if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band: 'pre-primary' };
-    if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band: 'pre-primary' };
-    if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band: 'pre-primary' };
-    return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band: 'pre-primary' };
-  }
 
   if (band === 'junior' || band === 'senior') {
     // Junior/Senior (Grades 7-12): 8-level scale with points
@@ -82,7 +64,7 @@ export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 
     return { subLevel: 'BE2', grade: 'BE', points: 1, descriptor: 'Below Expectation', band };
   }
 
-  // Primary (Grades 1-6): MARKS ONLY — 4 competency descriptors, NO points shown.
+  // Primary (PP1, PP2, Grades 1-6): MARKS ONLY — 4 competency descriptors, NO points shown.
   // EE: 75-100%, ME: 41-74%, AE: 21-40%, BE: 1-20%
   if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band };
   if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band };
@@ -90,31 +72,16 @@ export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 
   return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band };
 }
 
-export function calculate844Grade(score: number): NumericGrade844 {
-  const percentage = normalizePercentage(score);
-  if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent', band: '844' };
-  if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good', band: '844' };
-  if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good', band: '844' };
-  if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good', band: '844' };
-  if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good', band: '844' };
-  if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average', band: '844' };
-  if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average', band: '844' };
-  if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average', band: '844' };
-  if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average', band: '844' };
-  if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average', band: '844' };
-  if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average', band: '844' };
-  return { grade: 'E', points: 1, descriptor: 'Poor', band: '844' };
-}
-
 export function calculateResultGrades(percentage: number, classData?: { curriculum?: Curriculum | string | null; level?: number | string | null; name?: string | null }) {
   const band = getSchoolLevelBand(classData);
-  const cbcGrade = calculateCompetencyGrade(percentage, (band === '844') ? 'junior' : band);
-  const grade844 = calculate844Grade(percentage);
-  return { band, cbcGrade, grade844 };
+  // Keep Kimatu field name (cbeGrade) used across upload/results pages
+  const cbeGrade = calculateCompetencyGrade(percentage, band === '844' as any ? 'junior' : band);
+  const cbcGrade = cbeGrade; // alias for any Kimatu leftovers
+  const grade844 = typeof calculate844Grade === 'function' ? calculate844Grade(percentage) : undefined;
+  return { band, cbeGrade, cbcGrade, grade844 };
 }
 
 export function gradeDisplayLabel(band: SchoolLevelBand): string {
-  if (band === '844') return '8-4-4 Grade';
   if (band === 'senior') return 'Senior CBE Grade';
   if (band === 'junior') return 'Junior CBE Grade';
   return 'Primary CBE Grade';
@@ -131,9 +98,9 @@ export interface SubjectResult {
 
 function getSubjectAdvice(subjectName: string, band: SchoolLevelBand): string {
   const name = subjectName.toLowerCase();
-  if (name.includes('math')) return 'practice daily arithmetic and work through past exam papers';
-  if (name.includes('english')) return 'read more books, practice writing essays, and review grammar rules';
-  if (name.includes('kiswahili') || name.includes('swahili')) return 'practice speaking Kiswahili daily and review vocabulary';
+  if (name.includes('math')) return 'practice daily arithmetic and work through past assessment papers';
+  if (name.includes('english') || name.includes('composition') || name.includes('grammar')) return 'read more books, practice writing compositions, and review grammar rules';
+  if (name.includes('kiswahili') || name.includes('insha') || name.includes('sarufi')) return 'practice speaking Kiswahili daily and review vocabulary';
   if (name.includes('science') || name.includes('biology') || name.includes('chemistry') || name.includes('physics')) return 'review key concepts, conduct practical exercises, and ask your teacher for extra help';
   if (name.includes('history') || name.includes('social')) return 'create summary notes and practice answering past questions';
   if (name.includes('geography')) return 'study maps and practice describing geographical features';
@@ -146,17 +113,16 @@ function getSubjectAdvice(subjectName: string, band: SchoolLevelBand): string {
 }
 
 function getGradeLabel(pct: number, band: SchoolLevelBand): string {
-  if (band === '844') return calculate844Grade(pct).grade;
   const g = calculateCompetencyGrade(pct, band);
   return g.subLevel;
 }
 
 /**
  * ENHANCED AI Comment Generator that:
- * - Congratulates on BEST subject
- * - Identifies and addresses ALL weak subjects (not just top 2)
- * - Gives SPECIFIC advice for each weak subject
- * - Identifies failing subjects and recommends parent-teacher meeting
+ * - Congratulates on BEST learning area
+ * - Identifies and addresses ALL weak learning areas (not just top 2)
+ * - Gives SPECIFIC advice for each weak learning area
+ * - Identifies failing learning areas and recommends parent-teacher meeting
  * - Compares with previous term performance
  * - Adapts language to curriculum level
  * - Includes class position and encouragement
@@ -171,19 +137,18 @@ export function generateSubjectSpecificComment(
 ): string {
   const band = getSchoolLevelBand(classData);
   const isPrimary = band === 'primary';
-  const is844 = band === '844';
 
   if (!subjects || subjects.length === 0) {
-    return `${studentName}, keep working hard and striving for excellence in all your subjects!`;
+    return `${studentName}, keep working hard and striving for excellence in all your learning areas!`;
   }
 
   // Sort subjects by percentage
   const sorted = [...subjects].sort((a, b) => b.percentage - a.percentage);
   const best = sorted[0];
 
-  // Identify weak subjects (below 50% for 8-4-4, below ME threshold for CBE)
-  const weakThreshold = is844 ? 50 : isPrimary ? 41 : 41;
-  const failThreshold = is844 ? 40 : isPrimary ? 21 : 21;
+  // Identify weak subjects (below ME threshold)
+  const weakThreshold = isPrimary ? 41 : 41;
+  const failThreshold = isPrimary ? 21 : 21;
   const weakSubjects = sorted.filter(s => s.percentage < weakThreshold);
   const failingSubjects = sorted.filter(s => s.percentage < failThreshold);
 
@@ -200,8 +165,6 @@ export function generateSubjectSpecificComment(
   // Opening: congratulate on best subject
   if (isPrimary) {
     comment += `${firstName}, you did very well in ${best.name} (${best.percentage.toFixed(0)}% — ${bestGrade}). `;
-  } else if (is844) {
-    comment += `${firstName}, your performance in ${best.name} (${best.percentage.toFixed(0)}%, ${bestGrade}) is commendable. `;
   } else {
     comment += `${firstName}, you excelled in ${best.name} (${best.percentage.toFixed(0)}% — ${bestGrade}). `;
   }
@@ -209,8 +172,7 @@ export function generateSubjectSpecificComment(
   // Address failing subjects first (most urgent) — MENTION ALL
   if (failingSubjects.length > 0) {
     const failNames = failingSubjects.map(s => {
-      const g = getGradeLabel(s.percentage, band);
-      return `${s.name} (${s.percentage.toFixed(0)}%${is844 ? `, ${g}` : ''})`;
+      return `${s.name} (${s.percentage.toFixed(0)}%)`;
     }).join(', ');
 
     if (isPrimary) {
@@ -219,12 +181,6 @@ export function generateSubjectSpecificComment(
         comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
       });
       comment += `Let's work together to bring these up to ME level. `;
-    } else if (is844) {
-      comment += `However, your scores in ${failNames} require urgent improvement. `;
-      failingSubjects.forEach(s => {
-        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
-      });
-      comment += `A parent-teacher meeting is recommended to create a catch-up plan. `;
     } else {
       comment += `However, your performance in ${failNames} needs immediate attention. `;
       failingSubjects.forEach(s => {
@@ -235,8 +191,7 @@ export function generateSubjectSpecificComment(
   } else if (weakSubjects.length > 0) {
     // Address weak (but not failing) subjects — MENTION ALL WITH SPECIFIC ADVICE
     const weakNames = weakSubjects.map(s => {
-      const g = getGradeLabel(s.percentage, band);
-      return `${s.name} (${s.percentage.toFixed(0)}%${is844 ? `, ${g}` : ''})`;
+      return `${s.name} (${s.percentage.toFixed(0)}%)`;
     }).join(', ');
 
     if (isPrimary) {
@@ -244,12 +199,6 @@ export function generateSubjectSpecificComment(
       weakSubjects.forEach(s => {
         comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
       });
-    } else if (is844) {
-      comment += `However, your performance in ${weakNames} is below expectations. `;
-      weakSubjects.forEach(s => {
-        comment += `In ${s.name}, ${getSubjectAdvice(s.name, band)}. `;
-      });
-      comment += `Focus on these areas to raise your grades next term. `;
     } else {
       comment += `Focus more on ${weakNames}. `;
       weakSubjects.forEach(s => {
@@ -258,7 +207,7 @@ export function generateSubjectSpecificComment(
     }
   } else {
     // All subjects above threshold
-    comment += `Keep maintaining this excellent standard across all your subjects. `;
+    comment += `Keep maintaining this excellent standard across all your learning areas. `;
   }
 
   // Address dropping subjects (if not already mentioned)
@@ -290,3 +239,21 @@ export function generateSubjectSpecificComment(
 
   return comment;
 }
+
+// --- Kimatu 8-4-4 helpers (kept) ---
+export function calculate844Grade(score: number): NumericGrade844 {
+  const percentage = normalizePercentage(score);
+  if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent', band: '844' };
+  if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good', band: '844' };
+  if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good', band: '844' };
+  if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good', band: '844' };
+  if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good', band: '844' };
+  if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average', band: '844' };
+  if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average', band: '844' };
+  if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average', band: '844' };
+  if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average', band: '844' };
+  if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average', band: '844' };
+  if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average', band: '844' };
+  return { grade: 'E', points: 1, descriptor: 'Poor', band: '844' };
+}
+
