@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Award, CreditCard, ClipboardList, Clock, BookOpen, Bell } from 'lucide-react';
 import PhotoZoomModal from '@/components/PhotoZoomModal';
 
@@ -18,7 +18,7 @@ interface ResultRecord {
   id: string;
   marks: number | null;
   cbc_grade: string | null;
-  grade_844: string | null;
+  grade_: string | null;
   subjects: { name: string } | null;
 }
 
@@ -135,7 +135,7 @@ export default function StudentDashboard() {
                     <p className="text-sm font-medium">{r.subjects?.name}</p>
                     <p className="text-xs text-[#666666]">{r.percentage !== undefined && r.percentage !== null ? r.percentage : r.marks}%</p>
                   </div>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_844)}`}>{r.cbc_grade || r.grade_844}</span>
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_)}`}>{r.cbc_grade || r.grade_}</span>
                 </div>
               ))}
             </div>

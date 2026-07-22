@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BookOpen, Users, Upload, Loader2, BarChart3, TrendingUp, ChevronDown, ChevronUp, Award } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { getSchoolLevelBand } from '@/lib/grading';
-import MarksEntryProgress from '@/components/MarksEntryProgress';
 
 interface Assignment {
   id: string;
@@ -26,7 +25,7 @@ interface StudentResult {
   cbc_grade: string | null;
   cbc_sublevel: string | null;
   cbc_points: number | null;
-  grade_844: string | null;
+  grade_: string | null;
 }
 
 export default function SubjectTeacherDashboard() {
@@ -109,7 +108,7 @@ export default function SubjectTeacherDashboard() {
       // Get results for this subject and term
       const { data: results } = await supabaseUntyped
         .from('results')
-        .select('student_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_844')
+        .select('student_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_')
         .eq('class_id', assignment.class_id)
         .eq('subject_id', assignment.subject_id)
         .eq('term_id', selectedTerm);
@@ -128,7 +127,7 @@ export default function SubjectTeacherDashboard() {
         cbc_grade: resultMap[s.id]?.cbc_grade ?? null,
         cbc_sublevel: resultMap[s.id]?.cbc_sublevel ?? null,
         cbc_points: resultMap[s.id]?.cbc_points ?? null,
-        grade_844: resultMap[s.id]?.grade_844 ?? null,
+        grade_: resultMap[s.id]?.grade_ ?? null,
       }));
 
       setStudentResults(prev => ({ ...prev, [key]: combined }));
@@ -150,8 +149,8 @@ export default function SubjectTeacherDashboard() {
   };
 
   const getDisplayGrade = (r: StudentResult, classData: any): string => {
-    const is844 = String(classData?.curriculum || '').toUpperCase() === '844';
-    if (is844) return r.grade_844 || '—';
+    const is = String(classData?.curriculum || '').toUpperCase() === '';
+    if (is) return r.grade_ || '—';
     return r.cbc_sublevel || r.cbc_grade || '—';
   };
 
@@ -176,7 +175,7 @@ export default function SubjectTeacherDashboard() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111]">Learning Area Teacher Dashboard</h1>
+          <h1 className="text-2xl font-bold text-[#111111]">Subject Teacher Dashboard</h1>
           <p className="text-sm text-[#666666]">Your assigned subjects, classes, and student results</p>
         </div>
         {terms.length > 0 && (
@@ -213,18 +212,9 @@ export default function SubjectTeacherDashboard() {
             <TrendingUp className="w-5 h-5 text-green-600" />
             <span className="text-sm text-gray-600">Upload Marks</span>
           </div>
-          <Link to="/teacher/results/upload" className="text-sm font-semibold text-blue-600 hover:underline">Go to Upload →</Link>
+          <Link to="/teacher/results/assigned" className="text-sm font-semibold text-blue-600 hover:underline">Upload Assigned →</Link>
         </div>
       </div>
-
-      {/* Marks Entry Progress */}
-      {teacherRecord && selectedTerm && (
-        <MarksEntryProgress
-          teacherId={teacherRecord.id}
-          schoolId={teacherRecord.school_id || user?.schoolId || ''}
-          termId={selectedTerm}
-        />
-      )}
 
       {/* Assignment cards */}
       <div className="space-y-4">
@@ -266,7 +256,7 @@ export default function SubjectTeacherDashboard() {
                       </div>
                     )}
                     <Link
-                      to="/teacher/results/upload"
+                      to="/teacher/results/assigned"
                       onClick={e => e.stopPropagation()}
                       className="flex items-center gap-1.5 px-3 py-2 bg-[#2563EB] text-white rounded-xl text-xs font-medium hover:bg-blue-700 transition-colors"
                     >

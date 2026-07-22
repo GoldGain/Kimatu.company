@@ -1,92 +1,98 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from "@/lib/supabase/client";
 import { supabaseUntyped } from "@/lib/supabase/client";
 import { createScopedUser } from '@/lib/supabase/createUser';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStudents } from '@/hooks/useSupabaseData';
-import { Search, Plus, Loader2, Filter, Camera, Pencil, Trash2, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Plus, Loader2, Filter, Camera, Pencil, Trash2, X, ArrowUpDown, ChevronUp, ChevronDown, Users, Download, ChevronUp as ChevronUpIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
-import { sendSMS } from '@/lib/sms';
-import { deleteStudentAccount } from '@/lib/deleteAccount';
+import { useTrial } from '@/contexts/TrialContext';
 
-// Kenya counties list
+type SortField = 'name' | 'assessment_number' | 'class' | 'gender';
+type SortDir = 'asc' | 'desc';
+type ViewMode = 'list' | 'by-grade';
+
 const KENYA_COUNTIES = [
   'Baringo','Bomet','Bungoma','Busia','Elgeyo-Marakwet','Embu','Garissa','Homa Bay',
-  'Isiolo','Kajiado','Kakamega','Kericho','Kiambu','Kilifi','Kirinyaga','Kisii','Kisumu',
-  'Kitui','Kwale','Laikipia','Lamu','Machakos','Makueni','Mandera','Marsabit','Meru',
-  'Migori','Mombasa','Murang\'a','Nairobi','Nakuru','Nandi','Narok','Nyamira','Nyandarua',
-  'Nyeri','Samburu','Siaya','Taita-Taveta','Tana River','Tharaka-Nithi','Trans Nzoia',
-  'Turkana','Uasin Gishu','Vihiga','Wajir','West Pokot',
+  'Isiolo','Kajiado','Kakamega','Kericho','Kiambu','Kilifi','Kirinyaga','Kisii',
+  'Kisumu','Kitui','Kwale','Laikipia','Lamu','Machakos','Makueni','Mandera',
+  'Marsabit','Meru','Migori','Mombasa','Murang\'a','Nairobi','Nakuru','Nandi',
+  'Narok','Nyamira','Nyandarua','Nyeri','Samburu','Siaya','Taita-Taveta','Tana River',
+  'Tharaka-Nithi','Trans Nzoia','Turkana','Uasin Gishu','Vihiga','Wajir','West Pokot',
 ];
 
 export default function SchoolAdminStudents() {
   const { user } = useAuth();
+  const { trialStatus } = useTrial();
   const { students, loading, refetch } = useStudents(user?.schoolId || undefined);
   const [classes, setClasses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [filterClassId, setFilterClassId] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [showOptional, setShowOptional] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [selectedLevel, setSelectedLevel] = useState<string>('');
+  const [expandedClass, setExpandedClass] = useState<string | null>(null);
 
-  const emptyForm = {
-    // Mandatory fields
-    admission_number: '',
-    first_name: '',
+  const defaultForm = {
+    assessment_number: '', 
+    student_email: '',
+    first_name: '', 
     middle_name: '',
-    last_name: '',
-    gender: '' as GenderType,
+    last_name: '', 
+    class_id: '',
+    curriculum: 'CBE' as 'CBE',
+    gender: '' as GenderType, 
     date_of_birth: '',
     birth_cert_number: '',
-    class_id: '',
-    stream: '',
-    curriculum: 'CBE' as 'CBE' | '844',
-    boarding_status: 'Day',
-    parent_name: '',
-    parent_phone: '',
-    relationship_to_learner: '',
-    home_county: '',
-    home_sub_county: '',
     nationality: 'Kenyan',
-    learner_status: 'Active',
-    // Optional fields
-    student_email: '',
-    parent_email: '',
-    religion: '',
-    previous_school: '',
-    medical_info: '',
-    allergies: '',
-    blood_group: '',
-    disability_details: '',
-    transport_route: '',
-    club_memberships: '',
-    parent_id_number: '',
-    additional_emergency_contact: '',
+    county: '',
+    sub_county: '',
+    boarding_status: 'day',
+    disability_status: '',
+    parent_name: '', 
+    parent_phone: '', 
+    parent_email: '', 
+    parent2_name: '',
+    parent2_phone: '',
+    parent2_email: '',
+    emergency_contact_name: '',
+    emergency_contact_phone: '',
   };
 
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState(defaultForm);
 
   // Edit state
   const [editingStudent, setEditingStudent] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({
-    first_name: '', middle_name: '', last_name: '',
-    class_id: '', stream: '',
-    parent_name: '', parent_phone: '', parent_email: '',
-    student_email: '',
-    gender: '' as GenderType, date_of_birth: '',
-    boarding_status: 'Day', relationship_to_learner: '',
-    home_county: '', home_sub_county: '', nationality: 'Kenyan',
-    learner_status: 'Active', birth_cert_number: '',
-    religion: '', previous_school: '', medical_info: '',
-    allergies: '', blood_group: '', disability_details: '',
-    transport_route: '', club_memberships: '', parent_id_number: '',
-    additional_emergency_contact: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    class_id: '',
+    parent_name: '',
+    parent_phone: '',
+    parent_email: '',
+    parent2_name: '',
+    parent2_phone: '',
+    parent2_email: '',
+    gender: '' as GenderType,
+    date_of_birth: '',
+    birth_cert_number: '',
+    nationality: 'Kenyan',
+    county: '',
+    sub_county: '',
+    boarding_status: 'day',
+    disability_status: '',
+    emergency_contact_name: '',
+    emergency_contact_phone: '',
   });
   const [saving, setSaving] = useState(false);
-  const [editShowOptional, setEditShowOptional] = useState(false);
 
   // Delete state
   const [deletingStudent, setDeletingStudent] = useState<any | null>(null);
@@ -131,8 +137,8 @@ export default function SchoolAdminStudents() {
     e.preventDefault();
     setAdding(true);
     try {
-      const studentEmail = formData.student_email || `${formData.admission_number.toLowerCase().replace(/\s+/g, '')}@student.edu`;
-      const studentPassword = `${formData.admission_number}@2025`;
+      const studentEmail = formData.student_email || `${formData.assessment_number.toLowerCase().replace(/\s+/g, '')}@student.edu`;
+      const studentPassword = `${formData.assessment_number}@2025`;
       const authData = await createScopedUser({
         email: studentEmail,
         password: studentPassword,
@@ -140,7 +146,7 @@ export default function SchoolAdminStudents() {
         last_name: formData.last_name,
         role: 'student',
         school_id: user?.schoolId || null,
-        metadata: { admission_number: formData.admission_number },
+        metadata: { assessment_number: formData.assessment_number },
       });
       const studentUserId = authData.user.id;
       let parentId: string | null = null;
@@ -149,7 +155,7 @@ export default function SchoolAdminStudents() {
           parentId = await ensureParentAccount(formData.parent_email, formData.parent_name);
         } catch (parentError: any) {
           console.warn('Parent account creation warning:', parentError.message);
-          toast.warning(`Student created but parent account issue: ${parentError.message}`);
+          toast.warning(`Learner created but parent account issue: ${parentError.message}`);
         }
       }
       const { data: studentData, error: studentError } = await supabaseUntyped
@@ -157,38 +163,30 @@ export default function SchoolAdminStudents() {
         .insert({
           profile_id: studentUserId,
           school_id: user?.schoolId,
-          admission_number: formData.admission_number,
+          admission_number: formData.assessment_number,
           first_name: formData.first_name,
           middle_name: formData.middle_name || null,
           last_name: formData.last_name,
-          class_id: formData.class_id || null,
+          class_id: formData.class_id,
           student_email: studentEmail,
           parent_id: parentId,
           parent_name: formData.parent_name,
           parent_phone: formData.parent_phone,
-          parent_email: formData.parent_email || null,
+          parent_email: formData.parent_email,
+          parent2_name: formData.parent2_name || null,
+          parent2_phone: formData.parent2_phone || null,
+          parent2_email: formData.parent2_email || null,
           curriculum: formData.curriculum,
           date_of_birth: formData.date_of_birth || null,
           gender: formData.gender || null,
           birth_cert_number: formData.birth_cert_number || null,
-          stream: formData.stream || null,
-          boarding_status: formData.boarding_status,
-          relationship_to_learner: formData.relationship_to_learner || null,
-          home_county: formData.home_county || null,
-          home_sub_county: formData.home_sub_county || null,
           nationality: formData.nationality || 'Kenyan',
-          learner_status: formData.learner_status || 'Active',
-          email: formData.student_email || null,
-          religion: formData.religion || null,
-          previous_school: formData.previous_school || null,
-          medical_info: formData.medical_info || null,
-          allergies: formData.allergies || null,
-          blood_group: formData.blood_group || null,
-          disability_details: formData.disability_details || null,
-          transport_route: formData.transport_route || null,
-          club_memberships: formData.club_memberships || null,
-          parent_id_number: formData.parent_id_number || null,
-          additional_emergency_contact: formData.additional_emergency_contact || null,
+          county: formData.county || null,
+          sub_county: formData.sub_county || null,
+          boarding_status: formData.boarding_status || 'day',
+          disability_status: formData.disability_status || null,
+          emergency_contact_name: formData.emergency_contact_name || null,
+          emergency_contact_phone: formData.emergency_contact_phone || null,
           is_active: true,
           enrollment_date: new Date().toISOString().split('T')[0],
         })
@@ -202,21 +200,29 @@ export default function SchoolAdminStudents() {
           .upsert({ parent_id: parentId, student_id: studentId }, { onConflict: 'parent_id,student_id' });
         if (linkError) console.warn('parent_student_links upsert warning:', linkError.message);
       }
+      const parentMsg = parentId ? ` | Parent: ${formData.parent_email} (Password: Parent@2025)` : '';
+      toast.success(`✅ Learner added! Login: ${studentEmail} | Password: ${studentPassword}${parentMsg}`);
 
-      // Send welcome SMS to parent if phone is available
+      // Send Welcome SMS to parent if phone number is provided
       if (formData.parent_phone) {
-        try {
-          const studentFullName = `${formData.first_name} ${formData.last_name}`;
-          const smsMsg = `Welcome to Kimatu Analytics! Student ${studentFullName} (Adm: ${formData.admission_number}) has been registered. Student login: ${studentEmail} | Password: ${studentPassword}. Parent login: ${formData.parent_email || 'N/A'} | Password: Parent@2025. Please change passwords after first login. - Kimatu Analytics`;
-          await sendSMS(formData.parent_phone, smsMsg);
-        } catch (smsErr) {
-          console.warn('Welcome SMS failed:', smsErr);
-        }
+        const welcomeMessage = generateWelcomeSMS(
+          formData.parent_name || 'Parent',
+          'Parent',
+          formData.parent_email || studentEmail,
+          'Parent@2025',
+          undefined
+        );
+        sendSMS(formData.parent_phone, welcomeMessage).then((result) => {
+          if (result.success) {
+            toast.success('Welcome SMS sent to parent');
+          } else {
+            toast.warning('Could not send welcome SMS: ' + result.error);
+          }
+        });
       }
 
-      toast.success(`✅ Student added! Login: ${studentEmail} | Password: ${studentPassword}`);
       setShowAdd(false);
-      setFormData(emptyForm);
+      setFormData(defaultForm);
       refetch();
     } catch (error: any) {
       toast.error(error.message);
@@ -232,30 +238,22 @@ export default function SchoolAdminStudents() {
       middle_name: s.middle_name || '',
       last_name: s.last_name || '',
       class_id: s.class_id || '',
-      stream: s.stream || '',
       parent_name: s.parent_name || '',
       parent_phone: s.parent_phone || '',
       parent_email: s.parent_email || '',
-      student_email: s.email || s.student_email || '',
+      parent2_name: s.parent2_name || '',
+      parent2_phone: s.parent2_phone || '',
+      parent2_email: s.parent2_email || '',
       gender: (s.gender || '') as GenderType,
       date_of_birth: s.date_of_birth || '',
-      boarding_status: s.boarding_status || 'Day',
-      relationship_to_learner: s.relationship_to_learner || '',
-      home_county: s.home_county || '',
-      home_sub_county: s.home_sub_county || '',
-      nationality: s.nationality || 'Kenyan',
-      learner_status: s.learner_status || 'Active',
       birth_cert_number: s.birth_cert_number || '',
-      religion: s.religion || '',
-      previous_school: s.previous_school || '',
-      medical_info: s.medical_info || '',
-      allergies: s.allergies || '',
-      blood_group: s.blood_group || '',
-      disability_details: s.disability_details || '',
-      transport_route: s.transport_route || '',
-      club_memberships: s.club_memberships || '',
-      parent_id_number: s.parent_id_number || '',
-      additional_emergency_contact: s.additional_emergency_contact || '',
+      nationality: s.nationality || 'Kenyan',
+      county: s.county || '',
+      sub_county: s.sub_county || '',
+      boarding_status: s.boarding_status || 'day',
+      disability_status: s.disability_status || '',
+      emergency_contact_name: s.emergency_contact_name || '',
+      emergency_contact_phone: s.emergency_contact_phone || '',
     });
   };
 
@@ -264,77 +262,34 @@ export default function SchoolAdminStudents() {
     if (!editingStudent) return;
     setSaving(true);
     try {
-      // Check if parent email was added or changed
-      const oldParentEmail = editingStudent.parent_email || '';
-      const newParentEmail = editForm.parent_email.trim();
-      let parentId = editingStudent.parent_id || null;
-
-      // If parent email is provided and different from before, create/update parent account
-      if (newParentEmail && newParentEmail !== oldParentEmail) {
-        try {
-          parentId = await ensureParentAccount(newParentEmail, editForm.parent_name);
-          // Link parent to student
-          if (parentId && editingStudent.id) {
-            const { error: linkError } = await supabaseUntyped
-              .from('parent_student_links')
-              .upsert({ parent_id: parentId, student_id: editingStudent.id }, { onConflict: 'parent_id,student_id' });
-            if (linkError) console.warn('parent_student_links upsert warning:', linkError.message);
-
-            // Send welcome SMS to parent
-            if (editForm.parent_phone) {
-              try {
-                const studentFullName = `${editForm.first_name} ${editForm.last_name}`;
-                const smsMsg = `Welcome to Kimatu Analytics! You have been linked as a parent for ${studentFullName}. Login: ${newParentEmail} | Password: Parent@2025. Portal: https://kimatu.company. Please change your password after first login.`;
-                await sendSMS(editForm.parent_phone, smsMsg);
-              } catch (smsErr) {
-                console.warn('Parent welcome SMS failed:', smsErr);
-              }
-            }
-            toast.success('Parent account created and linked successfully!');
-          }
-        } catch (parentError: any) {
-          console.warn('Parent account creation warning:', parentError.message);
-          toast.warning(`Student updated but parent account issue: ${parentError.message}`);
-        }
-      }
-
       const { error } = await supabaseUntyped.from('students').update({
         first_name: editForm.first_name.trim(),
         middle_name: editForm.middle_name.trim() || null,
         last_name: editForm.last_name.trim(),
         class_id: editForm.class_id || null,
-        stream: editForm.stream || null,
         parent_name: editForm.parent_name.trim() || null,
         parent_phone: editForm.parent_phone.trim() || null,
-        parent_email: newParentEmail || null,
-        parent_id: parentId,
-        email: editForm.student_email.trim() || null,
+        parent_email: editForm.parent_email.trim() || null,
+        parent2_name: editForm.parent2_name.trim() || null,
+        parent2_phone: editForm.parent2_phone.trim() || null,
+        parent2_email: editForm.parent2_email.trim() || null,
         gender: editForm.gender || null,
         date_of_birth: editForm.date_of_birth || null,
-        boarding_status: editForm.boarding_status || null,
-        relationship_to_learner: editForm.relationship_to_learner || null,
-        home_county: editForm.home_county || null,
-        home_sub_county: editForm.home_sub_county || null,
+        birth_cert_number: editForm.birth_cert_number.trim() || null,
         nationality: editForm.nationality || 'Kenyan',
-        learner_status: editForm.learner_status || 'Active',
-        birth_cert_number: editForm.birth_cert_number || null,
-        religion: editForm.religion || null,
-        previous_school: editForm.previous_school || null,
-        medical_info: editForm.medical_info || null,
-        allergies: editForm.allergies || null,
-        blood_group: editForm.blood_group || null,
-        disability_details: editForm.disability_details || null,
-        transport_route: editForm.transport_route || null,
-        club_memberships: editForm.club_memberships || null,
-        parent_id_number: editForm.parent_id_number || null,
-        additional_emergency_contact: editForm.additional_emergency_contact || null,
+        county: editForm.county || null,
+        sub_county: editForm.sub_county.trim() || null,
+        boarding_status: editForm.boarding_status || 'day',
+        disability_status: editForm.disability_status.trim() || null,
+        emergency_contact_name: editForm.emergency_contact_name.trim() || null,
+        emergency_contact_phone: editForm.emergency_contact_phone.trim() || null,
       }).eq('id', editingStudent.id);
       if (error) throw new Error(error.message);
-      toast.success('Student updated successfully!');
+      toast.success('Learner updated successfully!');
       setEditingStudent(null);
       refetch();
     } catch (err: any) {
-      toast.error('Failed to update student: ' + err.message);
+      toast.error('Failed to update learner: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -344,12 +299,13 @@ export default function SchoolAdminStudents() {
     if (!deletingStudent) return;
     setDeleting(true);
     try {
-      await deleteStudentAccount(deletingStudent.id, deletingStudent.profile_id);
-      toast.success(`Student "${deletingStudent.first_name} ${deletingStudent.last_name}" deleted from database and authentication.`);
+      const { error } = await supabaseUntyped.from('students').delete().eq('id', deletingStudent.id);
+      if (error) throw new Error(error.message);
+      toast.success(`Learner "${deletingStudent.first_name} ${deletingStudent.last_name}" deleted.`);
       setDeletingStudent(null);
       refetch();
     } catch (err: any) {
-      toast.error('Failed to delete student: ' + err.message);
+      toast.error('Failed to delete learner: ' + err.message);
     } finally {
       setDeleting(false);
     }
@@ -360,259 +316,476 @@ export default function SchoolAdminStudents() {
 
   const handlePhotoSuccess = async (url: string, studentId: string) => {
     await supabaseUntyped.from('students').update({ photo_url: url }).eq('id', studentId);
-    toast.success('Student photo updated!');
+    toast.success('Learner photo updated!');
     setPhotoStudent(null);
     refetch();
   };
 
-  const filteredStudents = students.filter((s: any) => {
-    const matchesSearch =
-      (s.first_name + ' ' + s.last_name).toLowerCase().includes(search.toLowerCase()) ||
-      s.admission_number?.toLowerCase().includes(search.toLowerCase());
-    const matchesClass = filterClassId ? s.class_id === filterClassId : true;
-    return matchesSearch && matchesClass;
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 text-gray-400 inline" />;
+    return sortDir === 'asc'
+      ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600 inline" />
+      : <ChevronDown className="w-3 h-3 ml-1 text-blue-600 inline" />;
+  };
+
+  const filteredStudents = students
+    .filter((s: any) => {
+      const matchesSearch = 
+        (s.first_name + ' ' + (s.middle_name || '') + ' ' + s.last_name).toLowerCase().includes(search.toLowerCase()) ||
+        (s.admission_number || s.assessment_number)?.toLowerCase().includes(search.toLowerCase());
+      const matchesClass = filterClassId ? s.class_id === filterClassId : true;
+      return matchesSearch && matchesClass;
+    })
+    .sort((a: any, b: any) => {
+      let aVal = '', bVal = '';
+      if (sortField === 'name') { aVal = `${a.first_name} ${a.last_name}`; bVal = `${b.first_name} ${b.last_name}`; }
+      if (sortField === 'assessment_number') { aVal = a.admission_number || ''; bVal = b.admission_number || ''; }
+      if (sortField === 'class') { aVal = a.classes?.name || ''; bVal = b.classes?.name || ''; }
+      if (sortField === 'gender') { aVal = a.gender || ''; bVal = b.gender || ''; }
+      return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+
+  // ─── Grade View Data ─────────────────────────────────────────────────────────
+  interface ClassGroup {
+    classId: string;
+    className: string;
+    level: number | null;
+    stream: string | null;
+    students: any[];
+    totalBoys: number;
+    totalGirls: number;
+  }
+
+  const classGroups: ClassGroup[] = classes.map((cls: any) => {
+    const classStudents = filteredStudents.filter((s: any) => s.class_id === cls.id);
+    const totalBoys = classStudents.filter((s: any) => s.gender?.toLowerCase() === 'male').length;
+    const totalGirls = classStudents.filter((s: any) => s.gender?.toLowerCase() === 'female').length;
+    return {
+      classId: cls.id,
+      className: cls.name,
+      level: cls.level ?? cls.grade_level,
+      stream: cls.stream,
+      students: classStudents,
+      totalBoys,
+      totalGirls,
+    };
+  }).filter((g: ClassGroup) => g.students.length > 0 || !search)
+    .sort((a: ClassGroup, b: ClassGroup) => (a.level || 0) - (b.level || 0));
+
+  const uniqueLevels = Array.from(new Set(classGroups.map(g => g.level).filter(l => l !== null))).sort((a, b) => (a as number) - (b as number));
+
+  const filteredGroups = classGroups.filter((group: ClassGroup) => {
+    if (selectedLevel && String(group.level) !== selectedLevel) return false;
+    return true;
   });
 
-  const inputCls = 'w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]';
-  const selectCls = inputCls + ' bg-white';
-  const labelCls = 'block text-xs text-gray-500 mb-1';
+  const totalStudents = students.length;
+  const totalBoys = students.filter((s: any) => s.gender?.toLowerCase() === 'male').length;
+  const totalGirls = students.filter((s: any) => s.gender?.toLowerCase() === 'female').length;
+
+  const handlePrint = () => window.print();
+
+  // If trial is expired, show payment lock
+  if (trialStatus?.isExpired) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Learners</h1>
+          <p className="text-sm text-gray-500">Manage your learners</p>
+        </div>
+        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-8 text-center">
+          <h2 className="text-lg font-semibold text-red-800 mb-2">Trial Period Expired</h2>
+          <p className="text-sm text-red-600 mb-4">Please subscribe to continue managing learners.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const inputCls = "w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]";
+  const labelCls = "block text-xs text-gray-500 mb-1";
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Students</h1>
-          <p className="text-sm text-gray-500">{filteredStudents.length} total students</p>
+          <h1 className="text-2xl font-bold">Learners</h1>
+          <p className="text-sm text-gray-500">{filteredStudents.length} total learners</p>
         </div>
-        <button onClick={() => setShowAdd(!showAdd)} className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#1d4ed8]">
-          <Plus className="w-4 h-4" /> Add Student
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className="flex bg-gray-100 rounded-xl p-1 mr-2">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              List View
+            </button>
+            <button
+              onClick={() => setViewMode('by-grade')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${viewMode === 'by-grade' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              View by Grade
+            </button>
+          </div>
+          <button onClick={() => setShowAdd(!showAdd)} className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#1d4ed8]">
+            <Plus className="w-4 h-4" /> Add Learner
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Search students..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
+          <input type="text" placeholder="Search learners..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
         </div>
         <div className="relative w-full sm:w-64">
           <Filter className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <select value={filterClassId} onChange={e => setFilterClassId(e.target.value)} className="w-full pl-11 pr-10 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB] appearance-none">
             <option value="">All Classes</option>
             {classes.map((cls) => (
-              <option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>
+              <option key={cls.id} value={cls.id}>{cls.name}{cls.stream ? ` (${cls.stream})` : ''}</option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* Add Student Form */}
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
-          <h3 className="text-lg font-semibold mb-1">Add New Student</h3>
-          <p className="text-xs text-blue-600 mb-1">Student password: <strong>[Admission Number]@2025</strong></p>
+          <h3 className="text-lg font-semibold mb-2">Add New Learner</h3>
+          <p className="text-xs text-blue-600 mb-1">Learner password: <strong>[Assessment Number]@2025</strong></p>
           <p className="text-xs text-green-600 mb-4">Parent account auto-created with password: <strong>Parent@2025</strong></p>
-
-          <form onSubmit={handleAdd} className="space-y-4">
-            {/* Mandatory Fields */}
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 mb-3 border-b pb-1">Required Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div><label className={labelCls}>Admission Number *</label><input placeholder="e.g. 2025001" value={formData.admission_number} onChange={e => setFormData({...formData, admission_number: e.target.value})} className={inputCls} required /></div>
-                <div><label className={labelCls}>First Name *</label><input placeholder="First Name" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className={inputCls} required /></div>
-                <div><label className={labelCls}>Middle Name (optional)</label><input placeholder="Middle Name" value={formData.middle_name} onChange={e => setFormData({...formData, middle_name: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Last Name *</label><input placeholder="Last Name" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className={inputCls} required /></div>
-                <div>
-                  <label className={labelCls}>Gender *</label>
-                  <select value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value as GenderType})} className={selectCls} required>
-                    <option value="">Select Gender</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                  </select>
-                </div>
-                <div><label className={labelCls}>Date of Birth</label><input type="date" value={formData.date_of_birth} onChange={e => setFormData({...formData, date_of_birth: e.target.value})} className={inputCls} /></div>
-                <div>
-                  <label className={labelCls}>Class *</label>
-                  <select value={formData.class_id} onChange={e => setFormData({...formData, class_id: e.target.value})} className={selectCls} required>
-                    <option value="">Select Class</option>
-                    {classes.map((cls) => (<option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Curriculum *</label>
-                  <select value={formData.curriculum} onChange={e => setFormData({...formData, curriculum: e.target.value as 'CBE' | '844'})} className={selectCls} required>
-                    <option value="CBE">CBE (Competency Based)</option>
-                    <option value="844">8-4-4 (Traditional)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Boarding Status *</label>
-                  <select value={formData.boarding_status} onChange={e => setFormData({...formData, boarding_status: e.target.value})} className={selectCls} required>
-                    <option value="Day">Day</option>
-                    <option value="Boarding">Boarding</option>
-                    <option value="Weekly Boarding">Weekly Boarding</option>
-                  </select>
-                </div>
-                <div><label className={labelCls}>Parent/Guardian Name *</label><input placeholder="Parent/Guardian Name" value={formData.parent_name} onChange={e => setFormData({...formData, parent_name: e.target.value})} className={inputCls} required /></div>
-                <div><label className={labelCls}>Parent/Guardian Phone *</label><input placeholder="+254..." value={formData.parent_phone} onChange={e => setFormData({...formData, parent_phone: e.target.value})} className={inputCls} required /></div>
-                <div>
-                  <label className={labelCls}>Relationship to Learner *</label>
-                  <select value={formData.relationship_to_learner} onChange={e => setFormData({...formData, relationship_to_learner: e.target.value})} className={selectCls} required>
-                    <option value="">Select Relationship</option>
-                    <option value="Father">Father</option>
-                    <option value="Mother">Mother</option>
-                    <option value="Guardian">Guardian</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Home County *</label>
-                  <select value={formData.home_county} onChange={e => setFormData({...formData, home_county: e.target.value})} className={selectCls} required>
-                    <option value="">Select County</option>
-                    {KENYA_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div><label className={labelCls}>Home Sub-County *</label><input placeholder="Sub-County" value={formData.home_sub_county} onChange={e => setFormData({...formData, home_sub_county: e.target.value})} className={inputCls} required /></div>
-                <div>
-                  <label className={labelCls}>Nationality *</label>
-                  <input placeholder="Nationality" value={formData.nationality} onChange={e => setFormData({...formData, nationality: e.target.value})} className={inputCls} required />
-                </div>
-                <div>
-                  <label className={labelCls}>Learner Status *</label>
-                  <select value={formData.learner_status} onChange={e => setFormData({...formData, learner_status: e.target.value})} className={selectCls} required>
-                    <option value="Active">Active</option>
-                    <option value="Transferred">Transferred</option>
-                    <option value="Withdrawn">Withdrawn</option>
-                    <option value="Suspended">Suspended</option>
-                  </select>
-                </div>
-              </div>
+          <form onSubmit={handleAdd}>
+            {/* Section: Basic Info */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Basic Information</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <input placeholder="Assessment Number *" value={formData.assessment_number} onChange={e => setFormData({...formData, assessment_number: e.target.value})} className={inputCls} required />
+              <input placeholder="First Name *" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className={inputCls} required />
+              <input placeholder="Middle Name (optional)" value={formData.middle_name} onChange={e => setFormData({...formData, middle_name: e.target.value})} className={inputCls} />
+              <input placeholder="Last Name / Surname *" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className={inputCls} required />
+              <select value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value as GenderType})} className={inputCls + " bg-white"}>
+                <option value="">Select Gender *</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+              <input type="date" placeholder="Date of Birth" value={formData.date_of_birth} onChange={e => setFormData({...formData, date_of_birth: e.target.value})} className={inputCls} />
+              <input placeholder="Birth Certificate Number" value={formData.birth_cert_number} onChange={e => setFormData({...formData, birth_cert_number: e.target.value})} className={inputCls} />
+              <input placeholder="Nationality" value={formData.nationality} onChange={e => setFormData({...formData, nationality: e.target.value})} className={inputCls} />
+              <input placeholder="Learner Email (optional)" value={formData.student_email} onChange={e => setFormData({...formData, student_email: e.target.value})} className={inputCls} />
             </div>
-
-            {/* Optional Fields Toggle */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowOptional(!showOptional)}
-                className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
-              >
-                {showOptional ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                {showOptional ? 'Hide' : 'Show'} Optional Fields
-              </button>
-
-              {showOptional && (
-                <div className="mt-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3 border-b pb-1">Optional Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div><label className={labelCls}>Student Email</label><input type="email" placeholder="student@email.com" value={formData.student_email} onChange={e => setFormData({...formData, student_email: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Parent Email (auto-creates parent account)</label><input type="email" placeholder="parent@email.com" value={formData.parent_email} onChange={e => setFormData({...formData, parent_email: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Birth Certificate Number</label><input placeholder="Birth Cert No." value={formData.birth_cert_number} onChange={e => setFormData({...formData, birth_cert_number: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Stream</label><input placeholder="Stream (e.g. East, West)" value={formData.stream} onChange={e => setFormData({...formData, stream: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Religion</label><input placeholder="Religion" value={formData.religion} onChange={e => setFormData({...formData, religion: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Previous School</label><input placeholder="Previous School" value={formData.previous_school} onChange={e => setFormData({...formData, previous_school: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Medical Information</label><input placeholder="Medical Info" value={formData.medical_info} onChange={e => setFormData({...formData, medical_info: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Allergies</label><input placeholder="Allergies" value={formData.allergies} onChange={e => setFormData({...formData, allergies: e.target.value})} className={inputCls} /></div>
-                    <div>
-                      <label className={labelCls}>Blood Group</label>
-                      <select value={formData.blood_group} onChange={e => setFormData({...formData, blood_group: e.target.value})} className={selectCls}>
-                        <option value="">Select Blood Group</option>
-                        {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bg => <option key={bg} value={bg}>{bg}</option>)}
-                      </select>
-                    </div>
-                    <div><label className={labelCls}>Disability Details</label><input placeholder="Disability Details (if any)" value={formData.disability_details} onChange={e => setFormData({...formData, disability_details: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Transport Route</label><input placeholder="Transport Route" value={formData.transport_route} onChange={e => setFormData({...formData, transport_route: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Club Memberships</label><input placeholder="Clubs (comma separated)" value={formData.club_memberships} onChange={e => setFormData({...formData, club_memberships: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Parent ID Number</label><input placeholder="Parent/Guardian ID No." value={formData.parent_id_number} onChange={e => setFormData({...formData, parent_id_number: e.target.value})} className={inputCls} /></div>
-                    <div><label className={labelCls}>Additional Emergency Contact</label><input placeholder="Emergency Contact Phone" value={formData.additional_emergency_contact} onChange={e => setFormData({...formData, additional_emergency_contact: e.target.value})} className={inputCls} /></div>
-                  </div>
-                </div>
-              )}
+            {/* Section: School Info */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">School Information</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <select value={formData.class_id} onChange={e => setFormData({...formData, class_id: e.target.value})} className={inputCls + " bg-white"} required>
+                <option value="">Select Class *</option>
+                {classes.map((cls) => (
+                  <option key={cls.id} value={cls.id}>{cls.name}{cls.stream ? ` (${cls.stream})` : ''}</option>
+                ))}
+              </select>
+              <select value={formData.boarding_status} onChange={e => setFormData({...formData, boarding_status: e.target.value})} className={inputCls + " bg-white"}>
+                <option value="day">Day Scholar</option>
+                <option value="boarding">Boarder</option>
+                <option value="day_and_boarding">Day & Boarding</option>
+              </select>
+              <input placeholder="Disability / Special Needs (if any)" value={formData.disability_status} onChange={e => setFormData({...formData, disability_status: e.target.value})} className={inputCls} />
             </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button type="button" onClick={() => setShowAdd(false)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+            {/* Section: Location */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Location</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <select value={formData.county} onChange={e => setFormData({...formData, county: e.target.value})} className={inputCls + " bg-white"}>
+                <option value="">Select County</option>
+                {KENYA_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input placeholder="Sub-County" value={formData.sub_county} onChange={e => setFormData({...formData, sub_county: e.target.value})} className={inputCls} />
+            </div>
+            {/* Section: Parent / Guardian 1 */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Parent / Guardian 1</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <input placeholder="Parent / Guardian Name" value={formData.parent_name} onChange={e => setFormData({...formData, parent_name: e.target.value})} className={inputCls} />
+              <input placeholder="Parent Phone" value={formData.parent_phone} onChange={e => setFormData({...formData, parent_phone: e.target.value})} className={inputCls} />
+              <input placeholder="Parent Email (auto-creates parent account)" value={formData.parent_email} onChange={e => setFormData({...formData, parent_email: e.target.value})} className={inputCls} type="email" />
+            </div>
+            {/* Section: Parent / Guardian 2 */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Parent / Guardian 2 (optional)</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <input placeholder="Parent 2 Name" value={formData.parent2_name} onChange={e => setFormData({...formData, parent2_name: e.target.value})} className={inputCls} />
+              <input placeholder="Parent 2 Phone" value={formData.parent2_phone} onChange={e => setFormData({...formData, parent2_phone: e.target.value})} className={inputCls} />
+              <input placeholder="Parent 2 Email" value={formData.parent2_email} onChange={e => setFormData({...formData, parent2_email: e.target.value})} className={inputCls} type="email" />
+            </div>
+            {/* Section: Emergency Contact */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Emergency Contact</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <input placeholder="Emergency Contact Name" value={formData.emergency_contact_name} onChange={e => setFormData({...formData, emergency_contact_name: e.target.value})} className={inputCls} />
+              <input placeholder="Emergency Contact Phone" value={formData.emergency_contact_phone} onChange={e => setFormData({...formData, emergency_contact_phone: e.target.value})} className={inputCls} />
+            </div>
+            <div className="flex justify-end gap-3 mt-2">
+              <button type="button" onClick={() => { setShowAdd(false); setFormData(defaultForm); }} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
               <button type="submit" disabled={adding} className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
                 {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                Add Student
+                Add Learner
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Students Table */}
-      <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b bg-gray-50">
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Photo</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Admission</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Student</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Class</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Parent</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
-              ) : filteredStudents.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">No students found</td></tr>
-              ) : (
-                filteredStudents.map((s: any) => (
-                  <tr key={s.id} className="border-b hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
-                        {s.photo_url ? <img src={s.photo_url} alt="" className="w-full h-full object-cover" /> : <span className="text-xs font-bold text-gray-400">{(s.first_name?.[0] || '?').toUpperCase()}</span>}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium">{s.admission_number}</td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium">{s.first_name} {s.middle_name ? s.middle_name + ' ' : ''}{s.last_name}</div>
-                      <div className="text-xs text-gray-500">{s.gender || '-'} {s.date_of_birth ? `· ${s.date_of_birth}` : ''}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      <div>{s.classes?.name || '-'}</div>
-                      <div className="text-xs text-gray-400">{s.boarding_status || 'Day'}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                        s.learner_status === 'Active' ? 'bg-green-100 text-green-700' :
-                        s.learner_status === 'Transferred' ? 'bg-blue-100 text-blue-700' :
-                        s.learner_status === 'Suspended' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>{s.learner_status || 'Active'}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm">{s.parent_name || '-'}</div>
-                      <div className="text-xs text-gray-500">{s.parent_phone || s.parent_email || '-'}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <button onClick={() => setPhotoStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100">
-                          <Camera className="w-3 h-3" /> Photo
-                        </button>
-                        <button onClick={() => setPromotingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
-                          Promote
-                        </button>
-                        <button onClick={() => openEdit(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100">
-                          <Pencil className="w-3 h-3" /> Edit
-                        </button>
-                        <button onClick={() => setDeletingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
-                          <Trash2 className="w-3 h-3" /> Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {viewMode === 'list' ? (
+        /* ─── LIST VIEW ─────────────────────────────────────────────── */
+        <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b bg-gray-50">
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase">Photo</th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('assessment_number')}>
+                    Assessment # <SortIcon field="assessment_number" />
+                  </th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('name')}>
+                    Learner <SortIcon field="name" />
+                  </th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('class')}>
+                    Class <SortIcon field="class" />
+                  </th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('gender')}>
+                    Gender <SortIcon field="gender" />
+                  </th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase">Parent</th>
+                  <th className="px-4 py-4 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
+                ) : filteredStudents.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">No learners found</td></tr>
+                ) : (
+                  (() => {
+                    const grouped = filteredStudents.reduce((acc: Record<string, any[]>, s: any) => {
+                      const className = s.classes?.name || 'No Class';
+                      if (!acc[className]) acc[className] = [];
+                      acc[className].push(s);
+                      return acc;
+                    }, {});
+                    const sortedClassNames = Object.keys(grouped).sort();
+                    return sortedClassNames.map((className) => (
+                      <React.Fragment key={className}>
+                        <tr className="bg-blue-50 border-y border-blue-100">
+                          <td colSpan={7} className="px-4 py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">
+                                <span className="text-xs font-bold text-blue-600">{className[0]}</span>
+                              </div>
+                              <span className="text-sm font-semibold text-blue-800">{className}</span>
+                              <span className="text-xs text-blue-500 ml-1">({grouped[className].length} learners)</span>
+                            </div>
+                          </td>
+                        </tr>
+                        {grouped[className].map((s: any) => (
+                          <tr key={s.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
+                                {s.photo_url ? <img src={s.photo_url} alt="" className="w-full h-full object-cover" /> : <span className="text-xs font-bold text-gray-400">{(s.first_name?.[0] || '?').toUpperCase()}</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-sm font-medium">{s.admission_number || s.assessment_number}</td>
+                            <td className="px-4 py-4">
+                              <div className="text-sm font-medium">{s.first_name} {s.middle_name ? s.middle_name + ' ' : ''}{s.last_name}</div>
+                              <div className="text-xs text-gray-500">{s.student_email}</div>
+                              {s.boarding_status && s.boarding_status !== 'day' && (
+                                <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">{s.boarding_status === 'boarding' ? 'Boarder' : 'Day & Boarding'}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-sm text-gray-600">{s.classes?.name || '-'}</td>
+                            <td className="px-4 py-4 text-sm text-gray-600 capitalize">{s.gender || '-'}</td>
+                            <td className="px-4 py-4">
+                              <div className="text-sm">{s.parent_name || '-'}</div>
+                              <div className="text-xs text-gray-500">{s.parent_email || s.parent_phone || '-'}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <button onClick={() => setPhotoStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors">
+                                  <Camera className="w-3 h-3" /> Photo
+                                </button>
+                                <button onClick={() => setPromotingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors">
+                                  Promote
+                                </button>
+                                <button onClick={() => openEdit(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors">
+                                  <Pencil className="w-3 h-3" /> Edit
+                                </button>
+                                <button onClick={() => setDeletingStudent(s)} className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors">
+                                  <Trash2 className="w-3 h-3" /> Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    ));
+                  })()
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* ─── VIEW BY GRADE ─────────────────────────────────────────── */
+        <div className="space-y-6">
+          {/* Summary Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
+              <div className="text-2xl font-bold text-blue-600">{totalStudents}</div>
+              <div className="text-xs text-gray-500">Total Learners</div>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
+              <div className="text-2xl font-bold text-green-600">{totalBoys}</div>
+              <div className="text-xs text-gray-500">Boys</div>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
+              <div className="text-2xl font-bold text-pink-600">{totalGirls}</div>
+              <div className="text-xs text-gray-500">Girls</div>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
+              <div className="text-2xl font-bold text-purple-600">{classes.length}</div>
+              <div className="text-xs text-gray-500">Classes</div>
+            </div>
+          </div>
 
-      {/* Promote Student Modal */}
+          {/* Grade Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search learners by name, admission number, or parent name..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              />
+            </div>
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <select
+                value={selectedLevel}
+                onChange={e => setSelectedLevel(e.target.value)}
+                className="pl-9 pr-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB] appearance-none min-w-[160px]"
+              >
+                <option value="">All Grades</option>
+                {uniqueLevels.map(level => (
+                  <option key={level} value={String(level)}>Grade {level}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-4 py-3 rounded-xl text-sm font-medium hover:bg-gray-200 transition-colors"
+            >
+              <Download className="w-4 h-4" /> Print
+            </button>
+          </div>
+
+          {/* Class Groups */}
+          {loading ? (
+            <div className="text-center py-12"><Loader2 className="w-8 h-8 animate-spin mx-auto text-gray-400" /></div>
+          ) : filteredGroups.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-2xl border border-gray-100">
+              <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No learners found</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filteredGroups.map((group) => {
+                const isExpanded = expandedClass === group.classId;
+                return (
+                  <div key={group.classId} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                    <button
+                      onClick={() => setExpandedClass(isExpanded ? null : group.classId)}
+                      className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                          <Users className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="font-semibold text-gray-900">{group.className} {group.stream && `(${group.stream})`}</h3>
+                          <p className="text-xs text-gray-500">
+                            {group.level !== null ? `Grade ${group.level}` : 'Level -'} • {group.students.length} learners
+                            {group.totalBoys > 0 && ` • ${group.totalBoys} boys`}
+                            {group.totalGirls > 0 && ` • ${group.totalGirls} girls`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex gap-1 text-xs">
+                          {group.totalBoys > 0 && (
+                            <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-full flex items-center gap-1">
+                              <Users className="w-3 h-3" /> {group.totalBoys} Boys
+                            </span>
+                          )}
+                          {group.totalGirls > 0 && (
+                            <span className="px-2 py-1 bg-pink-50 text-pink-600 rounded-full flex items-center gap-1">
+                              <Users className="w-3 h-3" /> {group.totalGirls} Girls
+                            </span>
+                          )}
+                        </div>
+                        {isExpanded ? <ChevronUpIcon className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-gray-50">
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Admission #</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Gender</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Parent</th>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Parent Phone</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.students.length === 0 ? (
+                              <tr><td colSpan={6} className="text-center py-4 text-gray-500">No learners in this class</td></tr>
+                            ) : (
+                              group.students.map((student: any, idx: number) => (
+                                <tr key={student.id} className="border-b hover:bg-gray-50">
+                                  <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
+                                  <td className="px-4 py-3 text-gray-600">{student.admission_number || '-'}</td>
+                                  <td className="px-4 py-3 font-medium">{student.first_name} {student.last_name}</td>
+                                  <td className="px-4 py-3">
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                      student.gender?.toLowerCase() === 'male' ? 'bg-blue-50 text-blue-600' :
+                                      student.gender?.toLowerCase() === 'female' ? 'bg-pink-50 text-pink-600' :
+                                      'bg-gray-50 text-gray-600'
+                                    }`}>{student.gender || '-'}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-600">{student.parent_name || '-'}</td>
+                                  <td className="px-4 py-3 text-gray-600">{student.parent_phone || '-'}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Promote Learner Modal */}
       {promotingStudent && (
         <PromoteStudentModal
           student={promotingStudent}
@@ -622,12 +795,12 @@ export default function SchoolAdminStudents() {
         />
       )}
 
-      {/* Student Photo Modal */}
+      {/* Learner Photo Modal */}
       {photoStudent && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-lg">
-            <h2 className="text-lg font-semibold mb-1">Student Photo</h2>
-            <p className="text-sm text-gray-500 mb-4">{photoStudent.first_name} {photoStudent.last_name} — {photoStudent.admission_number}</p>
+            <h2 className="text-lg font-semibold mb-1">Learner Photo</h2>
+            <p className="text-sm text-gray-500 mb-4">{photoStudent.first_name} {photoStudent.last_name} — {photoStudent.admission_number || photoStudent.assessment_number}</p>
             <div className="flex flex-col items-center py-4">
               <PhotoUpload
                 currentPhotoUrl={photoStudent.photo_url}
@@ -635,7 +808,7 @@ export default function SchoolAdminStudents() {
                 folder="students"
                 entityId={photoStudent.id}
                 onSuccess={(url) => handlePhotoSuccess(url, photoStudent.id)}
-                label="Student Photo"
+                label="Learner Photo"
                 size="lg"
               />
             </div>
@@ -644,105 +817,76 @@ export default function SchoolAdminStudents() {
         </div>
       )}
 
-      {/* Edit Student Modal */}
+      {/* Edit Learner Modal */}
       {editingStudent && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl p-6 max-w-2xl w-full shadow-lg my-4">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Edit Student</h2>
+              <h2 className="text-lg font-semibold">Edit Learner</h2>
               <button onClick={() => setEditingStudent(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
-            <p className="text-xs text-gray-500 mb-4">Admission: <strong>{editingStudent.admission_number}</strong></p>
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <p className="text-xs text-gray-500 mb-4">Assessment #: <strong>{editingStudent.admission_number}</strong></p>
+            <form onSubmit={handleSaveEdit}>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Basic Information</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div><label className={labelCls}>First Name *</label><input value={editForm.first_name} onChange={e => setEditForm({...editForm, first_name: e.target.value})} className={inputCls} required /></div>
                 <div><label className={labelCls}>Middle Name</label><input value={editForm.middle_name} onChange={e => setEditForm({...editForm, middle_name: e.target.value})} className={inputCls} /></div>
                 <div><label className={labelCls}>Last Name *</label><input value={editForm.last_name} onChange={e => setEditForm({...editForm, last_name: e.target.value})} className={inputCls} required /></div>
-                <div>
-                  <label className={labelCls}>Class</label>
-                  <select value={editForm.class_id} onChange={e => setEditForm({...editForm, class_id: e.target.value})} className={selectCls}>
-                    <option value="">No Class</option>
-                    {classes.map((cls) => (<option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Gender</label>
-                  <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value as GenderType})} className={selectCls}>
+                <div><label className={labelCls}>Gender</label>
+                  <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value as GenderType})} className={inputCls + " bg-white"}>
                     <option value="">Select Gender</option>
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </select>
                 </div>
                 <div><label className={labelCls}>Date of Birth</label><input type="date" value={editForm.date_of_birth} onChange={e => setEditForm({...editForm, date_of_birth: e.target.value})} className={inputCls} /></div>
-                <div>
-                  <label className={labelCls}>Boarding Status</label>
-                  <select value={editForm.boarding_status} onChange={e => setEditForm({...editForm, boarding_status: e.target.value})} className={selectCls}>
-                    <option value="Day">Day</option>
-                    <option value="Boarding">Boarding</option>
-                    <option value="Weekly Boarding">Weekly Boarding</option>
+                <div><label className={labelCls}>Birth Certificate Number</label><input value={editForm.birth_cert_number} onChange={e => setEditForm({...editForm, birth_cert_number: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Nationality</label><input value={editForm.nationality} onChange={e => setEditForm({...editForm, nationality: e.target.value})} className={inputCls} /></div>
+              </div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">School Information</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div><label className={labelCls}>Class</label>
+                  <select value={editForm.class_id} onChange={e => setEditForm({...editForm, class_id: e.target.value})} className={inputCls + " bg-white"}>
+                    <option value="">No Class</option>
+                    {classes.map((cls) => (<option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>))}
                   </select>
                 </div>
-                <div>
-                  <label className={labelCls}>Learner Status</label>
-                  <select value={editForm.learner_status} onChange={e => setEditForm({...editForm, learner_status: e.target.value})} className={selectCls}>
-                    <option value="Active">Active</option>
-                    <option value="Transferred">Transferred</option>
-                    <option value="Withdrawn">Withdrawn</option>
-                    <option value="Suspended">Suspended</option>
+                <div><label className={labelCls}>Boarding Status</label>
+                  <select value={editForm.boarding_status} onChange={e => setEditForm({...editForm, boarding_status: e.target.value})} className={inputCls + " bg-white"}>
+                    <option value="day">Day Scholar</option>
+                    <option value="boarding">Boarder</option>
+                    <option value="day_and_boarding">Day & Boarding</option>
                   </select>
                 </div>
-                <div><label className={labelCls}>Parent Name</label><input value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Parent Phone</label><input value={editForm.parent_phone} onChange={e => setEditForm({...editForm, parent_phone: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Parent Email</label><input type="email" value={editForm.parent_email} onChange={e => setEditForm({...editForm, parent_email: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Student Email</label><input type="email" placeholder="student@email.com" value={editForm.student_email} onChange={e => setEditForm({...editForm, student_email: e.target.value})} className={inputCls} /></div>
-                <div>
-                  <label className={labelCls}>Relationship to Learner</label>
-                  <select value={editForm.relationship_to_learner} onChange={e => setEditForm({...editForm, relationship_to_learner: e.target.value})} className={selectCls}>
-                    <option value="">Select</option>
-                    <option value="Father">Father</option>
-                    <option value="Mother">Mother</option>
-                    <option value="Guardian">Guardian</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Home County</label>
-                  <select value={editForm.home_county} onChange={e => setEditForm({...editForm, home_county: e.target.value})} className={selectCls}>
+                <div><label className={labelCls}>Disability / Special Needs</label><input value={editForm.disability_status} onChange={e => setEditForm({...editForm, disability_status: e.target.value})} className={inputCls} /></div>
+              </div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Location</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div><label className={labelCls}>County</label>
+                  <select value={editForm.county} onChange={e => setEditForm({...editForm, county: e.target.value})} className={inputCls + " bg-white"}>
                     <option value="">Select County</option>
                     {KENYA_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <div><label className={labelCls}>Home Sub-County</label><input value={editForm.home_sub_county} onChange={e => setEditForm({...editForm, home_sub_county: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Nationality</label><input value={editForm.nationality} onChange={e => setEditForm({...editForm, nationality: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Sub-County</label><input value={editForm.sub_county} onChange={e => setEditForm({...editForm, sub_county: e.target.value})} className={inputCls} /></div>
               </div>
-
-              <button type="button" onClick={() => setEditShowOptional(!editShowOptional)} className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700">
-                {editShowOptional ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                {editShowOptional ? 'Hide' : 'Show'} Optional Fields
-              </button>
-
-              {editShowOptional && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div><label className={labelCls}>Birth Cert Number</label><input value={editForm.birth_cert_number} onChange={e => setEditForm({...editForm, birth_cert_number: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Religion</label><input value={editForm.religion} onChange={e => setEditForm({...editForm, religion: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Previous School</label><input value={editForm.previous_school} onChange={e => setEditForm({...editForm, previous_school: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Medical Info</label><input value={editForm.medical_info} onChange={e => setEditForm({...editForm, medical_info: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Allergies</label><input value={editForm.allergies} onChange={e => setEditForm({...editForm, allergies: e.target.value})} className={inputCls} /></div>
-                  <div>
-                    <label className={labelCls}>Blood Group</label>
-                    <select value={editForm.blood_group} onChange={e => setEditForm({...editForm, blood_group: e.target.value})} className={selectCls}>
-                      <option value="">Select</option>
-                      {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bg => <option key={bg} value={bg}>{bg}</option>)}
-                    </select>
-                  </div>
-                  <div><label className={labelCls}>Disability Details</label><input value={editForm.disability_details} onChange={e => setEditForm({...editForm, disability_details: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Transport Route</label><input value={editForm.transport_route} onChange={e => setEditForm({...editForm, transport_route: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Club Memberships</label><input value={editForm.club_memberships} onChange={e => setEditForm({...editForm, club_memberships: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Parent ID Number</label><input value={editForm.parent_id_number} onChange={e => setEditForm({...editForm, parent_id_number: e.target.value})} className={inputCls} /></div>
-                  <div><label className={labelCls}>Additional Emergency Contact</label><input value={editForm.additional_emergency_contact} onChange={e => setEditForm({...editForm, additional_emergency_contact: e.target.value})} className={inputCls} /></div>
-                </div>
-              )}
-
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Parent / Guardian 1</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div><label className={labelCls}>Parent Name</label><input value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Parent Phone</label><input value={editForm.parent_phone} onChange={e => setEditForm({...editForm, parent_phone: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Parent Email</label><input type="email" value={editForm.parent_email} onChange={e => setEditForm({...editForm, parent_email: e.target.value})} className={inputCls} /></div>
+              </div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Parent / Guardian 2</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div><label className={labelCls}>Parent 2 Name</label><input value={editForm.parent2_name} onChange={e => setEditForm({...editForm, parent2_name: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Parent 2 Phone</label><input value={editForm.parent2_phone} onChange={e => setEditForm({...editForm, parent2_phone: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Parent 2 Email</label><input type="email" value={editForm.parent2_email} onChange={e => setEditForm({...editForm, parent2_email: e.target.value})} className={inputCls} /></div>
+              </div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Emergency Contact</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div><label className={labelCls}>Emergency Contact Name</label><input value={editForm.emergency_contact_name} onChange={e => setEditForm({...editForm, emergency_contact_name: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Emergency Contact Phone</label><input value={editForm.emergency_contact_phone} onChange={e => setEditForm({...editForm, emergency_contact_phone: e.target.value})} className={inputCls} /></div>
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setEditingStudent(null)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={saving} className="px-6 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
@@ -763,12 +907,12 @@ export default function SchoolAdminStudents() {
                 <Trash2 className="w-5 h-5 text-red-600" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Delete Student</h2>
+                <h2 className="text-lg font-semibold">Delete Learner</h2>
                 <p className="text-xs text-gray-500">This action cannot be undone</p>
               </div>
             </div>
             <p className="text-sm text-gray-700 mb-6">
-              Are you sure you want to delete <strong>{deletingStudent.first_name} {deletingStudent.last_name}</strong> ({deletingStudent.admission_number})?
+              Are you sure you want to delete <strong>{deletingStudent.first_name} {deletingStudent.last_name}</strong> ({deletingStudent.admission_number || deletingStudent.assessment_number})?
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeletingStudent(null)} className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>

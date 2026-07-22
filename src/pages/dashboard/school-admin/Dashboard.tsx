@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router-dom';
-import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight, Eye, TrendingUp, ArrowUpRight, MessageSquare } from 'lucide-react';
+import { Link } from 'react-router';
+import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight, BarChart3, UserCheck } from 'lucide-react';
 import PromoteToNextTermModal from '@/components/PromoteToNextTermModal';
+import TrialCountdown from '@/components/TrialCountdown';
 
 interface SchoolStats {
   totalStudents: number;
@@ -81,10 +82,11 @@ export default function SchoolAdminDashboard() {
   };
 
   const statCards = [
-    { label: 'Learners', value: stats.totalStudents, icon: <Users className="w-5 h-5" />, color: 'bg-blue-500', link: '/school-admin/view-learners' },
+    { label: 'Learners', value: stats.totalStudents, icon: <Users className="w-5 h-5" />, color: 'bg-blue-500', link: '/school-admin/students' },
     { label: 'Teachers', value: stats.totalTeachers, icon: <Users className="w-5 h-5" />, color: 'bg-green-500', link: '/school-admin/teachers' },
     { label: 'Classes', value: stats.totalClasses, icon: <BookOpen className="w-5 h-5" />, color: 'bg-purple-500', link: '/school-admin/classes' },
     { label: 'Fee Collection', value: `Ksh ${(stats.feeCollection / 1000).toFixed(0)}K`, icon: <CreditCard className="w-5 h-5" />, color: 'bg-orange-500', link: '/school-admin/fees' },
+    { label: 'Assessments', value: 'Manage', icon: <BookOpen className="w-5 h-5" />, color: 'bg-indigo-500', link: '/school-admin/assessments' },
   ];
 
   return (
@@ -106,6 +108,9 @@ export default function SchoolAdminDashboard() {
           <p className="text-sm text-[#666666]">Welcome back, {user?.firstName}</p>
         </div>
       </div>
+
+      {/* Trial Countdown Banner */}
+      <TrialCountdown />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card, i) => (
@@ -138,13 +143,12 @@ export default function SchoolAdminDashboard() {
           <h3 className="font-semibold text-[#111111] mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'View Learners', icon: <Eye className="w-4 h-4" />, link: '/school-admin/view-learners', color: 'bg-blue-50 text-blue-600' },
+              { label: 'Add Learner', icon: <Users className="w-4 h-4" />, link: '/school-admin/students', color: 'bg-blue-50 text-blue-600' },
               { label: 'Add Teacher', icon: <Users className="w-4 h-4" />, link: '/school-admin/teachers', color: 'bg-green-50 text-green-600' },
               { label: 'Record Payment', icon: <CreditCard className="w-4 h-4" />, link: '/school-admin/fees', color: 'bg-orange-50 text-orange-600' },
               { label: 'Post Announcement', icon: <Bell className="w-4 h-4" />, link: '/school-admin/announcements', color: 'bg-purple-50 text-purple-600' },
-              { label: 'Marks Overview', icon: <TrendingUp className="w-4 h-4" />, link: '/school-admin/marks-overview', color: 'bg-cyan-50 text-cyan-600' },
-              { label: 'Promote Class', icon: <ArrowUpRight className="w-4 h-4" />, link: '/school-admin/promote-class', color: 'bg-pink-50 text-pink-600' },
-              { label: 'Communicate', icon: <MessageSquare className="w-4 h-4" />, link: '/school-admin/communicate', color: 'bg-indigo-50 text-indigo-600' },
+              { label: 'Assign Roles', icon: <UserCheck className="w-4 h-4" />, link: '/school-admin/assign-roles', color: 'bg-indigo-50 text-indigo-600' },
+              { label: 'Marks Overview', icon: <BarChart3 className="w-4 h-4" />, link: '/school-admin/marks-overview', color: 'bg-green-50 text-green-600' },
             ].map((action, i) => (
               <Link key={i} to={action.link} className={`flex items-center gap-2 p-3 rounded-xl ${action.color} hover:opacity-80 transition-opacity text-sm font-medium`}>
                 {action.icon} {action.label}
@@ -178,7 +182,7 @@ export default function SchoolAdminDashboard() {
                   <p className="text-xs text-[#666666] mt-0.5 line-clamp-2">{a.content}</p>
                   <span className={`text-[10px] mt-1 inline-block px-2 py-0.5 rounded-full ${
                     a.type === 'fee_reminder' ? 'bg-orange-100 text-orange-600' :
-                    a.type === 'exam' ? 'bg-blue-100 text-blue-600' :
+                    a.type === 'assessment' ? 'bg-blue-100 text-blue-600' :
                     a.type === 'emergency' ? 'bg-red-100 text-red-600' :
                     'bg-gray-100 text-gray-600'
                   }`}>{a.type}</span>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Loader2, Pencil, Save, X, Eye, BookOpen, Send, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Loader2, Pencil, Save, X, Eye, BookOpen, Filter, Send, Users, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface MarkEntry {
@@ -50,10 +50,27 @@ export default function ViewMarks() {
   const [submittingAll, setSubmittingAll] = useState(false);
   const [expandedClass, setExpandedClass] = useState<string | null>(null);
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null);
+  const [filterExam, setFilterExam] = useState<string>('');
+  const [exams, setExams] = useState<any[]>([]);
 
   useEffect(() => {
     fetchMarks();
+    fetchExams();
   }, [user?.id]);
+
+  const fetchExams = async () => {
+    try {
+      const { data } = await supabaseUntyped
+        .from('school_exams')
+        .select('id, name, type')
+        .eq('school_id', user?.schoolId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      setExams(data || []);
+    } catch (err) {
+      console.warn('Could not load exams', err);
+    }
+  };
 
   const fetchMarks = async () => {
     setLoading(true);
@@ -71,7 +88,7 @@ export default function ViewMarks() {
         return;
       }
 
-      // Fetch marks with related data
+      // Fetch marks with related data - include ALL fields to avoid blank spaces
       const { data: marksData, error } = await supabaseUntyped
         .from('results')
         .select(`
@@ -86,6 +103,7 @@ export default function ViewMarks() {
 
       if (error) throw error;
 
+      // Ensure all marks have valid data - no blank spaces
       const loadedMarks = (marksData || []).map((m: MarkEntry) => ({
         ...m,
         marks: m.marks ?? 0,
@@ -162,7 +180,7 @@ export default function ViewMarks() {
       return;
     }
 
-    if (!confirm(`Submit all ${draftMarks.length} draft mark(s) for ${subjectMarks[0].subjects?.name || 'this learning area'}?`)) {
+    if (!confirm(`Submit all ${draftMarks.length} draft mark(s) for ${subjectMarks[0].subjects?.name || 'this subject'}?`)) {
       return;
     }
 
@@ -198,7 +216,8 @@ export default function ViewMarks() {
     const matchesClass = filterClass ? m.class_id === filterClass : true;
     const matchesSubject = filterSubject ? m.subject_id === filterSubject : true;
     const matchesStatus = filterStatus === 'all' ? true : m.status === filterStatus;
-    return matchesSearch && matchesClass && matchesSubject && matchesStatus;
+    const matchesExam = filterExam ? m.exam_id === filterExam : true;
+    return matchesSearch && matchesClass && matchesSubject && matchesStatus && matchesExam;
   });
 
   // Group marks by class and subject
@@ -211,7 +230,7 @@ export default function ViewMarks() {
     
     if (!classMap.has(classId)) {
       classMap.set(classId, {
-        className: m.classes?.name || 'Unknown Grade',
+        className: m.classes?.name || 'Unknown Class',
         subjects: new Map(),
       });
     }
@@ -219,7 +238,7 @@ export default function ViewMarks() {
     const classData = classMap.get(classId)!;
     if (!classData.subjects.has(subjectId)) {
       classData.subjects.set(subjectId, {
-        subjectName: m.subjects?.name || 'Unknown Learning Area',
+        subjectName: m.subjects?.name || 'Unknown Subject',
         marks: [],
       });
     }
@@ -251,7 +270,7 @@ export default function ViewMarks() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#111111]">My Entered Marks</h1>
-        <p className="text-sm text-[#666666]">View and manage marks grouped by grade and learning area</p>
+        <p className="text-sm text-[#666666]">View and manage marks grouped by class and subject</p>
       </div>
 
       {/* Stats */}
@@ -270,7 +289,7 @@ export default function ViewMarks() {
         </div>
         <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
           <div className="text-2xl font-bold text-purple-600">{new Set(marks.map(m => m.class_id)).size}</div>
-          <div className="text-xs text-gray-500">Grades</div>
+          <div className="text-xs text-gray-500">Classes</div>
         </div>
       </div>
 
@@ -291,9 +310,9 @@ export default function ViewMarks() {
           onChange={(e) => setFilterClass(e.target.value)}
           className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
         >
-          <option value="">All Grades</option>
+          <option value="">All Classes</option>
           {uniqueClasses.map((c: any) => (
-            <option key={c.name} value={c.name === 'Unknown Grade' ? '' : c.name}>{c.name}</option>
+            <option key={c.name} value={c.name === 'Unknown Class' ? '' : c.name}>{c.name}</option>
           ))}
         </select>
         <select
@@ -301,7 +320,7 @@ export default function ViewMarks() {
           onChange={(e) => setFilterSubject(e.target.value)}
           className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
         >
-          <option value="">All Learning Areas</option>
+          <option value="">All Subjects</option>
           {uniqueSubjects.map((s: any) => (
             <option key={s.name} value={s.name}>{s.name}</option>
           ))}
@@ -315,6 +334,18 @@ export default function ViewMarks() {
           <option value="draft">Draft</option>
           <option value="submitted">Submitted</option>
         </select>
+        {exams.length > 0 && (
+          <select
+            value={filterExam}
+            onChange={(e) => setFilterExam(e.target.value)}
+            className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+          >
+            <option value="">All Assessments</option>
+            {exams.map((ex: any) => (
+              <option key={ex.id} value={ex.id}>{ex.name}{ex.type ? ` (${ex.type})` : ''}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Grouped Marks */}
@@ -346,7 +377,7 @@ export default function ViewMarks() {
                     </div>
                     <div className="text-left">
                       <h3 className="font-semibold text-gray-900">{group.className}</h3>
-                      <p className="text-xs text-gray-500">{group.subjects.length} learning area(s) &middot; {totalMarks} mark entries</p>
+                      <p className="text-xs text-gray-500">{group.subjects.length} subject(s) • {totalMarks} mark entries</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -366,6 +397,7 @@ export default function ViewMarks() {
                     {group.subjects.map((subject) => {
                       const isSubjectExpanded = expandedSubject === `${group.classId}-${subject.subjectId}`;
                       const subjectDrafts = subject.marks.filter(m => m.status === 'draft');
+                      const subjectSubmitted = subject.marks.filter(m => m.status === 'submitted');
                       
                       return (
                         <div key={subject.subjectId} className="border-b border-gray-50 last:border-0">
@@ -401,7 +433,7 @@ export default function ViewMarks() {
                                 <thead>
                                   <tr className="border-b bg-gray-50">
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Learner</th>
-                                    <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Assessment #</th>
+                                    <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Admission #</th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Marks</th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">%</th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Grade</th>

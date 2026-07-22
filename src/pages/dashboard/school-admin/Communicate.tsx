@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Send, Loader2, Users, UserCheck, Bell, CheckCircle } from 'lucide-react';
+import { Send, Loader2, MessageSquare, Users, UserCheck, Bell, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { sendBulkSMS } from '@/lib/sms';
+import { sendBulkSMS, generateAnnouncementSMS } from '@/lib/sms';
 
 type RecipientType = 'class' | 'teachers' | 'all_parents';
 
@@ -15,10 +15,15 @@ export default function Communicate() {
   const [selectedClass, setSelectedClass] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [recipientCount, setRecipientCount] = useState(0);
 
   useEffect(() => {
     fetchData();
   }, [user?.schoolId]);
+
+  useEffect(() => {
+    updateRecipientCount();
+  }, [recipientType, selectedClass, classes, teachers]);
 
   const fetchData = async () => {
     const schoolId = user?.schoolId;
@@ -28,6 +33,19 @@ export default function Communicate() {
     ]);
     setClasses(c || []);
     setTeachers(t || []);
+  };
+
+  const updateRecipientCount = () => {
+    let count = 0;
+    if (recipientType === 'class' && selectedClass) {
+      // Will be calculated when fetching students
+      count = 0; // Placeholder - actual count from parent phones
+    } else if (recipientType === 'teachers') {
+      count = teachers.filter(t => t.phone).length;
+    } else if (recipientType === 'all_parents') {
+      count = 0; // Will be calculated
+    }
+    setRecipientCount(count);
   };
 
   const fetchRecipients = async (): Promise<string[]> => {
@@ -67,6 +85,7 @@ export default function Communicate() {
       });
     }
 
+    // Deduplicate
     return [...new Set(phones)];
   };
 
@@ -139,8 +158,8 @@ export default function Communicate() {
           >
             <Users className="w-5 h-5" />
             <div className="text-left">
-              <p className="text-sm font-medium">A Grade</p>
-              <p className="text-xs text-gray-500">Send to parents in a grade</p>
+              <p className="text-sm font-medium">A Class</p>
+              <p className="text-xs text-gray-500">Send to parents in a class</p>
             </div>
           </button>
           <button
@@ -177,13 +196,13 @@ export default function Communicate() {
       {/* Class Selection */}
       {recipientType === 'class' && (
         <div className="bg-white rounded-2xl p-6 border border-gray-100">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Select Grade</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Select Class</label>
           <select
             value={selectedClass}
             onChange={e => setSelectedClass(e.target.value)}
             className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
           >
-            <option value="">-- Select a grade --</option>
+            <option value="">-- Select a class --</option>
             {classes.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
@@ -197,7 +216,7 @@ export default function Communicate() {
           <CheckCircle className="w-4 h-4 text-green-600" />
           <span className="text-sm text-gray-600">
             {recipientType === 'class' && selectedClass
-              ? `Sending to parents of: ${classes.find(c => c.id === selectedClass)?.name || 'selected grade'}`
+              ? `Sending to parents of: ${classes.find(c => c.id === selectedClass)?.name || 'selected class'}`
               : recipientType === 'teachers'
               ? `Sending to ${teachers.filter(t => t.phone).length} teacher(s)`
               : 'Sending to all parents in school'}

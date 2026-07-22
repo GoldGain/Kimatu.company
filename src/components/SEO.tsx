@@ -6,7 +6,7 @@
  * Usage:
  *   <SEO
  *     title="Teacher Dashboard | Kimatu Analytics"
- *     description="Manage your classes, upload results, and track learner performance."
+ *     description="Manage your classes, upload results, and track student performance."
  *     path="/teacher"
  *   />
  */
@@ -42,14 +42,15 @@ export default function SEO({
   const canonicalUrl = `${BASE_URL}${path}`;
 
   useEffect(() => {
-    // Title
+    // ── Title ──────────────────────────────────────────────────────────────────
     document.title = fullTitle;
 
-    // Helper: set or create a <meta> tag
+    // ── Helper: set or create a <meta> tag ────────────────────────────────────
     const setMeta = (selector: string, content: string) => {
       let el = document.querySelector<HTMLMetaElement>(selector);
       if (!el) {
         el = document.createElement('meta');
+        // Determine attribute type from selector
         if (selector.includes('property=')) {
           const propMatch = selector.match(/property="([^"]+)"/);
           el.setAttribute('property', propMatch ? propMatch[1] : '');
@@ -62,12 +63,12 @@ export default function SEO({
       el.setAttribute('content', content);
     };
 
-    // Standard meta
+    // ── Standard meta ─────────────────────────────────────────────────────────
     setMeta('meta[name="description"]', description);
     setMeta('meta[name="robots"]', noindex ? 'noindex,nofollow' : 'index,follow');
-    setMeta('meta[name="keywords"]', 'Kimatu, Kimatu Analytics, Kimatu Schools, Kimatu Results, school management system Kenya, intelligent school management, CBE Kenya, competency based education, learner results portal, Kenya school portal, Kimatu School Management, 8-4-4 curriculum, school system Kenya');
+    setMeta('meta[name="keywords"]', 'Kimatu, Kimatu Analytics, Kimatu Schools, Kimatu Results, school management system Kenya, intelligent school management, CBE Kenya, competency based education, student results portal, Kenya school portal, Kimatu School Management, 8-4-4 curriculum, school system Kenya');
 
-    // Canonical
+    // ── Canonical ─────────────────────────────────────────────────────────────
     let canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement('link');
@@ -76,7 +77,7 @@ export default function SEO({
     }
     canonical.setAttribute('href', canonicalUrl);
 
-    // Open Graph
+    // ── Open Graph ────────────────────────────────────────────────────────────
     setMeta('meta[property="og:title"]', fullTitle);
     setMeta('meta[property="og:description"]', description);
     setMeta('meta[property="og:url"]', canonicalUrl);
@@ -85,13 +86,13 @@ export default function SEO({
     setMeta('meta[property="og:site_name"]', SITE_NAME);
     setMeta('meta[property="og:locale"]', 'en_KE');
 
-    // Twitter Card
+    // ── Twitter Card ──────────────────────────────────────────────────────────
     setMeta('meta[name="twitter:card"]', 'summary_large_image');
     setMeta('meta[name="twitter:title"]', fullTitle);
     setMeta('meta[name="twitter:description"]', description);
     setMeta('meta[name="twitter:image"]', image);
 
-    // JSON-LD Structured Data
+    // ── JSON-LD Structured Data ───────────────────────────────────────────────
     const defaultSchema = {
       '@context': 'https://schema.org',
       '@type': 'WebApplication',
@@ -110,7 +111,7 @@ export default function SEO({
         name: 'Kimatu Analytics',
         url: BASE_URL,
       },
-      keywords: 'Kimatu, Kimatu Analytics, school management Kenya, intelligent education, learner results, report card, CBE, 8-4-4',
+      keywords: 'Kimatu, Kimatu Analytics, school management Kenya, intelligent education, student results, report card, CBE, 8-4-4',
     };
 
     const schemaData = structuredData || defaultSchema;
@@ -122,6 +123,11 @@ export default function SEO({
       document.head.appendChild(ldScript);
     }
     ldScript.textContent = JSON.stringify(schemaData);
+
+    // Cleanup: restore title on unmount
+    return () => {
+      // Keep the title as-is; the next page will set its own
+    };
   }, [fullTitle, description, canonicalUrl, image, type, noindex, structuredData]);
 
   return null;

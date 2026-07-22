@@ -77,8 +77,8 @@ export default function ParentChatbot() {
         const total = invoices?.reduce((s: number, i: any) => s + (i.total_amount || 0), 0) || 0;
         const paid = invoices?.reduce((s: number, i: any) => s + (i.amount_paid || 0), 0) || 0;
         return t(
-          `📊 **Fee Summary for ${childName}:**\n\nTotal Fees: Ksh ${total.toLocaleString()}\nAmount Paid: Ksh ${paid.toLocaleString()}\nOutstanding Balance: Ksh ${balance.toLocaleString()}\n\nPlease visit the school office or use M-Pesa to pay.\n\n📧 Support: support@kimatu.company`,
-          `📊 **Muhtasari wa Ada kwa ${childName}:**\n\nJumla ya Ada: Ksh ${total.toLocaleString()}\nKilicholipwa: Ksh ${paid.toLocaleString()}\nSalio Linalobaki: Ksh ${balance.toLocaleString()}\n\nTafadhali tembelea ofisi ya shule au tumia M-Pesa kulipa.\n\n📧 Msaada: support@kimatu.company`
+          `📊 **Fee Summary for ${childName}:**\n\nTotal Fees: Ksh ${total.toLocaleString()}\nAmount Paid: Ksh ${paid.toLocaleString()}\nOutstanding Balance: Ksh ${balance.toLocaleString()}\n\nPlease visit the school office or use M-Pesa to pay.\n\n📧 Support: tutorsultimate@gmail.com`,
+          `📊 **Muhtasari wa Ada kwa ${childName}:**\n\nJumla ya Ada: Ksh ${total.toLocaleString()}\nKilicholipwa: Ksh ${paid.toLocaleString()}\nSalio Linalobaki: Ksh ${balance.toLocaleString()}\n\nTafadhali tembelea ofisi ya shule au tumia M-Pesa kulipa.\n\n📧 Msaada: tutorsultimate@gmail.com`
         );
       }
       return t('No child linked to your account. Please contact the school.', 'Hakuna mtoto aliyeunganishwa na akaunti yako. Wasiliana na shule.');
@@ -118,8 +118,8 @@ export default function ParentChatbot() {
     // Absence recording
     if (q.includes('absent') || q.includes('absence') || q.includes('hayupo') || q.includes('kutokuwepo')) {
       return t(
-        `📋 To report ${childName}'s absence:\n\nPlease contact the school directly or visit the school office. The class teacher will record the absence in the system.\n\n📧 Support: support@kimatu.company`,
-        `📋 Kuripoti kutokuwepo kwa ${childName}:\n\nTafadhali wasiliana na shule moja kwa moja au tembelea ofisi ya shule. Mwalimu wa darasa atarekodi kutokuwepo katika mfumo.\n\n📧 Msaada: support@kimatu.company`
+        `📋 To report ${childName}'s absence:\n\nPlease contact the school directly or visit the school office. The class teacher will record the absence in the system.\n\n📧 Support: tutorsultimate@gmail.com`,
+        `📋 Kuripoti kutokuwepo kwa ${childName}:\n\nTafadhali wasiliana na shule moja kwa moja au tembelea ofisi ya shule. Mwalimu wa darasa atarekodi kutokuwepo katika mfumo.\n\n📧 Msaada: tutorsultimate@gmail.com`
       );
     }
 
@@ -197,8 +197,8 @@ export default function ParentChatbot() {
 
     // Default response
     return t(
-      `I can help you with:\n\n• **Fee balance** - Ask "What is my child's fee balance?"\n• **Results** - Ask "Show my child's results"\n• **Report card** - Ask "Download report card"\n• **Absence** - Ask "My child was absent today"\n• **Meeting** - Ask "Book meeting with teacher"\n• **Exams** - Ask "When is next exam?"\n• **Timetable** - Ask "Show timetable"\n\n📧 Support: support@kimatu.company`,
-      `Ninaweza kukusaidia na:\n\n• **Salio la ada** - Uliza "Salio la ada ya mtoto wangu ni ngapi?"\n• **Matokeo** - Uliza "Nionyeshe matokeo"\n• **Kadi ya ripoti** - Uliza "Pakua kadi ya ripoti"\n• **Kutokuwepo** - Uliza "Mtoto wangu hakuwepo leo"\n• **Mkutano** - Uliza "Weka mkutano na mwalimu"\n• **Mitihani** - Uliza "Mtihani ujao ni lini?"\n• **Ratiba** - Uliza "Nionyeshe ratiba"\n\n📧 Msaada: support@kimatu.company`
+      `I can help you with:\n\n• **Fee balance** - Ask "What is my child's fee balance?"\n• **Results** - Ask "Show my child's results"\n• **Report card** - Ask "Download report card"\n• **Absence** - Ask "My child was absent today"\n• **Meeting** - Ask "Book meeting with teacher"\n• **Exams** - Ask "When is next exam?"\n• **Timetable** - Ask "Show timetable"\n\n📧 Support: tutorsultimate@gmail.com`,
+      `Ninaweza kukusaidia na:\n\n• **Salio la ada** - Uliza "Salio la ada ya mtoto wangu ni ngapi?"\n• **Matokeo** - Uliza "Nionyeshe matokeo"\n• **Kadi ya ripoti** - Uliza "Pakua kadi ya ripoti"\n• **Kutokuwepo** - Uliza "Mtoto wangu hakuwepo leo"\n• **Mkutano** - Uliza "Weka mkutano na mwalimu"\n• **Mitihani** - Uliza "Mtihani ujao ni lini?"\n• **Ratiba** - Uliza "Nionyeshe ratiba"\n\n📧 Msaada: tutorsultimate@gmail.com`
     );
   };
 

@@ -5,7 +5,7 @@ import { useClasses } from '@/hooks/useSupabaseData';
 import { Plus, Loader2, School, Search, ArrowRight, Users, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-type CurriculumType = 'CBE' | '844';
+type CurriculumType = 'CBE' | '';
 
 interface StandardClass {
   name: string;
@@ -15,8 +15,8 @@ interface StandardClass {
 }
 
 const STANDARD_CLASSES: StandardClass[] = [
-  { name: 'PP1',     grade_level: -1, curriculum: 'CBE', label: 'PP1      — Pre-Primary CBE' },
-  { name: 'PP2',     grade_level: 0,  curriculum: 'CBE', label: 'PP2      — Pre-Primary CBE' },
+  { name: 'PP1',      grade_level: -2, curriculum: 'CBE', label: 'PP1      — Pre-Primary CBE' },
+  { name: 'PP2',      grade_level: -1, curriculum: 'CBE', label: 'PP2      — Pre-Primary CBE' },
   { name: 'Grade 1',  grade_level: 1,  curriculum: 'CBE', label: 'Grade 1  — Primary CBE'  },
   { name: 'Grade 2',  grade_level: 2,  curriculum: 'CBE', label: 'Grade 2  — Primary CBE'  },
   { name: 'Grade 3',  grade_level: 3,  curriculum: 'CBE', label: 'Grade 3  — Primary CBE'  },
@@ -29,15 +29,13 @@ const STANDARD_CLASSES: StandardClass[] = [
   { name: 'Grade 10', grade_level: 10, curriculum: 'CBE', label: 'Grade 10 — Senior CBE'   },
   { name: 'Grade 11', grade_level: 11, curriculum: 'CBE', label: 'Grade 11 — Senior CBE'   },
   { name: 'Grade 12', grade_level: 12, curriculum: 'CBE', label: 'Grade 12 — Senior CBE'   },
-  { name: 'Form 1',   grade_level: 9,  curriculum: '844', label: 'Form 1   — 8-4-4'        },
-  { name: 'Form 2',   grade_level: 10, curriculum: '844', label: 'Form 2   — 8-4-4'        },
-  { name: 'Form 3',   grade_level: 11, curriculum: '844', label: 'Form 3   — 8-4-4'        },
-  { name: 'Form 4',   grade_level: 12, curriculum: '844', label: 'Form 4   — 8-4-4'        },
+  { name: 'Form 3',   grade_level: 11, curriculum: '', label: 'Form 3   — '        },
+  { name: 'Form 4',   grade_level: 12, curriculum: '', label: 'Form 4   — '        },
 ];
 
 const CURRICULUM_OPTIONS: { value: CurriculumType; label: string }[] = [
   { value: 'CBE', label: 'CBE (Competency Based)' },
-  { value: '844', label: '8-4-4 (Traditional)' },
+  { value: '', label: ' (Traditional)' },
 ];
 
 export default function SchoolAdminClasses() {
@@ -50,12 +48,11 @@ export default function SchoolAdminClasses() {
 
   const [selectedPreset, setSelectedPreset] = useState('');
   const [stream, setStream] = useState('');
-  const [capacity, setCapacity] = useState(40);
-  const [academicYear, setAcademicYear] = useState(new Date().getFullYear().toString());
+  const [capacity, setCapacity] = useState(60);
 
   // Edit state
   const [editingClass, setEditingClass] = useState<any | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', stream: '', capacity: 40, curriculum: 'CBE' as CurriculumType });
+  const [editForm, setEditForm] = useState({ name: '', stream: '', capacity: 60, curriculum: 'CBE' as CurriculumType });
   const [saving, setSaving] = useState(false);
 
   // Delete state
@@ -75,8 +72,7 @@ export default function SchoolAdminClasses() {
         grade_level: preset.grade_level,
         curriculum: preset.curriculum,
         stream: stream.trim() || null,
-        capacity: capacity || 40,
-        academic_year: academicYear || new Date().getFullYear().toString(),
+        capacity: capacity || 60,
         school_id: user?.schoolId,
         is_active: true,
       }]);
@@ -86,8 +82,7 @@ export default function SchoolAdminClasses() {
       setShowAdd(false);
       setSelectedPreset('');
       setStream('');
-      setCapacity(40);
-      setAcademicYear(new Date().getFullYear().toString());
+      setCapacity(60);
       refetch();
     } catch (err: any) {
       toast.error('Failed to add class: ' + err.message);
@@ -101,7 +96,7 @@ export default function SchoolAdminClasses() {
     setEditForm({
       name: c.name || '',
       stream: c.stream || '',
-      capacity: c.capacity || 40,
+      capacity: c.capacity || 60,
       curriculum: (c.curriculum || 'CBE') as CurriculumType,
     });
   };
@@ -114,7 +109,7 @@ export default function SchoolAdminClasses() {
       const { error } = await supabaseUntyped.from('classes').update({
         name: editForm.name.trim(),
         stream: editForm.stream.trim() || null,
-        capacity: editForm.capacity || 40,
+        capacity: editForm.capacity || 60,
         curriculum: editForm.curriculum,
       }).eq('id', editingClass.id);
       if (error) throw new Error(error.message);
@@ -180,8 +175,7 @@ export default function SchoolAdminClasses() {
   };
 
   const getLevelBadgeColor = (gradeLevel: number, curriculum?: string) => {
-    if (curriculum === '844') return 'bg-purple-100 text-purple-700';
-    if (gradeLevel < 1) return 'bg-pink-100 text-pink-700';
+    if (curriculum === '') return 'bg-purple-100 text-purple-700';
     if (gradeLevel >= 1 && gradeLevel <= 6) return 'bg-green-100 text-green-700';
     if (gradeLevel >= 7 && gradeLevel <= 9) return 'bg-blue-100 text-blue-700';
     if (gradeLevel >= 10 && gradeLevel <= 12) return 'bg-indigo-100 text-indigo-700';
@@ -189,9 +183,9 @@ export default function SchoolAdminClasses() {
   };
 
   const getLevelLabel = (gradeLevel: number, curriculum?: string, name?: string) => {
-    if (curriculum === '844') return '8-4-4';
-    if (name?.toLowerCase().startsWith('form')) return '8-4-4';
-    if (name === 'PP1' || name === 'PP2' || gradeLevel < 1) return 'Pre-Primary';
+    if (curriculum === '') return '';
+    if (name?.toLowerCase().startsWith('form')) return '';
+    if (gradeLevel < 0) return 'Pre-Primary';
     if (gradeLevel >= 1 && gradeLevel <= 6) return 'Primary';
     if (gradeLevel >= 7 && gradeLevel <= 9) return 'Junior';
     if (gradeLevel >= 10 && gradeLevel <= 12) return 'Senior';
@@ -236,8 +230,13 @@ export default function SchoolAdminClasses() {
               <label className="block text-xs text-gray-500 mb-1">Class *</label>
               <select value={selectedPreset} onChange={e => setSelectedPreset(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white" required>
                 <option value="">— Select a class —</option>
+                <optgroup label="Pre-Primary CBE (PP1–PP2)">
+                  {STANDARD_CLASSES.filter(c => c.curriculum === 'CBE' && c.grade_level < 0).map(c => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </optgroup>
                 <optgroup label="Primary CBE (Grades 1–6)">
-                  {STANDARD_CLASSES.filter(c => c.curriculum === 'CBE' && c.grade_level <= 6).map(c => (
+                  {STANDARD_CLASSES.filter(c => c.curriculum === 'CBE' && c.grade_level >= 1 && c.grade_level <= 6).map(c => (
                     <option key={c.name} value={c.name}>{c.name}</option>
                   ))}
                 </optgroup>
@@ -251,15 +250,15 @@ export default function SchoolAdminClasses() {
                     <option key={c.name} value={c.name}>{c.name}</option>
                   ))}
                 </optgroup>
-                <optgroup label="8-4-4 (Form 3–4)">
-                  {STANDARD_CLASSES.filter(c => c.curriculum === '844').map(c => (
+                <optgroup label=" (Form 3–4)">
+                  {STANDARD_CLASSES.filter(c => c.curriculum === '').map(c => (
                     <option key={c.name} value={c.name}>{c.name}</option>
                   ))}
                 </optgroup>
               </select>
               {previewPreset && (
                 <p className="text-xs text-blue-600 mt-1">
-                  {previewPreset.curriculum === '844' ? '8-4-4' : previewPreset.grade_level <= 6 ? 'Primary CBE' : previewPreset.grade_level <= 9 ? 'Junior CBE' : 'Senior CBE'} · Grade level {previewPreset.grade_level}
+                  {previewPreset.curriculum === '' ? '' : previewPreset.grade_level <= 6 ? 'Primary CBE' : previewPreset.grade_level <= 9 ? 'Junior CBE' : 'Senior CBE'} · Grade level {previewPreset.grade_level}
                 </p>
               )}
             </div>
@@ -269,27 +268,12 @@ export default function SchoolAdminClasses() {
               <p className="text-xs text-gray-400 mt-1">Leave blank if no streams</p>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Academic Year *</label>
-              <select
-                value={academicYear}
-                onChange={e => setAcademicYear(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                required
-              >
-                {[...Array(5)].map((_, i) => {
-                  const year = (new Date().getFullYear() + i).toString();
-                  return <option key={year} value={year}>{year}</option>;
-                })}
-              </select>
-              <p className="text-xs text-gray-400 mt-1">e.g., 2026 for Grade 7 2026</p>
-            </div>
-            <div>
               <label className="block text-xs text-gray-500 mb-1">Capacity</label>
-              <input type="number" placeholder="40" value={capacity} onChange={e => setCapacity(parseInt(e.target.value) || 40)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" min={1} max={200} />
+              <input type="number" placeholder="60" value={capacity} onChange={e => setCapacity(parseInt(e.target.value) || 60)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" min={1} max={200} />
             </div>
             {previewPreset && (
               <div className="md:col-span-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
-                <strong>Preview:</strong> {previewPreset.name}{stream.trim() ? ` (${stream.trim()})` : ''} &nbsp;·&nbsp; {previewPreset.curriculum === '844' ? '8-4-4' : 'CBE'} &nbsp;·&nbsp; Grade level {previewPreset.grade_level} &nbsp;·&nbsp; Capacity {capacity}
+                <strong>Preview:</strong> {previewPreset.name}{stream.trim() ? ` (${stream.trim()})` : ''} &nbsp;·&nbsp; {previewPreset.curriculum === '' ? '' : 'CBE'} &nbsp;·&nbsp; Grade level {previewPreset.grade_level} &nbsp;·&nbsp; Capacity {capacity}
               </div>
             )}
             <div className="flex items-end gap-3 md:col-span-3">
@@ -297,7 +281,7 @@ export default function SchoolAdminClasses() {
                 {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 {adding ? 'Adding...' : 'Add Class'}
               </button>
-              <button type="button" onClick={() => { setShowAdd(false); setSelectedPreset(''); setStream(''); setCapacity(40); }} className="border border-gray-200 px-4 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={() => { setShowAdd(false); setSelectedPreset(''); setStream(''); setCapacity(60); }} className="border border-gray-200 px-4 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
             </div>
           </form>
         </div>
@@ -343,7 +327,7 @@ export default function SchoolAdminClasses() {
             <div className="flex items-center gap-2 mb-4">
               <School className="w-5 h-5 text-[#2563EB]" />
               <h3 className="font-semibold text-[#111111]">
-                {curriculum === '844' ? '8-4-4 (Form 3–4)' : 'CBE'} Classes ({cls.length})
+                {curriculum === '' ? ' (Form 3–4)' : 'CBE'} Classes ({cls.length})
               </h3>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -363,7 +347,7 @@ export default function SchoolAdminClasses() {
                       <div>Grade level {gradeLevel} · Capacity: {c.capacity}</div>
                       <div className="flex items-center justify-between gap-1 mt-2 flex-wrap">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${curriculum === 'CBE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                          {curriculum === '844' ? '8-4-4' : 'CBE'}
+                          {curriculum === '' ? '' : 'CBE'}
                         </span>
                         <div className="flex items-center gap-1">
                           <button onClick={() => { setBulkPromoteClass(c); setBulkDestClassId(''); }} className="flex items-center gap-1 text-[10px] px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors font-medium">
@@ -407,12 +391,12 @@ export default function SchoolAdminClasses() {
                 <label className="block text-xs text-gray-500 mb-1">Curriculum</label>
                 <select value={editForm.curriculum} onChange={e => setEditForm({...editForm, curriculum: e.target.value as CurriculumType})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
                   <option value="CBE">CBE (Competency Based)</option>
-                  <option value="844">8-4-4 (Traditional)</option>
+                  <option value=""> (Traditional)</option>
                 </select>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Capacity</label>
-                <input type="number" value={editForm.capacity} onChange={e => setEditForm({...editForm, capacity: parseInt(e.target.value) || 40})} className="w-full px-4 py-2.5 border rounded-xl text-sm" min={1} max={200} />
+                <input type="number" value={editForm.capacity} onChange={e => setEditForm({...editForm, capacity: parseInt(e.target.value) || 60})} className="w-full px-4 py-2.5 border rounded-xl text-sm" min={1} max={200} />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setEditingClass(null)} className="px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>

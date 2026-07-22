@@ -1,77 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit, Plus, BookOpen } from 'lucide-react';
+import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit, BookOpen, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand } from '@/lib/grading';
-
-// ─── Pre-populated subjects by curriculum level ───────────────────────────────
-
-const PRE_PRIMARY_SUBJECTS = [
-  'Mathematics Activities',
-  'English Language Activities',
-  'Environment Activities',
-  'Creative Arts Activities',
-  'Religious Studies Activities',
-  'Kiswahili Activities',
-];
-
-const PRIMARY_SUBJECTS = [
-  'English Composition',
-  'English Grammar',
-  'Kiswahili Insha',
-  'Kiswahili Sarufi',
-  'Mathematics',
-  'Science and Technology',
-  'Social Studies',
-  'Religious Education',
-  'Creative Arts',
-  'Physical and Health Education',
-  'Indigenous Languages',
-];
-
-const JUNIOR_SUBJECTS = [
-  'English',
-  'Kiswahili',
-  'Mathematics',
-  'Integrated Science',
-  'Social Studies',
-  'Religious Education',
-  'Creative Arts and Sports',
-  'Life Skills',
-  'Agriculture',
-  'Business Studies',
-  'Computer Science',
-  'French',
-  'German',
-  'Arabic',
-];
-
-const SENIOR_SUBJECTS = [
-  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
-  'History', 'Geography', 'Business Studies', 'Agriculture', 'Computer Studies',
-  'Home Science', 'Physical Education', 'Religious Education', 'Community Service Learning',
-];
-
-const SUBJECTS_844 = [
-  'English', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics',
-  'History', 'Geography', 'CRE', 'IRE', 'HRE', 'Business Studies',
-  'Agriculture', 'Computer Studies',
-];
-
-function getPresetSubjectsForBand(band: string): string[] {
-  if (band === '844') return SUBJECTS_844;
-  if (band === 'senior') return SENIOR_SUBJECTS;
-  if (band === 'junior') return JUNIOR_SUBJECTS;
-  if (band === 'pre-primary') return PRE_PRIMARY_SUBJECTS;
-  return PRIMARY_SUBJECTS; // primary (default)
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import {
+  fetchTeacherAssignments,
+  verifyTeacherSubjectAssignment,
+  type TeacherAssignment,
+} from '@/lib/teacher-restrictions';
 
 interface ProcessedRow {
   student_id: string;
@@ -80,8 +22,7 @@ interface ProcessedRow {
   marks: number;
   out_of: number;
   percentage: number;
-  cbcGrade: ReturnType<typeof calculateResultGrades>['cbcGrade'];
-  grade844: ReturnType<typeof calculateResultGrades>['grade844'];
+  cbcGrade: ReturnType<typeof calculateResultGrades>['cbeGrade'];
   position?: number;
 }
 
@@ -94,6 +35,7 @@ interface ManualRow {
 
 export default function TeacherResultsUpload() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<'manual' | 'csv'>('manual');
   const [classes, setClasses] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -104,66 +46,55 @@ export default function TeacherResultsUpload() {
   const [selectedTerm, setSelectedTerm] = useState('');
   const [selectedExam, setSelectedExam] = useState('');
   const [exams, setExams] = useState<any[]>([]);
+  const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
+  const [assignmentsLoaded, setAssignmentsLoaded] = useState(false);
   const [outOf, setOutOf] = useState(100);
 
-  // Subject selection: 'db' = from DB, 'preset' = from pre-populated list, 'manual' = typed
-  const [subjectMode, setSubjectMode] = useState<'db' | 'preset' | 'manual'>('preset');
-  const [manualSubjectName, setManualSubjectName] = useState('');
-  const [savingManualSubject, setSavingManualSubject] = useState(false);
-
-  // CSV mode
   const [csvData, setCsvData] = useState<ProcessedRow[]>([]);
   const [preview, setPreview] = useState(false);
-  // Manual mode
   const [manualRows, setManualRows] = useState<ManualRow[]>([]);
   const [manualPreview, setManualPreview] = useState<ProcessedRow[]>([]);
   const [manualPreviewReady, setManualPreviewReady] = useState(false);
-  // Shared
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
-  // ── Strict teacher assignment enforcement ────────────────────────────────────
-  const [teacherAssignments, setTeacherAssignments] = useState<Array<{ class_id: string; subject_id: string }>>([]);
-
   useEffect(() => {
     const fetchData = async () => {
       const schoolId = user?.schoolId ?? '';
-
-      // Get teacher record first
-      const { data: teacherData } = await supabaseUntyped
-        .from('teachers')
-        .select('id')
-        .eq('profile_id', user?.id)
-        .maybeSingle();
-
-      // Get teacher's subject assignments
-      const { data: assignments } = await supabase
-        .from('teacher_subject_assignments')
-        .select('class_id, subject_id')
-        .eq('teacher_id', teacherData?.id || '')
-        .eq('is_active', true);
-
-      const assignmentList = assignments || [];
-      setTeacherAssignments(assignmentList);
-
-      // Get all classes and subjects but we'll filter by assignments
-      const [{ data: c }, { data: s }, { data: t }, { data: e }] = await Promise.all([
+      const [{ data: c }, { data: t }, { data: ex }, assignmentResult] = await Promise.all([
         supabase.from('classes').select('*').eq('school_id', schoolId).order('level'),
-        supabase.from('subjects').select('*').eq('school_id', schoolId).order('name'),
         supabase.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
-        supabaseUntyped.from('school_exams').select('*').eq('school_id', schoolId).eq('is_active', true).order('name'),
+        (supabase as any).from('school_exams').select('id, name, type, term_id').eq('school_id', schoolId).eq('is_active', true).order('created_at', { ascending: false }),
+        fetchTeacherAssignments(user?.id),
       ]);
 
-      // Filter to only classes/subjects the teacher is assigned to
-      const assignedClassIds = [...new Set(assignmentList.map(a => a.class_id))];
-      const assignedSubjectIds = [...new Set(assignmentList.map(a => a.subject_id))];
+      const assignments = assignmentResult.assignments || [];
+      setTeacherAssignments(assignments);
+      setAssignmentsLoaded(true);
 
-      setClasses((c || []).filter((cls: any) => assignedClassIds.includes(cls.id)));
-      setSubjects((s || []).filter((sub: any) => assignedSubjectIds.includes(sub.id)));
-      setExams(e || []);
+      const assignedClassIds = [...new Set(assignments.map((a) => a.class_id).filter(Boolean))];
+      const filteredClasses = (c || []).filter((cls: any) => assignedClassIds.includes(cls.id));
+      setClasses(filteredClasses);
 
-      // Auto-create default terms if none exist
+      const subjectMap = new Map<string, any>();
+      assignments.forEach((a) => {
+        if (a.subject_id) {
+          subjectMap.set(a.subject_id, { id: a.subject_id, name: a.subject_name || 'Learning Area' });
+        }
+      });
+      setSubjects(Array.from(subjectMap.values()));
+      setExams(ex || []);
+
+      const qClass = searchParams.get('classId') || '';
+      const qSubject = searchParams.get('subjectId') || '';
+      if (qClass && assignedClassIds.includes(qClass)) {
+        setSelectedClass(qClass);
+      }
+      if (qSubject && assignments.some((a) => a.subject_id === qSubject && (!qClass || a.class_id === qClass))) {
+        setSelectedSubject(qSubject);
+      }
+
       let termsData = t || [];
       if (termsData.length === 0 && schoolId) {
         const currentYear = new Date().getFullYear();
@@ -181,10 +112,14 @@ export default function TeacherResultsUpload() {
       setTerms(termsData);
     };
     fetchData();
-  }, [user?.schoolId]);
+  }, [user?.schoolId, user?.id]);
 
   useEffect(() => {
-    if (!selectedClass) return;
+    if (!selectedClass) {
+      setStudents([]);
+      setManualRows([]);
+      return;
+    }
     const fetchStudents = async () => {
       const { data } = await supabaseUntyped
         .from('students')
@@ -204,92 +139,61 @@ export default function TeacherResultsUpload() {
       setManualPreview([]);
     };
     fetchStudents();
-    // Reset subject selection when class changes
-    setSelectedSubject('');
-    setManualSubjectName('');
-  }, [selectedClass]);
+    setSelectedSubject((prev) => {
+      if (!prev) return '';
+      const stillValid = teacherAssignments.some(
+        (a) => a.class_id === selectedClass && a.subject_id === prev
+      );
+      return stillValid ? prev : '';
+    });
+  }, [selectedClass, teacherAssignments]);
 
-  // ── Derived: current class data & band ──────────────────────────────────────
   const currentClassData = classes.find((c: any) => c.id === selectedClass);
   const currentBand = getSchoolLevelBand(currentClassData);
   const currentGradeLabel = gradeDisplayLabel(currentBand);
-  const presetSubjects = getPresetSubjectsForBand(currentBand);
 
-  // DB subjects filtered to match the class curriculum
-  const dbSubjectsFiltered = subjects.filter((s: any) => {
-    if (!currentClassData) return true;
-    if (currentBand === '844') return s.curriculum === '844';
-    return s.curriculum === 'CBE';
-  });
+  const assignedSubjectsForClass = useMemo(() => {
+    if (!selectedClass) return [] as { id: string; name: string }[];
+    const map = new Map<string, string>();
+    teacherAssignments
+      .filter((a) => a.class_id === selectedClass && a.subject_id)
+      .forEach((a) => map.set(a.subject_id, a.subject_name || 'Learning Area'));
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [selectedClass, teacherAssignments]);
 
-  // ── Resolve the effective learning area name & id for submission ───────────────────
-  const getEffectiveSubjectId = () => {
-    if (subjectMode === 'db') return selectedSubject;
-    return selectedSubject; // preset also stores the DB id after save
-  };
-
-  // Save a manually-typed subject to DB and select it
-  const saveManualSubject = async () => {
-    if (!manualSubjectName.trim()) { toast.error('Enter a learning area name'); return; }
-    setSavingManualSubject(true);
-    // Check if already exists
-    const existing = subjects.find(s => s.name.toLowerCase() === manualSubjectName.trim().toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
-    if (existing) {
-      setSelectedSubject(existing.id);
-      toast.info(`"${existing.name}" already exists — selected!`);
-      setSavingManualSubject(false);
-      return;
-    }
-    const { data, error } = await supabaseUntyped.from('subjects').insert([{
-      school_id: user?.schoolId,
-      name: manualSubjectName.trim(),
-      curriculum: currentBand === '844' ? '844' : 'CBE',
-      class_levels: [],
-    }]).select('*').single();
-    if (error) {
-      toast.error('Failed to save subject: ' + error.message);
-    } else {
-      toast.success(`Subject "${data.name}" saved and selected!`);
-      setSubjects(prev => [...prev, data]);
-      setSelectedSubject(data.id);
-      setManualSubjectName('');
-      setSubjectMode('preset');
-    }
-    setSavingManualSubject(false);
-  };
-
-  // When a preset learning area name is selected, find or create its DB record
-  const handlePresetSubjectSelect = async (name: string) => {
-    if (!name) { setSelectedSubject(''); return; }
-    // Try to find in DB
-    const existing = subjects.find(s => s.name.toLowerCase() === name.toLowerCase() && s.curriculum === (currentBand === '844' ? '844' : 'CBE'));
-    if (existing) {
-      setSelectedSubject(existing.id);
-      return;
-    }
-    // Auto-create in DB so results can be linked
-    const { data, error } = await supabaseUntyped.from('subjects').insert([{
-      school_id: user?.schoolId,
-      name: name.trim(),
-      curriculum: currentBand === '844' ? '844' : 'CBE',
-      class_levels: [],
-    }]).select('*').single();
-    if (error) {
-      toast.error('Could not auto-create subject: ' + error.message);
-    } else {
-      setSubjects(prev => [...prev, data]);
-      setSelectedSubject(data.id);
-    }
-  };
-
-  // ── Manual Entry helpers ─────────────────────────────────────────────────────
   const updateManualMark = (idx: number, value: string) => {
+    // Issue 24: Prevent marks above max
+    const numVal = parseFloat(value);
+    if (value !== '' && !isNaN(numVal) && numVal > outOf) {
+      toast.error(`Mark cannot exceed maximum of ${outOf}`);
+      return;
+    }
     setManualRows(prev => {
       const updated = [...prev];
       updated[idx] = { ...updated[idx], marks: value };
       return updated;
     });
     setManualPreviewReady(false);
+  };
+
+  // Issue 23: Excel-like keyboard navigation for marks cells
+  const handleMarkKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    const total = manualRows.length;
+    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+      e.preventDefault();
+      const nextIdx = (idx + 1) % total;
+      const nextInput = document.querySelector<HTMLInputElement>(`[data-mark-idx="${nextIdx}"]`);
+      nextInput?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prevIdx = (idx - 1 + total) % total;
+      const prevInput = document.querySelector<HTMLInputElement>(`[data-mark-idx="${prevIdx}"]`);
+      prevInput?.focus();
+    } else if (e.key === 'Tab') {
+      const nextIdx = e.shiftKey ? (idx - 1 + total) % total : (idx + 1) % total;
+      const nextInput = document.querySelector<HTMLInputElement>(`[data-mark-idx="${nextIdx}"]`);
+      if (nextInput) { e.preventDefault(); nextInput.focus(); }
+    }
   };
 
   const calculateManualGrades = () => {
@@ -306,8 +210,7 @@ export default function TeacherResultsUpload() {
         marks,
         out_of: outOf,
         percentage,
-        cbcGrade: grades.cbcGrade,
-        grade844: grades.grade844,
+        cbcGrade: grades.cbeGrade,
       };
     });
     const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
@@ -318,8 +221,8 @@ export default function TeacherResultsUpload() {
   };
 
   // ── Download helpers ─────────────────────────────────────────────────────────
-  const getMainGrade = (row: ProcessedRow) => currentBand === '844' ? row.grade844.grade : row.cbcGrade.subLevel;
-  const getMainPoints = (row: ProcessedRow) => currentBand === '844' ? row.grade844.points : row.cbcGrade.points;
+  const getMainGrade = (row: ProcessedRow) => row.cbcGrade.subLevel;
+  const getMainPoints = (row: ProcessedRow) => row.cbcGrade.points;
 
   const downloadManualPDF = () => {
     if (!manualPreview.length) return;
@@ -330,7 +233,7 @@ export default function TeacherResultsUpload() {
     doc.setFontSize(16);
     doc.text('Kimatu Analytics - Results Report', 14, 15);
     doc.setFontSize(11);
-    doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
+    doc.text(`Class: ${className} | Learning Area: ${subjectName} | Term: ${termName}`, 14, 25);
     doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
     autoTable(doc, {
       startY: 40,
@@ -365,21 +268,61 @@ export default function TeacherResultsUpload() {
     XLSX.writeFile(wb, `results_${className}_${subjectName}.xlsx`);
   };
 
-  // ── Submit results ───────────────────────────────────────────────────────────
-  const handleSubmit = async (dataToSubmit: ProcessedRow[]) => {
+  // ── Calculate class mean ────────────────────────────────────────────────────
+  const calculateClassMean = (data: ProcessedRow[]): number => {
+    if (data.length === 0) return 0;
+    const total = data.reduce((sum, r) => sum + r.percentage, 0);
+    return Math.round((total / data.length) * 100) / 100;
+  };
+
+  // ── Check for duplicate subject entries ──────────────────────────────────────
+  const checkDuplicateSubject = async (): Promise<boolean> => {
+    if (!selectedClass || !selectedSubject || !selectedTerm) return false;
+    try {
+      const { data: existing } = await supabaseUntyped
+        .from('results')
+        .select('id')
+        .eq('class_id', selectedClass)
+        .eq('subject_id', selectedSubject)
+        .eq('term_id', selectedTerm)
+        .limit(1);
+      return (existing || []).length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  // ── Submit or Save Draft results ────────────────────────────────────────────
+  const handleSubmit = async (dataToSubmit: ProcessedRow[], asDraft: boolean = false) => {
     if (!selectedClass || !selectedSubject || !selectedTerm) {
-      toast.error('Please select class, subject, and term');
+      toast.error('Please select class, learning area, and term');
       return;
     }
+
+    // CRITICAL: backend verification — teacher must be assigned to this class + subject
+    const verification = await verifyTeacherSubjectAssignment(user?.id, selectedClass, selectedSubject);
+    if (!verification.allowed || !verification.teacherId) {
+      toast.error(verification.reason || 'You are not assigned to this learning area.');
+      setError(verification.reason || 'Upload rejected: not assigned to this learning area.');
+      return;
+    }
+
+    // Check for duplicates (only on submit, not draft)
+    if (!asDraft) {
+      const isDuplicate = await checkDuplicateSubject();
+      if (isDuplicate) {
+        toast.error('Marks for this learning area already exist. Please use "Edit" from My Marks page.');
+        return;
+      }
+    }
+
     setUploading(true);
     setError('');
     try {
-      const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
-      const teacherId = teacherData?.id ?? '';
-      // Primary (Grades 1-6) and Pre-Primary (PP1/PP2): cbc_sublevel MUST be null
-      // (enum only accepts EE1/ME1 etc. for junior/senior).
-      // Primary and Pre-Primary grades use cbc_grade (EE/ME/AE/BE) with no sub-level and no points.
-      const isPrimaryClass = currentBand === 'primary' || currentBand === 'pre-primary';
+      const teacherId = verification.teacherId;
+      // Primary (Grades 1-6): cbc_sublevel MUST be null (enum only accepts EE1/ME1 etc.)
+      // Primary grades use cbc_grade (EE/ME/AE/BE) with no sub-level and no points.
+      const isPrimaryClass = currentBand === 'primary';
       const records = dataToSubmit.map((row) => ({
         school_id: user?.schoolId ?? '',
         student_id: row.student_id,
@@ -387,7 +330,6 @@ export default function TeacherResultsUpload() {
         subject_id: selectedSubject,
         teacher_id: teacherId,
         term_id: selectedTerm,
-        exam_id: selectedExam || null,
         academic_year: new Date().getFullYear().toString(),
         curriculum: currentClassData?.curriculum || 'CBE',
         marks: row.marks,
@@ -399,50 +341,59 @@ export default function TeacherResultsUpload() {
         cbc_grade: row.cbcGrade.grade,
         cbc_points: isPrimaryClass ? null : row.cbcGrade.points,
         cbc_descriptor: row.cbcGrade.descriptor,
-        grade_844: row.grade844.grade,
+        grade_844: row.cbcGrade.grade,
+        exam_id: selectedExam || null,
         position: row.position,
-        status: 'submitted' as const,
+        status: asDraft ? 'draft' as const : 'submitted' as const,
         submitted_at: new Date().toISOString(),
       }));
 
+      // Use exam_id in conflict key so different assessments don't overwrite each other
+      // If exam_id is set, use the exam-specific unique index; otherwise use the no-exam index
+      const conflictKey = selectedExam
+        ? 'student_id,subject_id,term_id,exam_id'
+        : 'student_id,subject_id,term_id';
       const { error: insertError } = await supabaseUntyped.from('results').upsert(records, {
-        onConflict: 'student_id,subject_id,term_id',
+        onConflict: conflictKey,
         ignoreDuplicates: false,
       });
       if (insertError) {
+        // Fallback: try insert (handles cases where constraint doesn't exist yet)
         const { error: insertError2 } = await supabaseUntyped.from('results').insert(records);
         if (insertError2) throw new Error(insertError2.message);
       }
 
-      // Recalculate class positions
-      try {
-        const { data: allResults } = await supabaseUntyped
-          .from('results')
-          .select('id, student_id, marks, out_of')
-          .eq('class_id', selectedClass)
-          .eq('term_id', selectedTerm);
-        if (allResults && allResults.length > 0) {
-          const studentTotals: Record<string, { totalPct: number; count: number }> = {};
-          allResults.forEach((r: any) => {
-            const pct = r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0;
-            if (!studentTotals[r.student_id]) studentTotals[r.student_id] = { totalPct: 0, count: 0 };
-            studentTotals[r.student_id].totalPct += pct;
-            studentTotals[r.student_id].count += 1;
-          });
-          const ranked = Object.entries(studentTotals)
-            .map(([sid, v]) => ({ student_id: sid, avg: v.totalPct / v.count }))
-            .sort((a, b) => b.avg - a.avg);
-          for (let i = 0; i < ranked.length; i++) {
-            await supabaseUntyped
-              .from('results')
-              .update({ class_position: i + 1 })
-              .eq('student_id', ranked[i].student_id)
-              .eq('class_id', selectedClass)
-              .eq('term_id', selectedTerm);
+      // Recalculate class positions (only on final submit)
+      if (!asDraft) {
+        try {
+          const { data: allResults } = await supabaseUntyped
+            .from('results')
+            .select('id, student_id, marks, out_of')
+            .eq('class_id', selectedClass)
+            .eq('term_id', selectedTerm);
+          if (allResults && allResults.length > 0) {
+            const studentTotals: Record<string, { totalPct: number; count: number }> = {};
+            allResults.forEach((r: any) => {
+              const pct = r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0;
+              if (!studentTotals[r.student_id]) studentTotals[r.student_id] = { totalPct: 0, count: 0 };
+              studentTotals[r.student_id].totalPct += pct;
+              studentTotals[r.student_id].count += 1;
+            });
+            const ranked = Object.entries(studentTotals)
+              .map(([sid, v]) => ({ student_id: sid, avg: v.totalPct / v.count }))
+              .sort((a, b) => b.avg - a.avg);
+            for (let i = 0; i < ranked.length; i++) {
+              await supabaseUntyped
+                .from('results')
+                .update({ class_position: i + 1 })
+                .eq('student_id', ranked[i].student_id)
+                .eq('class_id', selectedClass)
+                .eq('term_id', selectedTerm);
+            }
           }
+        } catch (posErr) {
+          console.warn('Position recalculation warning:', posErr);
         }
-      } catch (posErr) {
-        console.warn('Position recalculation warning:', posErr);
       }
 
       setSuccess(true);
@@ -451,7 +402,11 @@ export default function TeacherResultsUpload() {
       setManualPreview([]);
       setManualPreviewReady(false);
       setManualRows(prev => prev.map(r => ({ ...r, marks: '' })));
-      toast.success(`${records.length} results saved successfully! Class positions recalculated.`);
+      if (asDraft) {
+        toast.success(`${records.length} results saved as draft! You can edit them later.`);
+      } else {
+        toast.success(`${records.length} results submitted successfully! Class positions recalculated.`);
+      }
     } catch (err: any) {
       setError(err.message);
       toast.error('Upload failed: ' + err.message);
@@ -501,8 +456,7 @@ export default function TeacherResultsUpload() {
             marks,
             out_of: rowOutOf,
             percentage,
-            cbcGrade: grades.cbcGrade,
-            grade844: grades.grade844,
+            cbcGrade: grades.cbeGrade,
           };
         });
         const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
@@ -521,7 +475,7 @@ export default function TeacherResultsUpload() {
     doc.setFontSize(16);
     doc.text('Kimatu Analytics - Results Report', 14, 15);
     doc.setFontSize(11);
-    doc.text(`Class: ${className} | Subject: ${subjectName} | Term: ${termName}`, 14, 25);
+    doc.text(`Class: ${className} | Learning Area: ${subjectName} | Term: ${termName}`, 14, 25);
     doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
     autoTable(doc, {
       startY: 40,
@@ -563,14 +517,25 @@ export default function TeacherResultsUpload() {
   };
 
   // Band label for display
-  const bandLabel = currentBand === '844' ? '8-4-4 (Form 1–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : currentBand === 'pre-primary' ? 'Pre-Primary CBE (PP1–PP2)' : 'Primary CBE (Gr 1–6)';
+  const isPP = /pp1|pp2|pre.?primary/i.test(currentClassData?.name || '');
+  const bandLabel = currentBand === '' ? ' (Form 3–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : (isPP ? 'Pre-Primary CBE (PP1–PP2)' : 'Primary CBE (Gr 1–6)');
 
   return (
     <div className="space-y-6">
       <div>
+        <Link to="/teacher/results/assigned" className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mb-2">
+          <ArrowLeft className="w-4 h-4" /> Assigned learning areas
+        </Link>
         <h1 className="text-2xl font-bold text-[#111111]">Upload Results</h1>
-        <p className="text-sm text-[#666666]">Enter or upload student results with automatic Primary CBE, Junior CBE, Senior CBE, and 8-4-4 grading</p>
+        <p className="text-sm text-[#666666]">Enter marks only for learning areas assigned to you. Unassigned subjects are blocked.</p>
       </div>
+
+      {assignmentsLoaded && teacherAssignments.length === 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600" />
+          <span className="text-sm text-red-700">No learning areas have been assigned to you. Contact your school admin.</span>
+        </div>
+      )}
 
       {success && (
         <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center gap-3">
@@ -589,8 +554,8 @@ export default function TeacherResultsUpload() {
 
       {/* Step 1: Select Class, Subject, Term */}
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Subject &amp; Term</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <h3 className="font-semibold text-[#111111] mb-4">Step 1: Select Class, Learning Area, Term &amp; Assessment</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Class selector */}
           <select
             value={selectedClass}
@@ -603,80 +568,30 @@ export default function TeacherResultsUpload() {
             ))}
           </select>
 
-          {/* Subject selector — smart, level-aware */}
+          {/* Learning Area selector — ASSIGNED ONLY */}
           <div className="space-y-1">
             {selectedClass && (
               <div className="flex items-center gap-1 mb-1">
                 <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">{bandLabel}</span>
+                <span className="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">Assigned only</span>
               </div>
             )}
-            {subjectMode !== 'manual' ? (
-              <div className="flex gap-2">
-                <select
-                  value={selectedSubject ? (subjects.find(s => s.id === selectedSubject)?.name || '') : ''}
-                  onChange={e => handlePresetSubjectSelect(e.target.value)}
-                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                  disabled={!selectedClass}
-                >
-                  <option value="">Select Subject</option>
-                  {/* Pre-populated subjects for this level */}
-                  {selectedClass && (
-                    <optgroup label={`Standard ${bandLabel} Subjects`}>
-                      {presetSubjects.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {/* DB subjects already added by admin */}
-                  {dbSubjectsFiltered.length > 0 && (
-                    <optgroup label="Other School Subjects">
-                      {dbSubjectsFiltered
-                        .filter(s => !presetSubjects.includes(s.name))
-                        .map((s: any) => (
-                          <option key={s.id} value={s.name}>{s.name}</option>
-                        ))}
-                    </optgroup>
-                  )}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setSubjectMode('manual')}
-                  title="Add subject manually"
-                  className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Other
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Type learning area name…"
-                  value={manualSubjectName}
-                  onChange={e => setManualSubjectName(e.target.value)}
-                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveManualSubject(); } }}
-                />
-                <button
-                  type="button"
-                  onClick={saveManualSubject}
-                  disabled={savingManualSubject}
-                  className="flex items-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-medium hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {savingManualSubject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSubjectMode('preset'); setManualSubjectName(''); }}
-                  className="px-3 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
+            <select
+              value={selectedSubject}
+              onChange={e => setSelectedSubject(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+              disabled={!selectedClass}
+            >
+              <option value="">{!selectedClass ? 'Select class first' : assignedSubjectsForClass.length === 0 ? 'No assigned learning areas' : 'Select Learning Area'}</option>
+              {assignedSubjectsForClass.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            {selectedSubject && (
+              <p className="text-xs text-green-600">✓ {assignedSubjectsForClass.find(s => s.id === selectedSubject)?.name || subjects.find(s => s.id === selectedSubject)?.name || ''} selected</p>
             )}
-            {selectedSubject && subjectMode !== 'manual' && (
-              <p className="text-xs text-green-600">✓ {subjects.find(s => s.id === selectedSubject)?.name || ''} selected</p>
+            {selectedClass && assignedSubjectsForClass.length === 0 && (
+              <p className="text-xs text-red-600">No learning areas assigned for this class.</p>
             )}
           </div>
 
@@ -690,24 +605,17 @@ export default function TeacherResultsUpload() {
             {terms.map((t: any) => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
           </select>
 
-          {/* Assessment/Exam selector */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Assessment (optional)</label>
-            <select
-              value={selectedExam}
-              onChange={e => setSelectedExam(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-            >
-              <option value="">All / Term Exam</option>
-              {exams
-                .filter(ex => !selectedTerm || ex.term_id === selectedTerm)
-                .map((ex: any) => (
-                  <option key={ex.id} value={ex.id}>
-                    {ex.name}{ex.type ? ` (${ex.type})` : ''}{ex.weightage ? ` — ${ex.weightage}%` : ''}
-                  </option>
-                ))}
-            </select>
-          </div>
+          {/* Assessment / Exam selector */}
+          <select
+            value={selectedExam}
+            onChange={e => setSelectedExam(e.target.value)}
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+          >
+            <option value="">Select Assessment (optional)</option>
+            {exams.filter(ex => !selectedTerm || ex.term_id === selectedTerm || !ex.term_id).map((ex: any) => (
+              <option key={ex.id} value={ex.id}>{ex.name} {ex.type ? `(${ex.type})` : ''}</option>
+            ))}
+          </select>
 
           {/* Out of */}
           <div>
@@ -777,7 +685,7 @@ export default function TeacherResultsUpload() {
                     <thead>
                       <tr className="border-b border-gray-100 bg-gray-50">
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">#</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Student Name</th>
+                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learner Name</th> {/* Issue 26 */}
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Adm #</th>
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks (out of {outOf})</th>
                         {manualPreviewReady && (
@@ -805,8 +713,11 @@ export default function TeacherResultsUpload() {
                                 max={outOf}
                                 value={row.marks}
                                 onChange={e => updateManualMark(idx, e.target.value)}
+                                onKeyDown={e => handleMarkKeyDown(e, idx)}
+                                data-mark-idx={idx}
                                 placeholder={`0 - ${outOf}`}
                                 className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] text-center"
+                                title="Use Arrow Up/Down or Enter to navigate between students"
                               />
                             </td>
                             {manualPreviewReady && previewRow && (
@@ -845,14 +756,33 @@ export default function TeacherResultsUpload() {
                     Calculate Grades &amp; Preview
                   </button>
                   {manualPreviewReady && (
-                    <button
-                      onClick={() => handleSubmit(manualPreview)}
-                      disabled={uploading}
-                      className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
-                    >
-                      {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                      {uploading ? 'Saving...' : `Submit ${manualPreview.length} Results to Database`}
-                    </button>
+                    <>
+                      {/* Mean Calculation Display */}
+                      <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 rounded-xl">
+                        <span className="text-sm text-blue-700">
+                          <strong>Class Mean: {calculateClassMean(manualPreview)}%</strong>
+                        </span>
+                        <span className="text-xs text-blue-500">
+                          ({manualPreview.length} learners)
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleSubmit(manualPreview, true)}
+                        disabled={uploading}
+                        className="flex items-center gap-2 bg-gray-100 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50 border border-gray-300"
+                      >
+                        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardEdit className="w-4 h-4" />}
+                        {uploading ? 'Saving...' : 'Save as Draft'}
+                      </button>
+                      <button
+                        onClick={() => handleSubmit(manualPreview, false)}
+                        disabled={uploading}
+                        className="flex items-center gap-2 bg-[#2563EB] text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50"
+                      >
+                        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        {uploading ? 'Saving...' : `Submit ${manualPreview.length} Results`}
+                      </button>
+                    </>
                   )}
                 </div>
               </>
@@ -900,7 +830,7 @@ export default function TeacherResultsUpload() {
                     <thead>
                       <tr className="border-b border-gray-100 bg-gray-50">
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Rank</th>
-                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Student</th>
+                        <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learner</th> {/* Issue 26 */}
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Out Of</th>
                         <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
@@ -928,10 +858,20 @@ export default function TeacherResultsUpload() {
                     </tbody>
                   </table>
                 </div>
-                <div className="mt-4 flex gap-3">
-                  <button onClick={() => handleSubmit(csvData)} disabled={uploading} className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {/* Mean Display */}
+                  <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 rounded-xl mr-auto">
+                    <span className="text-sm text-blue-700">
+                      <strong>Class Mean: {calculateClassMean(csvData)}%</strong>
+                    </span>
+                    <span className="text-xs text-blue-500">({csvData.length} learners)</span>
+                  </div>
+                  <button onClick={() => handleSubmit(csvData, true)} disabled={uploading} className="bg-gray-100 text-gray-700 border border-gray-300 px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50 flex items-center gap-2">
+                    {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save as Draft'}
+                  </button>
+                  <button onClick={() => handleSubmit(csvData, false)} disabled={uploading} className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50 flex items-center gap-2">
                     {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                    {uploading ? 'Uploading...' : 'Submit Results to Database'}
+                    {uploading ? 'Uploading...' : 'Submit Results'}
                   </button>
                   <button onClick={() => { setCsvData([]); setPreview(false); }} className="border border-gray-200 px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
                 </div>

@@ -319,7 +319,7 @@ export default function ParentChildReportCard() {
   };
 
   const classDataForGrading = selectedChild?.classes || {};
-  const is844 = (classDataForGrading?.curriculum || 'CBE') === '844';
+  const is = (classDataForGrading?.curriculum || 'CBE') === '';
   const band = getSchoolLevelBand(classDataForGrading);
   const isPrimary = band === 'primary';
 
@@ -333,7 +333,7 @@ export default function ParentChildReportCard() {
       const avgPercentage = results.length
         ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
         : 0;
-      const totalPoints = is844
+      const totalPoints = is
         ? results.reduce((s, r) => {
             const pct = getPercentage(r);
             if (pct >= 80) return s + 12; if (pct >= 75) return s + 11; if (pct >= 70) return s + 10;
@@ -372,7 +372,7 @@ export default function ParentChildReportCard() {
       const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
       let trendEndY = devEndY;
       if (trendData.length >= 2) {
-        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is844);
+        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is);
         trendEndY = devEndY + 55;
       }
       const myBestSubjects = classBestList.filter(b => b.studentId === selectedChild.id);
@@ -381,7 +381,7 @@ export default function ParentChildReportCard() {
       addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text('Kimatu Analytics | Support: support@kimatu.company', 105, 285, { align: 'center' });
+      doc.text('Kimatu Analytics | Support: tutorsultimate@gmail.com', 105, 285, { align: 'center' });
       doc.save(`report_card_${selectedChild.first_name}_${term?.name}.pdf`);
       toast.success('Report card downloaded!');
     } catch (err: any) {
@@ -552,10 +552,10 @@ export default function ParentChildReportCard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
+                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th> {/* Issue 26 */}
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844 ? '8-4-4 Grade' : 'CBE Grade'}</th>
+                      <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is ? ' Grade' : 'CBE Grade'}</th>
                       {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                       <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                     </tr>
@@ -564,7 +564,7 @@ export default function ParentChildReportCard() {
                     {results.map((r, i) => {
                       const pct = r.percentage !== undefined && r.percentage !== null ? r.percentage : Math.round((r.marks / (r.out_of || 100)) * 100);
                       const grading = (() => {
-                        if (is844) {
+                        if (is) {
                           if (pct >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
                           if (pct >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
                           if (pct >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };

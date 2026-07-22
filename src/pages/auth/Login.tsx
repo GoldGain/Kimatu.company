@@ -7,6 +7,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
 import SEO from '@/components/SEO';
 
+interface StudentData {
+  email: string;
+  admission_number: string;
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -17,6 +22,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // If already logged in, redirect to appropriate dashboard
   useEffect(() => {
     if (!authLoading && user) {
       redirectByRole(user.role);
@@ -48,6 +54,7 @@ export default function Login() {
     try {
       let email = identifier;
 
+      // If using admission number, find the student's email
       if (loginMethod === 'admission') {
         const { data: student, error: studentError } = await supabase
           .from('students')
@@ -72,6 +79,7 @@ export default function Login() {
         email = emailToUse;
       }
 
+      // Attempt login via Supabase directly
       const { error: loginError, data } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
@@ -89,6 +97,7 @@ export default function Login() {
         return;
       }
 
+      // Get user role from profile directly
       const { data: profileData } = await supabase
         .from('profiles')
         .select('role')
@@ -101,6 +110,7 @@ export default function Login() {
       toast.success('Welcome back!');
       setLoading(false);
 
+      // Redirect based on role
       if (role === 'master_super_admin') {
         navigate('/master-admin', { replace: true });
       } else if (role === 'reseller_super_admin') {
@@ -116,6 +126,7 @@ export default function Login() {
       } else if (role === 'parent') {
         navigate('/parent', { replace: true });
       } else {
+        // Role not found - show error
         setError('❌ Account role not configured. Please contact your administrator.');
         await supabase.auth.signOut();
       }
@@ -127,10 +138,11 @@ export default function Login() {
     }
   };
 
+  // Show loading while initial auth state is being determined
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F3EF]">
-        <Loader2 className="w-8 h-8 animate-spin text-[#1A365D]" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#2563EB]" />
       </div>
     );
   }
@@ -138,21 +150,18 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-[#F5F3EF] flex items-center justify-center px-4">
       <SEO
-        title="Login - Kimatu Analytics School Portal"
-        description="Login to Kimatu Analytics, Kenya's school management portal for teachers, students, parents, and administrators. Access results, report cards, and more."
+        title="Login — Kimatu Analytics School Portal"
+        description="Login to Kimatu Analytics, Kenya's intelligent school management portal for teachers, students, parents, and administrators."
         path="/login"
       />
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 mb-6">
-            <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-10 h-10 rounded-xl" />
-            <div className="flex flex-col items-start">
-              <span className="text-2xl font-bold" style={{ color: '#1A365D' }}>Kimatu</span>
-              <span className="text-[10px] -mt-1" style={{ color: '#D4AF37' }}>ANALYTICS</span>
-            </div>
+            <img src="/icon-192.png" alt="Kimatu Analytics" className="w-12 h-12 rounded-xl object-contain" />
+            <span className="text-2xl font-bold text-[#111111]">Kimatu Analytics</span>
           </Link>
-          <h1 className="text-3xl font-bold text-[#111111]">Welcome Back</h1>
-          <p className="text-base text-[#666666] mt-1">Login to your school portal</p>
+          <h1 className="text-2xl font-bold text-[#111111]">Welcome Back</h1>
+          <p className="text-sm text-[#666666] mt-1">Login to your school portal</p>
           <div className="mt-3 flex justify-center">
             <PWAInstallButton />
           </div>
@@ -172,7 +181,7 @@ export default function Login() {
               onClick={() => setLoginMethod('email')}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 ${
                 loginMethod === 'email' 
-                  ? 'bg-[#1A365D] text-white' 
+                  ? 'bg-[#2563EB] text-white' 
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -183,7 +192,7 @@ export default function Login() {
               onClick={() => setLoginMethod('admission')}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 ${
                 loginMethod === 'admission' 
-                  ? 'bg-[#1A365D] text-white' 
+                  ? 'bg-[#2563EB] text-white' 
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -194,19 +203,19 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-[#111111] mb-1.5">
-                {loginMethod === 'email' ? 'Email Address' : 'Admission Number'}
+                {loginMethod === 'email' ? 'Email Address' : 'Assessment Number'}
               </label>
               <input
                 type={loginMethod === 'email' ? 'email' : 'text'}
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 placeholder={loginMethod === 'email' ? 'your@email.com' : 'e.g., GFA-2025-001'}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D] focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent"
                 required
                 autoFocus
               />
               {loginMethod === 'admission' && (
-                <p className="text-xs text-gray-500 mt-1">Enter the admission number given by your school</p>
+                <p className="text-xs text-gray-500 mt-1">Enter the assessment number given by your school</p>
               )}
             </div>
 
@@ -218,7 +227,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A365D] focus:border-transparent pr-10"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent pr-10"
                   required
                 />
                 <button
@@ -236,7 +245,7 @@ export default function Login() {
                 <input type="checkbox" className="rounded border-gray-300" />
                 Remember me
               </label>
-              <Link to="/auth/forgot-password" className="text-sm text-[#1A365D] hover:underline">
+              <Link to="/auth/forgot-password" className="text-sm text-[#2563EB] hover:underline">
                 Forgot password?
               </Link>
             </div>
@@ -244,7 +253,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#1A365D] text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-[#2D4A7C] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full bg-[#2563EB] text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-[#1d4ed8] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign In'}
             </button>
@@ -252,30 +261,14 @@ export default function Login() {
 
           <div className="mt-6 text-center text-sm text-[#666666]">
             Don&apos;t have an account?{' '}
-            <Link to="/get-started" className="text-[#1A365D] font-medium hover:underline">
+            <Link to="/register-school" className="text-[#2563EB] font-medium hover:underline">
               Get Started
             </Link>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-gray-100 text-center">
-            <p className="text-sm text-gray-500 mb-2">Need help logging in?</p>
-            <div className="flex justify-center gap-3">
-              <a 
-                href="https://wa.me/254114645757" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-sm text-green-600 hover:text-green-700 font-medium"
-              >
-                WhatsApp Support
-              </a>
-              <span className="text-gray-300">|</span>
-              <a 
-                href="mailto:martinmakau123@gmail.com"
-                className="inline-flex items-center gap-1 text-sm text-[#1A365D] hover:text-[#2D4A7C] font-medium"
-              >
-                Email Support
-              </a>
-            </div>
+          <div className="mt-6 text-center text-xs text-gray-400">
+            <p>📧 School Admin / Teacher / Parent: Use Email Login</p>
+            <p className="mt-1">🎓 Learners: Use Assessment Number Login or Email Login</p>
           </div>
         </div>
       </div>

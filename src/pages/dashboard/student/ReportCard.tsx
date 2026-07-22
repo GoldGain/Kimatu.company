@@ -70,9 +70,7 @@ export default function StudentReportCard() {
           setSelectedTerm(termsData[0].id);
         }
 
-        // Fetch school info (logo, principal, etc.)
         await fetchSchoolInfo(studentData.school_id);
-        // Fetch signatures
         await fetchSignatures(studentData.school_id, studentData.classes?.class_teacher_id);
       }
     } catch (err) {
@@ -98,7 +96,6 @@ export default function StudentReportCard() {
           phone: data.phone || '',
           email: data.email || '',
         });
-        // Also set principal signature from school data
         setSignatures(prev => ({
           ...prev,
           principal_signature_url: data.principal_signature_url || null,
@@ -107,7 +104,6 @@ export default function StudentReportCard() {
         setSchoolInfo({ name: 'School' });
       }
     } catch (err: any) {
-      // If column doesn't exist, fetch without it
       try {
         const { data } = await supabaseUntyped
           .from('schools')
@@ -134,7 +130,6 @@ export default function StudentReportCard() {
   };
 
   const fetchSignatures = async (schoolId: string, classTeacherId?: string) => {
-    // Principal signature — column now exists after migration
     let principalSigUrl: string | null = null;
     try {
       const { data: schoolSig } = await supabaseUntyped
@@ -143,9 +138,7 @@ export default function StudentReportCard() {
         .eq('id', schoolId)
         .maybeSingle();
       principalSigUrl = schoolSig?.principal_signature_url || null;
-    } catch {
-      // Column may not exist on older deployments — ignore
-    }
+    } catch {}
 
     let teacherSigUrl: string | null = null;
     if (classTeacherId) {
@@ -156,9 +149,7 @@ export default function StudentReportCard() {
           .eq('id', classTeacherId)
           .maybeSingle();
         teacherSigUrl = teacherSig?.signature_url || null;
-      } catch {
-        // Ignore errors fetching teacher signature
-      }
+      } catch {}
     }
 
     setSignatures(prev => ({
@@ -179,13 +170,12 @@ export default function StudentReportCard() {
     if (!student || !selectedTerm) return;
     const { data } = await supabaseUntyped
       .from('results')
-      .select('*, subjects(name), terms(name, academic_year)')
+      .select('*, subjects(name), terms(name, academic_year), school_exams(name, type)')
       .eq('student_id', student.id)
       .eq('term_id', selectedTerm)
       .order('subjects(name)');
     setResults(data || []);
     await fetchPreviousAvg();
-    // Fetch class-wide best per subject
     const { data: classResults } = await supabaseUntyped
       .from('results')
       .select('*, students(id, first_name, last_name), subjects(name)')
@@ -248,10 +238,9 @@ export default function StudentReportCard() {
   };
 
   const classDataForGrading = student?.classes || {};
-  const is844 = (classDataForGrading?.curriculum || 'CBE') === '844';
+  const is = (classDataForGrading?.curriculum || 'CBE') === '';
   const band = getSchoolLevelBand(classDataForGrading);
-  // Pre-Primary (PP1/PP2) uses same display as Primary: no sub-level, no points column
-  const isPrimary = band === 'primary' || band === 'pre-primary';
+  const isPrimary = band === 'primary';
 
   const generatePDF = async () => {
     if (!results.length) { toast.error('No results found for this term'); return; }
@@ -264,7 +253,7 @@ export default function StudentReportCard() {
       const avgPercentage = results.length
         ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
         : 0;
-      const totalPoints = is844
+      const totalPoints = is
         ? results.reduce((s, r) => {
             const pct = getPercentage(r);
             if (pct >= 80) return s + 12; if (pct >= 75) return s + 11; if (pct >= 70) return s + 10;
@@ -286,33 +275,27 @@ export default function StudentReportCard() {
       const position = results[0]?.class_position || results[0]?.position || null;
       const positionStr = formatPosition(position, totalStudents || 0);
 
-      // AI comment — subject-specific with all scores
       const subjectScores = results.map(r => ({
         name: r.subjects?.name || 'Unknown',
         percentage: getPercentage(r),
         previousPercentage: null,
       }));
       const sortedBest = [...subjectScores].sort((a, b) => b.percentage - a.percentage);
-      const bestLearningArea = sortedBest[0]?.name || 'all subjects';
-      const weakestLearningArea = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
+      const bestSubject = sortedBest[0]?.name || 'all subjects';
+      const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
       const studentFullName = `${student.first_name} ${student.last_name}`;
       const aiComment = generateUniqueAIComment(
-        studentFullName, avgPercentage, deviation, bestLearningArea, weakestLearningArea,
+        studentFullName, avgPercentage, deviation, bestSubject, weakestSubject,
         position, totalStudents || 0, isNew, classDataForGrading, subjectScores
       );
 
-      // Header with logo
       await drawReportHeader(doc, schoolInfo);
 
-      // Student photo (top-right corner) — bigger (35x35mm ~132px)
       const photoUrl = student.photo_url || null;
       if (photoUrl) {
-        try {
-          await addStudentPhotoToPDF(doc, photoUrl, 163, 30, 35);
-        } catch {}
+        try { await addStudentPhotoToPDF(doc, photoUrl, 163, 30, 35); } catch {}
       }
 
-      // Student info
       drawStudentInfo(
         doc,
         studentFullName,
@@ -323,36 +306,30 @@ export default function StudentReportCard() {
         positionStr,
       );
 
-      // Results table
-      const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
-
-      // Summary
-      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
-
-      // Deviation
-      const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
-
-      // Performance trend graph
-      let trendEndY = devEndY;
-      if (trendData.length >= 2) {
-        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is844);
-        trendEndY = devEndY + 55;
+      // Show assessment name if available
+      const assessmentName = results[0]?.school_exams?.name || '';
+      if (assessmentName) {
+        doc.setFontSize(9);
+        doc.setTextColor(37, 99, 235);
+        doc.text(`Assessment: ${assessmentName}`, 120, 70);
       }
 
-      // Achievements
-      const myBestLearningAreas = classBestList.filter((b: BestInSubject) => b.studentId === student.id);
-      const achievementEndY = drawAchievements(doc, myBestLearningAreas, trendEndY);
-
-      // AI Comment
+      const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
+      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
+      const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
+      let trendEndY = devEndY;
+      if (trendData.length >= 2) {
+        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is);
+        trendEndY = devEndY + 55;
+      }
+      const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
+      const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
       const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
-
-      // Signatures
       addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
 
-      // Footer
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text('Kimatu Analytics School Management System | Support: tutorsultimate@gmail.com | kimatu.company', 105, 285, { align: 'center' });
+      doc.text('Kimatu Analytics School Management System | Support: tutorsultimate@gmail.com', 105, 285, { align: 'center' });
 
       doc.save(`report_card_${student.first_name}_${student.last_name}_${term?.name}.pdf`);
       toast.success('Report card downloaded!');
@@ -366,9 +343,9 @@ export default function StudentReportCard() {
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 -m-2 p-2 sm:p-4 rounded-3xl bg-gradient-to-br from-slate-50 via-sky-50/50 to-emerald-50/40 min-h-full">
       <div>
-        <h1 className="text-2xl font-bold text-[#111111]">Report Card</h1>
+        <h1 className="text-2xl font-bold text-[#111111]">Learner Report Card</h1>
         <p className="text-sm text-[#666666]">Download your official academic report card</p>
       </div>
 
@@ -387,10 +364,10 @@ export default function StudentReportCard() {
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-lg font-bold text-[#111111]">{student.first_name} {student.last_name}</h2>
-              <p className="text-sm text-[#666666]">Admission: {student.admission_number}</p>
+              <p className="text-sm text-[#666666]">Assessment #: {student.admission_number}</p>
               <p className="text-sm text-[#666666]">Class: {student.classes?.name}</p>
             </div>
-{zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={student.first_name} onClose={() => setZoomPhoto(null)} />}
+            {zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={student.first_name} onClose={() => setZoomPhoto(null)} />}
             {student.photo_url ? (
               <img
                 src={student.photo_url}
@@ -423,7 +400,14 @@ export default function StudentReportCard() {
       {results.length > 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-[#111111]">Results Preview ({results.length} subjects)</h3>
+            <h3 className="font-semibold text-[#111111]">
+              Results Preview ({results.length} subjects)
+              {results[0]?.school_exams?.name && (
+                <span className="ml-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                  {results[0]?.school_exams?.name}
+                </span>
+              )}
+            </h3>
             <div className="flex gap-2">
               <button
                 onClick={generatePDF}
@@ -474,7 +458,7 @@ export default function StudentReportCard() {
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844 ? '8-4-4 Grade' : 'CBE Grade'}</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is ? ' Grade' : 'CBE Grade'}</th>
                   {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                 </tr>
@@ -483,7 +467,7 @@ export default function StudentReportCard() {
                 {results.map((r, i) => {
                   const percentage = getPercentage(r);
                   const grading = (() => {
-                    if (is844) {
+                    if (is) {
                       if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
                       if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
                       if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };

@@ -1,13 +1,7 @@
 import {
-  useState } from 'react';
-import { Link,
+  useState } from 'react';import { Link,
   useLocation,
-  useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import PWAInstallButton from '@/components/PWAInstallButton';
-import PhotoZoomModal from '@/components/PhotoZoomModal';
-import {
-  LayoutDashboard,
+  useNavigate } from 'react-router-dom';import { useAuth } from '@/contexts/AuthContext';import PWAInstallButton from '@/components/PWAInstallButton';import PhotoZoomModal from '@/components/PhotoZoomModal';import {  LayoutDashboard,
   Users,
   BookOpen,
   Library,
@@ -41,7 +35,8 @@ import {
   ClipboardCheck,
   GraduationCap,
   FileSpreadsheet,
-  Shield
+  Shield,
+  Sparkles
 } from 'lucide-react';
 
 interface NavItem {

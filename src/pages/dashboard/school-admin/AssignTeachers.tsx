@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Plus, Trash2, AlertCircle, CheckCircle, Users, BookOpen } from 'lucide-react';
-import TeacherWorkloadTable from '@/components/TeacherWorkloadTable';
-import type { LessonDistribution, Day } from '@/lib/timetable';
 
 interface TeacherAssignment {
   id: string;
@@ -12,12 +10,10 @@ interface TeacherAssignment {
   teacher_number: number;
   class_id: string;
   class_name: string;
-  class_level: number | null;
   subject_id: string;
   subject_name: string;
   lessons_per_week: number;
   is_priority: boolean;
-  academic_year: string | null;
 }
 
 interface Teacher {
@@ -55,10 +51,7 @@ export default function AssignTeachers() {
     subject_id: '',
     lessons_per_week: 5,
     is_priority: false,
-    academic_year: new Date().getFullYear().toString(),
   });
-  const [workloadDistribution, setWorkloadDistribution] = useState<LessonDistribution[]>([]);
-  const [unavailableDays, setUnavailableDays] = useState<Day[]>([]);
 
   useEffect(() => {
     if (user?.schoolId) fetchData();
@@ -106,9 +99,9 @@ export default function AssignTeachers() {
     const { data, error: ae } = await supabase
       .from('teacher_subject_assignments')
       .select(`
-        id, teacher_id, class_id, subject_id, lessons_per_week, is_priority, academic_year,
+        id, teacher_id, class_id, subject_id, lessons_per_week, is_priority,
         teachers(first_name, last_name, teacher_number),
-        classes(name, level),
+        classes(name),
         subjects(name)
       `)
       .eq('school_id', user?.schoolId)
@@ -123,12 +116,10 @@ export default function AssignTeachers() {
       teacher_number: a.teachers?.teacher_number || 0,
       class_id: a.class_id,
       class_name: a.classes?.name || '',
-      class_level: a.classes?.level || null,
       subject_id: a.subject_id,
       subject_name: a.subjects?.name || '',
       lessons_per_week: a.lessons_per_week || 5,
       is_priority: a.is_priority || false,
-      academic_year: a.academic_year || null,
     }));
     setAssignments(mapped.sort((a, b) => a.teacher_number - b.teacher_number));
   };
@@ -154,13 +145,13 @@ export default function AssignTeachers() {
           is_priority: formData.is_priority,
           assigned_by_admin: true,
           is_active: true,
-          academic_year: formData.academic_year,
+          academic_year: '2026',
         }, { onConflict: 'teacher_id,class_id,subject_id' });
 
       if (insertError) throw insertError;
 
       setSuccess('Assignment saved successfully!');
-      setFormData({ teacher_id: '', class_id: '', subject_id: '', lessons_per_week: 5, is_priority: false, academic_year: new Date().getFullYear().toString() });
+      setFormData({ teacher_id: '', class_id: '', subject_id: '', lessons_per_week: 5, is_priority: false });
       await fetchAssignments();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -194,7 +185,7 @@ export default function AssignTeachers() {
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-black text-gray-900">Assign Teachers to Subjects</h1>
+        <h1 className="text-2xl font-black text-gray-900">Assign Teachers to Learning Areas</h1>
         <p className="text-gray-500 text-sm mt-1">
           Admin assigns teachers to subjects per class. Teachers appear in the timetable by their number (e.g. MATH<strong>3</strong> = Teacher #3 teaches Mathematics).
         </p>
@@ -249,25 +240,8 @@ export default function AssignTeachers() {
                 >
                   <option value="">Select class...</option>
                   {classes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.level !== null ? `(Grade ${c.level})` : ''}
-                    </option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Academic Year</label>
-                <select
-                  value={formData.academic_year}
-                  onChange={(e) => setFormData({ ...formData, academic_year: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {[...Array(5)].map((_, i) => {
-                    const year = (new Date().getFullYear() + i).toString();
-                    return <option key={year} value={year}>{year}</option>;
-                  })}
                 </select>
               </div>
 
@@ -291,40 +265,10 @@ export default function AssignTeachers() {
                 <input
                   type="number" min="1" max="10"
                   value={formData.lessons_per_week}
-                  onChange={(e) => setFormData({ ...formData, lessons_per_week: parseInt(e.target.value) || 5 })}
+                  onChange={(e) => setFormData({ ...formData, lessons_per_week: parseInt(e.target.value) })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              {/* Unavailable Days */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">Teacher Unavailable Days</label>
-                <div className="flex flex-wrap gap-2">
-                  {(['monday','tuesday','wednesday','thursday','friday'] as Day[]).map((day) => (
-                    <label key={day} className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={unavailableDays.includes(day)}
-                        onChange={(e) => {
-                          setUnavailableDays(prev =>
-                            e.target.checked ? [...prev, day] : prev.filter(d => d !== day)
-                          );
-                        }}
-                        className="w-3.5 h-3.5 rounded border-gray-300 text-red-500"
-                      />
-                      <span className="text-xs text-gray-600 capitalize">{day.slice(0,3)}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              {/* Workload Distribution Preview */}
-              {formData.teacher_id && (
-                <TeacherWorkloadTable
-                  teacherId={formData.teacher_id}
-                  totalLessonsPerWeek={formData.lessons_per_week}
-                  unavailableDays={unavailableDays}
-                  onChange={setWorkloadDistribution}
-                />
-              )}
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -386,9 +330,7 @@ export default function AssignTeachers() {
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">#</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Teacher</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Class</th>
-                    <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Level</th>
                     <th className="px-4 py-3 text-left text-xs font-black text-gray-600 uppercase">Learning Area</th>
-                    <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Year</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Lessons</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Priority</th>
                     <th className="px-4 py-3 text-center text-xs font-black text-gray-600 uppercase">Del</th>
@@ -397,7 +339,7 @@ export default function AssignTeachers() {
                 <tbody>
                   {assignments.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
+                      <td colSpan={7} className="px-4 py-10 text-center text-gray-400 text-sm">
                         No assignments yet. Add one using the form.
                       </td>
                     </tr>
@@ -411,11 +353,7 @@ export default function AssignTeachers() {
                         </td>
                         <td className="px-4 py-3 font-semibold text-gray-900">{a.teacher_name}</td>
                         <td className="px-4 py-3 text-gray-700">{a.class_name}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">
-                          {a.class_level !== null ? `Grade ${a.class_level}` : '—'}
-                        </td>
                         <td className="px-4 py-3 text-gray-700">{a.subject_name}</td>
-                        <td className="px-4 py-3 text-center text-gray-500 text-xs">{a.academic_year || '—'}</td>
                         <td className="px-4 py-3 text-center text-gray-700">{a.lessons_per_week}</td>
                         <td className="px-4 py-3 text-center">
                           {a.is_priority ? (

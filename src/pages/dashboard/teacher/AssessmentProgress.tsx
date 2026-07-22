@@ -39,7 +39,7 @@ export default function AssessmentProgress() {
       // Get teacher record
       const { data: teacherData } = await supabaseUntyped
         .from('teachers')
-        .select('id')
+        .select('id, school_id')
         .eq('profile_id', user?.id)
         .single();
 
@@ -49,12 +49,18 @@ export default function AssessmentProgress() {
         return;
       }
 
+      // Issue 9: Resolve school_id from teacher record as fallback when user.schoolId is null
+      const resolvedSchoolId = user?.schoolId || teacherData?.school_id;
+      if (!resolvedSchoolId) {
+        setLoading(false);
+        return;
+      }
+
       // Get teacher's class-subject assignments
       const { data: assignments } = await supabaseUntyped
         .from('teacher_subject_assignments')
         .select('*, classes(id, name), subjects(id, name)')
-        .eq('teacher_id', teacherId)
-        .eq('is_active', true);
+        .eq('teacher_id', teacherId);
 
       if (!assignments || assignments.length === 0) {
         setLoading(false);
@@ -65,7 +71,7 @@ export default function AssessmentProgress() {
       const { data: exams } = await supabaseUntyped
         .from('school_exams')
         .select('*, terms(name, academic_year)')
-        .eq('school_id', user?.schoolId)
+        .eq('school_id', resolvedSchoolId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
@@ -208,6 +214,7 @@ export default function AssessmentProgress() {
                     <p className="text-sm font-bold text-[#111111]">{p.percentComplete}%</p>
                     <p className="text-xs text-gray-500">{p.enteredSubjects}/{p.totalSubjects} learning areas</p>
                   </div>
+                  {/* Issue 25: Clear status badge showing Completed / In Progress / Not Started */}
                   {p.percentComplete === 100 ? (
                     <span className="flex items-center gap-1 text-xs font-bold bg-green-100 text-green-700 px-2.5 py-1 rounded-full border border-green-200 whitespace-nowrap">
                       <CheckCircle className="w-3.5 h-3.5" /> Completed

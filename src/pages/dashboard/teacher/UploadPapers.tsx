@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Upload, FileText, Trash2, Download, Loader2, Plus, BookOpen } from 'lucide-react';
+import { Upload, FileText, Trash2, Download, Loader2, Plus, X, BookOpen, Calendar, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Paper {
@@ -184,7 +184,7 @@ export default function UploadPapers() {
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
                 required
               >
-                <option value="">Select Grade *</option>
+                <option value="">Select Class *</option>
                 {classes.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <select
@@ -193,7 +193,7 @@ export default function UploadPapers() {
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
                 required
               >
-                <option value="">Select Learning Area *</option>
+                <option value="">Select Subject *</option>
                 {subjects.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
               <select
@@ -240,7 +240,7 @@ export default function UploadPapers() {
           onChange={e => setFilterClass(e.target.value)}
           className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
         >
-          <option value="">All Grades</option>
+          <option value="">All Classes</option>
           {classes.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <select
@@ -248,7 +248,7 @@ export default function UploadPapers() {
           onChange={e => setFilterSubject(e.target.value)}
           className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
         >
-          <option value="">All Learning Areas</option>
+          <option value="">All Subjects</option>
           {subjects.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>

@@ -2,12 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { AlertCircle, Download, Printer, RefreshCw } from 'lucide-react';
-import { formatTimeDisplay } from '@/lib/timetable-generator';
+import {
+  formatTimeDisplay,
+  summarizeSlots,
+  generateSlots,
+  resolveLessonTargets,
+  type TimetableConfig,
+  type TimetableSlot,
+} from '@/lib/timetable-generator';
 
 interface SchoolClass {
   id: string;
   name: string;
   level: number;
+  grade_level?: number | null;
   stream?: string | null;
 }
 
@@ -34,6 +42,7 @@ interface TimeSlot {
   end_time: string;
   slot_type: 'lesson' | 'break' | 'lunch' | 'activities' | 'activity';
   label: string;
+  level_group?: string | null;
 }
 
 interface TeacherKeyEntry {
@@ -118,18 +127,192 @@ const fmt = (t: string): string => {
   return `${hour}:${min}`;
 };
 
+
+/** Map a class to timetable level_group key */
+function resolveClassLevelGroup(cls: SchoolClass): string {
+  const grade = Number(cls.grade_level ?? cls.level);
+  const name = String(cls.name || '').toLowerCase();
+  if (grade === -2 || grade === -1 || grade === 0 || /(pp\s*[12]|pre[\s-]?primary|playgroup|baby)/.test(name)) return 'pre-primary';
+  if ((grade >= 1 && grade <= 3) || /grade\s*[123]\b/.test(name)) return 'lower-primary';
+  if ((grade >= 4 && grade <= 6) || /grade\s*[456]\b/.test(name)) return 'upper-primary';
+  if ((grade >= 7 && grade <= 9) || /grade\s*[789]\b/.test(name)) return 'junior';
+  if ((grade >= 10 && grade <= 12) || /grade\s*(10|11|12)\b/.test(name)) return 'senior';
+  if (/form\s*[12]\b/.test(name)) return 'form-3-4'; // treat early forms like 8-4-4 band if present
+  if (/form\s*[34]\b/.test(name)) return 'form-3-4';
+  // fallback by level number ranges
+  if (!isNaN(grade)) {
+    if (grade <= 0) return 'pre-primary';
+    if (grade <= 3) return 'lower-primary';
+    if (grade <= 6) return 'upper-primary';
+    if (grade <= 9) return 'junior';
+    if (grade <= 12) return 'senior';
+  }
+  return 'default';
+}
+
+const LEVEL_LABELS: Record<string, string> = {
+  'pre-primary': 'Pre-Primary (6 lessons, 0 after lunch)',
+  'lower-primary': 'Lower Primary (7 lessons, 1 after lunch)',
+  'upper-primary': 'Upper Primary (7 lessons, 1 after lunch)',
+  'combined-primary': 'Combined Primary (7 lessons, 1 after lunch)',
+  'junior': 'Junior School (8 lessons, 2 after lunch)',
+  'senior': 'Senior School (9 lessons, 3 after lunch)',
+  'form-3-4': '8-4-4 Form 3-4 (8 lessons, 2 after lunch)',
+  'default': 'Legacy default',
+};
+
+/** Expected lesson structure per level (source of truth for columns) */
+const LEVEL_LESSON_TARGETS: Record<string, { total: number; afterLunch: number }> = {
+  'pre-primary': { total: 6, afterLunch: 0 },
+  'lower-primary': { total: 7, afterLunch: 1 },
+  'upper-primary': { total: 7, afterLunch: 1 },
+  'combined-primary': { total: 7, afterLunch: 1 },
+  'junior': { total: 8, afterLunch: 2 },
+  'senior': { total: 9, afterLunch: 3 },
+  'form-3-4': { total: 8, afterLunch: 2 },
+  'default': { total: 8, afterLunch: 2 },
+};
+
+function countLessons(slots: { slot_type: string }[]): { total: number; afterLunch: number } {
+  const lunchIdx = slots.findIndex((s) => s.slot_type === 'lunch');
+  const lessons = slots.filter((s) => s.slot_type === 'lesson');
+  const after =
+    lunchIdx >= 0
+      ? slots.slice(lunchIdx + 1).filter((s) => s.slot_type === 'lesson').length
+      : 0;
+  return { total: lessons.length, afterLunch: after };
+}
+
+function dedupeByOrder(slots: TimeSlot[]): TimeSlot[] {
+  const seen = new Set<number>();
+  const unique: TimeSlot[] = [];
+  for (const s of [...slots].sort((a, b) => a.slot_order - b.slot_order)) {
+    if (!seen.has(s.slot_order)) {
+      seen.add(s.slot_order);
+      unique.push(s);
+    }
+  }
+  return unique;
+}
+
+/**
+ * Build the COLUMN structure for a level.
+ * - Prefer DB slots for that level_group when counts match expected structure
+ * - Otherwise synthesize with generateSlots so Pre-Primary never shows L7–L9 etc.
+ */
+function buildDisplaySlotsForLevel(
+  all: TimeSlot[],
+  levelKey: string,
+  levelConfig?: any | null
+): TimeSlot[] {
+  // Never treat unknown/default as a real level for column counts when we know the class level
+  const key = levelKey === 'default' ? 'lower-primary' : levelKey;
+  const targets = LEVEL_LESSON_TARGETS[key] || { total: 7, afterLunch: 1 };
+  const byLevel = (lg: string) =>
+    dedupeByOrder(all.filter((s) => (s.level_group || 'default') === lg));
+
+  let candidates = byLevel(key);
+  if (!candidates.length && key === 'combined-primary') {
+    candidates = byLevel('lower-primary');
+  }
+  // Do NOT fall back to legacy "default" slots — they have wrong after-lunch counts
+
+  const counts = countLessons(candidates);
+  const countsMatch =
+    candidates.length > 0 &&
+    counts.total === targets.total &&
+    counts.afterLunch === targets.afterLunch;
+
+  // Prefer DB slots only when structure is exactly correct for this level
+  if (countsMatch) {
+    let slots = candidates;
+    if (targets.afterLunch === 0) {
+      // Pre-primary: no post-lunch lesson columns and no activities column clutter
+      slots = slots.filter((s) => {
+        if (s.slot_type === 'lesson') {
+          // keep only first 6 lessons by order among lessons
+          return true;
+        }
+        return s.slot_type !== 'activities' && s.slot_type !== 'activity';
+      });
+      // Extra safety: drop any lesson after lunch if present
+      const lunchOrder = slots.find((s) => s.slot_type === 'lunch')?.slot_order;
+      if (lunchOrder != null) {
+        slots = slots.filter(
+          (s) => !(s.slot_type === 'lesson' && s.slot_order > lunchOrder)
+        );
+      }
+    }
+    // Senior: ensure we have lessons through 9 — if DB missing a lesson, fall through to synth
+    const lessonLabels = slots.filter((s) => s.slot_type === 'lesson').map((s) => s.label);
+    if (targets.total === 9 && !lessonLabels.some((l) => /9/.test(l || ''))) {
+      // fall through to synthesize
+    } else {
+      return slots;
+    }
+  }
+
+  // Multi-tenant: never invent school clock times. Only use this school's Setup.
+  const required = [
+    levelConfig?.start_time,
+    levelConfig?.first_break_start,
+    levelConfig?.first_break_end,
+    levelConfig?.second_break_start,
+    levelConfig?.second_break_end,
+    levelConfig?.lunch_start,
+    levelConfig?.lunch_end,
+  ];
+  if (!levelConfig || required.some((v) => !v)) {
+    if (candidates.length) return candidates;
+    return [];
+  }
+
+  const cfg: TimetableConfig = {
+    lesson_duration: Number(levelConfig.period_duration) || 40,
+    school_start: String(levelConfig.start_time).slice(0, 5),
+    school_end: String(levelConfig.end_time || levelConfig.activities_end || levelConfig.lunch_end).slice(0, 5),
+    first_break_start: String(levelConfig.first_break_start).slice(0, 5),
+    first_break_end: String(levelConfig.first_break_end).slice(0, 5),
+    second_break_start: String(levelConfig.second_break_start).slice(0, 5),
+    second_break_end: String(levelConfig.second_break_end).slice(0, 5),
+    lunch_start: String(levelConfig.lunch_start).slice(0, 5),
+    lunch_end: String(levelConfig.lunch_end).slice(0, 5),
+    activities_start: levelConfig.activities_start ? String(levelConfig.activities_start).slice(0, 5) : undefined,
+    activities_end: levelConfig.activities_end ? String(levelConfig.activities_end).slice(0, 5) : undefined,
+    lessons_per_day: typeof levelConfig.lessons_per_day === 'number' ? levelConfig.lessons_per_day : targets.total,
+    after_lunch_lessons: typeof levelConfig.after_lunch_lessons === 'number' ? levelConfig.after_lunch_lessons : targets.afterLunch,
+  };
+
+  const generated = generateSlots(cfg, cfg.lessons_per_day || targets.total, key);
+  return generated.map((s: TimetableSlot, i: number) => ({
+    id: `synth-${key}-${s.slot_order}-${i}`,
+    slot_order: s.slot_order,
+    start_time: s.start_time.length === 5 ? s.start_time + ':00' : s.start_time,
+    end_time: s.end_time.length === 5 ? s.end_time + ':00' : s.end_time,
+    slot_type: (s.slot_type === 'activities' ? 'activity' : s.slot_type) as TimeSlot['slot_type'],
+    label: s.label,
+    level_group: key,
+  }));
+}
+
+/** @deprecated name kept for call sites */
+function pickSlotsForLevel(all: TimeSlot[], levelKey: string, levelConfig?: any | null): TimeSlot[] {
+  return buildDisplaySlotsForLevel(all, levelKey, levelConfig);
+}
+
 export default function TimetableView() {
   const { user } = useAuth();
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [entries, setEntries] = useState<TimetableEntry[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [levelConfigs, setLevelConfigs] = useState<Record<string, any>>({});
   const [activities, setActivities] = useState<SchoolActivity[]>([]);
   const [teacherKey, setTeacherKey] = useState<TeacherKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [selectedClass, setSelectedClass] = useState<string>('all');
-  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>('all');
+  const [selectedLevelGroup, setSelectedLevelGroup] = useState<string>('auto');
   const [downloadingClass, setDownloadingClass] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -145,6 +328,7 @@ export default function TimetableView() {
         fetchSchoolName(),
         fetchClasses(),
         fetchTimeSlots(),
+        fetchLevelConfigs(),
         fetchEntries(),
         fetchTeacherKey(),
         fetchActivities(),
@@ -168,13 +352,31 @@ export default function TimetableView() {
   const fetchClasses = async () => {
     const { data, error: err } = await supabase
       .from('classes')
-      .select('id, name, level, stream')
+      .select('id, name, level, grade_level, stream')
       .eq('school_id', user?.schoolId)
       .eq('is_active', true)
       .order('level')
       .order('name');
     if (err) throw err;
     setClasses((data || []) as SchoolClass[]);
+  };
+
+
+  const fetchLevelConfigs = async () => {
+    const { data, error: err } = await supabase
+      .from('timetable_level_configs')
+      .select('*')
+      .eq('school_id', user?.schoolId);
+    if (err) {
+      console.warn('level configs', err);
+      setLevelConfigs({});
+      return;
+    }
+    const map: Record<string, any> = {};
+    (data || []).forEach((row: any) => {
+      if (row.level_group) map[row.level_group] = row;
+    });
+    setLevelConfigs(map);
   };
 
   const fetchTimeSlots = async () => {
@@ -191,7 +393,7 @@ export default function TimetableView() {
     const { data, error: err } = await supabase
       .from('timetable_entries')
       .select(
-        `id, class_id, day_of_week, time_slot_id, teacher_id, subject_id, entry_type, activity_name,
+        `id, class_id, day_of_week, time_slot_id, teacher_id, subject_id, entry_type, activity_name, level_group,
         teachers(teacher_number, first_name, last_name), subjects(name, code)`
       )
       .eq('school_id', user?.schoolId);
@@ -268,22 +470,63 @@ export default function TimetableView() {
     );
   };
 
-  /** All slots in order, deduplicated by slot_order (take first per order) */
-  const allSlots = useMemo(() => {
-    const seen = new Set<number>();
-    const unique: TimeSlot[] = [];
-    [...timeSlots]
-      .sort((a, b) => a.slot_order - b.slot_order)
-      .forEach(s => {
-        if (!seen.has(s.slot_order)) {
-          seen.add(s.slot_order);
-          unique.push(s);
-        }
-      });
-    return unique;
+  /** Available level groups that actually have slots */
+  const availableLevelGroups = useMemo(() => {
+    const set = new Set<string>();
+    timeSlots.forEach((s) => set.add(s.level_group || 'default'));
+    // Prefer non-default first
+    return Array.from(set).sort((a, b) => {
+      if (a === 'default') return 1;
+      if (b === 'default') return -1;
+      return a.localeCompare(b);
+    });
   }, [timeSlots]);
 
+  /** Active level for the grid: selected class ALWAYS wins (correct columns per class) */
+  const activeLevelGroup = useMemo(() => {
+    if (selectedClass !== 'all') {
+      const cls = classes.find((c) => c.id === selectedClass);
+      if (cls) return resolveClassLevelGroup(cls);
+    }
+    if (selectedLevelGroup !== 'auto') return selectedLevelGroup;
+    const nonDefault = availableLevelGroups.find((g) => g !== 'default');
+    return nonDefault || availableLevelGroups[0] || 'lower-primary';
+  }, [selectedLevelGroup, selectedClass, classes, availableLevelGroups]);
+
+  /**
+   * Columns for the active level only.
+   * Pre-primary → 6 lessons, 0 after lunch (no L7/L8/L9 columns).
+   * Senior → 9 lessons, 3 after lunch (columns through Lesson 9).
+   */
+  const allSlots = useMemo(
+    () => buildDisplaySlotsForLevel(timeSlots, activeLevelGroup, levelConfigs[activeLevelGroup]),
+    [timeSlots, activeLevelGroup, levelConfigs]
+  );
+
+  /** Map real DB time_slot_id → slot_order for cell matching when display slots are synthetic */
+  const slotIdToOrder = useMemo(() => {
+    const m = new Map<string, number>();
+    timeSlots.forEach((s) => m.set(s.id, s.slot_order));
+    return m;
+  }, [timeSlots]);
+
+  /** Map slot_order → entries by day+class for robust matching */
+  const entriesByOrder = useMemo(() => {
+    const m = new Map<string, TimetableEntry[]>();
+    entries.forEach((entry) => {
+      const order = slotIdToOrder.get(entry.time_slot_id);
+      if (order == null) return;
+      const key = `${entry.day_of_week}-${entry.class_id}-${order}`;
+      const list = m.get(key) || [];
+      list.push(entry);
+      m.set(key, list);
+    });
+    return m;
+  }, [entries, slotIdToOrder]);
+
   const lessonSlots = useMemo(() => allSlots.filter(s => s.slot_type === 'lesson'), [allSlots]);
+
+  const slotSummary = useMemo(() => summarizeSlots(allSlots as any), [allSlots]);
 
   const entryLookup = useMemo(() => {
     const lookup = new Map<string, TimetableEntry[]>();
@@ -296,8 +539,12 @@ export default function TimetableView() {
     return lookup;
   }, [entries]);
 
-  const getEntries = (day: number, classId: string, slotId: string): TimetableEntry[] => {
-    return entryLookup.get(`${day}-${classId}-${slotId}`) || [];
+  const getEntries = (day: number, classId: string, slot: TimeSlot): TimetableEntry[] => {
+    // Prefer exact time_slot_id match (real DB slots)
+    const byId = entryLookup.get(`${day}-${classId}-${slot.id}`);
+    if (byId && byId.length) return byId;
+    // Synthetic display slots: match by slot_order
+    return entriesByOrder.get(`${day}-${classId}-${slot.slot_order}`) || [];
   };
 
   const getCellDisplay = (entriesForCell: TimetableEntry[]): string => {
@@ -325,39 +572,21 @@ export default function TimetableView() {
     return dayActivities.map(a => a.activity_name.trim().toUpperCase()).join(' / ');
   };
 
-  /** Classes to display (filtered by level and/or specific class) */
-  const LEVEL_GRADE_RANGES: Record<string, number[]> = {
-    'pre-primary': [-2, -1, 0],
-    'lower-primary': [1, 2, 3],
-    'upper-primary': [4, 5, 6],
-    'combined-primary': [1, 2, 3, 4, 5, 6],
-    'junior': [7, 8, 9],
-    'senior': [10, 11, 12],
-    'form-3-4': [11, 12],
-  };
-  const LEVEL_LABELS: Record<string, string> = {
-    'pre-primary': 'Pre-Primary (PP1, PP2)',
-    'lower-primary': 'Lower Primary (Grade 1-3)',
-    'upper-primary': 'Upper Primary (Grade 4-6)',
-    'combined-primary': 'Combined Primary (Grade 1-6)',
-    'junior': 'Junior School (Grade 7-9)',
-    'senior': 'Senior School (Grade 10-12)',
-    'form-3-4': 'Form 3 & 4 (8-4-4)',
-  };
+  /** Classes to display (filtered if a specific class is selected) */
   const displayClasses = useMemo(() => {
-    let filtered = classes;
-    if (selectedLevelFilter !== 'all') {
-      const gradeRange = LEVEL_GRADE_RANGES[selectedLevelFilter] || [];
-      filtered = filtered.filter(c => {
-        const gl = (c as any).grade_level ?? c.level;
-        return gradeRange.includes(Number(gl));
-      });
-    }
+    let list = classes;
     if (selectedClass !== 'all') {
-      filtered = filtered.filter(c => c.id === selectedClass);
+      list = classes.filter(c => c.id === selectedClass);
+    } else if (selectedLevelGroup !== 'auto') {
+      list = classes.filter(c => resolveClassLevelGroup(c) === selectedLevelGroup);
+    } else if (activeLevelGroup && activeLevelGroup !== 'default') {
+      // When showing "all" with auto level, only show classes that match active level
+      // so the column structure matches their lesson count.
+      const matched = classes.filter(c => resolveClassLevelGroup(c) === activeLevelGroup);
+      list = matched.length > 0 ? matched : classes;
     }
-    return filtered;
-  }, [classes, selectedClass, selectedLevelFilter]);
+    return list;
+  }, [classes, selectedClass, selectedLevelGroup, activeLevelGroup]);
 
   const downloadPdf = async (classId?: string, className?: string) => {
     const targetId = classId ? `timetable-class-${classId}` : 'timetable-print-area';
@@ -396,6 +625,27 @@ export default function TimetableView() {
       <AlertCircle size={20} />
       <span>{error}</span>
       <button onClick={fetchAll} className="ml-auto text-sm underline">Retry</button>
+    </div>
+  );
+
+  
+  // Structure summary only. Clock times come from this school's Setup / generated slots.
+  const summaryBanner = (
+    <div className="mx-4 mb-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-semibold">Structure ({LEVEL_LABELS[activeLevelGroup] || activeLevelGroup}):</span>
+        <span><strong>{slotSummary.totalLessons}</strong> lessons/day</span>
+        <span className="text-blue-300">|</span>
+        <span><strong>{slotSummary.beforeLunch}</strong> before lunch</span>
+        <span className="text-blue-300">|</span>
+        <span>
+          <strong>{slotSummary.afterLunch}</strong> after lunch
+          {slotSummary.afterLunch === 0 ? ' (ends at lunch)' : ''}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-blue-700">
+        Break, lunch, and activities times come from Timetable Setup for this school. Edit Setup, then regenerate to refresh the grid.
+      </p>
     </div>
   );
 
@@ -507,7 +757,26 @@ export default function TimetableView() {
     }
   `;
 
-  const renderTimetableTable = (classesToRender: SchoolClass[], tableId: string) => (
+  const renderTimetableTable = (classesToRender: SchoolClass[], tableId: string, slotsOverride?: TimeSlot[]) => {
+    const slotsForTable =
+      slotsOverride ||
+      (classesToRender.length === 1
+        ? buildDisplaySlotsForLevel(
+            timeSlots,
+            resolveClassLevelGroup(classesToRender[0]),
+            levelConfigs[resolveClassLevelGroup(classesToRender[0])]
+          )
+        : allSlots);
+    if (!slotsForTable.length) {
+      return (
+        <div id={tableId} className="m-4 rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900 text-sm">
+          No timetable slots for this level yet. Open Timetable Setup, save times for this school, then Generate Timetable.
+        </div>
+      );
+    }
+
+    return (
+
     <div id={tableId} className="bb-wrap rounded-lg overflow-hidden">
       <div className="mb-4 text-center">
         <h2 className="text-2xl font-black tracking-tighter text-blue-400 uppercase">
@@ -516,8 +785,14 @@ export default function TimetableView() {
         {classesToRender.length === 1 && (
           <p className="text-green-400 font-bold text-sm mt-1">
             Class: {displayClassName(classesToRender[0])}
+            {' · '}
+            {LEVEL_LABELS[resolveClassLevelGroup(classesToRender[0])] || resolveClassLevelGroup(classesToRender[0])}
           </p>
         )}
+                <p className="text-blue-300 text-xs mt-1">
+          {countLessons(slotsForTable).total} lessons/day · {countLessons(slotsForTable).afterLunch} after lunch
+          {countLessons(slotsForTable).afterLunch === 0 ? ' · ends at lunch (no post-lunch lesson columns)' : ''}
+        </p>
         <div className="h-0.5 w-24 bg-blue-400 mx-auto mt-2"></div>
       </div>
       <div className="overflow-x-auto">
@@ -526,7 +801,7 @@ export default function TimetableView() {
             <tr>
               <th rowSpan={2} className="tt-header">DAYS</th>
               <th rowSpan={2} className="tt-header">CLASS</th>
-              {allSlots.map(slot => {
+              {slotsForTable.map(slot => {
                 if (slot.slot_type === 'break') {
                   return (
                     <th key={slot.id} rowSpan={2} className="tt-break-header">
@@ -556,12 +831,23 @@ export default function TimetableView() {
                   </th>
                 );
               })}
-              <th rowSpan={2} className="tt-header" style={{ width: '60px', minWidth: '60px', color: '#33cc33' }}>
-                AFTER-SCHOOL ACTIVITIES
+              <th rowSpan={2} className="tt-header" style={{ width: '72px', minWidth: '72px', color: '#33cc33' }}>
+                <span style={{display:'block'}}>ACTIVITIES</span>
+                {(() => {
+                  const act = slotsForTable.find((s) => s.slot_type === 'activities' || s.slot_type === 'activity');
+                  if (!act) return <span style={{display:'block', fontSize:'0.55rem', color:'#8f8'}}>AFTER SCHOOL</span>;
+                  return (
+                    <>
+                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>{fmt(act.start_time)}</span>
+                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>—</span>
+                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>{fmt(act.end_time)}</span>
+                    </>
+                  );
+                })()}
               </th>
             </tr>
             <tr>
-              {allSlots.map(slot => {
+              {slotsForTable.map(slot => {
                 if (slot.slot_type === 'break' || slot.slot_type === 'lunch') return null;
                 if (slot.slot_type === 'activities' || slot.slot_type === 'activity') return null;
                 return (
@@ -583,7 +869,7 @@ export default function TimetableView() {
                       </td>
                     )}
                     <td className="tt-class">{displayClassName(cls)}</td>
-                    {allSlots.map(slot => {
+                    {slotsForTable.map(slot => {
                       if (slot.slot_type === 'break') {
                         if (clsIdx === 0) {
                           return (
@@ -613,7 +899,7 @@ export default function TimetableView() {
                       if (slot.slot_type === 'activities' || slot.slot_type === 'activity') {
                         return null;
                       }
-                      const cellEntries = getEntries(dayIdx + 1, cls.id, slot.id);
+                      const cellEntries = getEntries(dayIdx + 1, cls.id, slot);
                       const display = getCellDisplay(cellEntries);
                       return (
                         <td key={slot.id} className="tt-cell">
@@ -648,6 +934,7 @@ export default function TimetableView() {
       )}
     </div>
   );
+  };
 
   return (
     <div className="max-w-full mx-auto space-y-4 p-4 bg-gray-100 min-h-screen">
@@ -700,27 +987,38 @@ export default function TimetableView() {
         </div>
       )}
 
-      {/* Filter by level */}
-      <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
-        <div className="flex flex-wrap items-center gap-3 mb-3">
-          <span className="font-bold text-gray-700 text-sm">Filter by Level:</span>
-          <select
-            value={selectedLevelFilter}
-            onChange={e => { setSelectedLevelFilter(e.target.value); setSelectedClass('all'); }}
-            className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+      {/* Filter by level group — each level has its own lesson count / after-lunch structure */}
+      <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-bold text-gray-700 text-sm">Level:</span>
+          <button
+            type="button"
+            onClick={() => setSelectedLevelGroup('auto')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedLevelGroup === 'auto' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
           >
-            <option value="all">All Levels</option>
-            {Object.entries(LEVEL_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
+            Auto
+          </button>
+          {availableLevelGroups.map((lg) => (
+            <button
+              key={lg}
+              type="button"
+              onClick={() => { setSelectedLevelGroup(lg); setSelectedClass('all'); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedLevelGroup === lg ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              title={LEVEL_LABELS[lg] || lg}
+            >
+              {lg}
+            </button>
+          ))}
         </div>
-      </div>
-
-      {/* Filter by class */}
-      <div className="no-print bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+        <p className="text-xs text-gray-500">
+          Active structure: <strong>{LEVEL_LABELS[activeLevelGroup] || activeLevelGroup}</strong>
+          {' '}· {slotSummary.totalLessons} lessons/day · {slotSummary.afterLunch} after lunch
+          {availableLevelGroups.includes('default') && availableLevelGroups.length > 1 ? (
+            <span className="text-amber-600"> · Tip: re-generate each level to replace legacy &quot;default&quot; slots</span>
+          ) : null}
+        </p>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="font-bold text-gray-700 text-sm">View:</span>
+          <span className="font-bold text-gray-700 text-sm">Class:</span>
           <button
             onClick={() => setSelectedClass('all')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedClass === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
@@ -730,14 +1028,21 @@ export default function TimetableView() {
           {classes.map(cls => (
             <button
               key={cls.id}
-              onClick={() => setSelectedClass(cls.id)}
+              onClick={() => {
+                setSelectedClass(cls.id);
+                // snap level to this class so lesson columns match
+                setSelectedLevelGroup(resolveClassLevelGroup(cls));
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedClass === cls.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
               {displayClassName(cls)}
+              <span className="ml-1 opacity-60 font-normal">({resolveClassLevelGroup(cls)})</span>
             </button>
           ))}
         </div>
       </div>
+
+      {summaryBanner}
 
       {/* Main Timetable (full or filtered) */}
       <div id="timetable-print-area">

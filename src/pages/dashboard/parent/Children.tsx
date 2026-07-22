@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { Award, ClipboardList, Lock, CreditCard, CheckCircle, Loader2 } from 'lucide-react';
@@ -30,8 +30,8 @@ interface ResultRecord {
   marks: number | null;
   cbc_grade: string | null;
   cbc_points: number | null;
-  points_844: number | null;
-  grade_844: string | null;
+  points_: number | null;
+  grade_: string | null;
   subjects: { name: string } | null;
 }
 
@@ -358,8 +358,8 @@ export default function ParentChildren() {
                       <p className="text-xs text-[#666666]">{r.marks}%</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_844)}`}>{r.cbc_grade || r.grade_844}</span>
-                      <span className="text-xs text-[#666666]">{r.cbc_points || r.points_844} pts</span>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(r.cbc_grade || r.grade_)}`}>{r.cbc_grade || r.grade_}</span>
+                      <span className="text-xs text-[#666666]">{r.cbc_points || r.points_} pts</span>
                     </div>
                   </div>
                 ))}

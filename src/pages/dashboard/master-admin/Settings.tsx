@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 export default function MasterAdminSettings() {
   const [platformName, setPlatformName] = useState('Kimatu Analytics');
   const [currency, setCurrency] = useState('KES');
-  const [supportEmail, setSupportEmail] = useState('support@kimatu.company');
+  const [supportEmail, setSupportEmail] = useState('tutorsultimate@gmail.com');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { Link } from 'react-router-dom';
-import { Upload, ClipboardList, BookOpen, Users, Clock, Trophy, FileText, Eye, BarChart3 } from 'lucide-react';
+import { Link } from 'react-router';
+import { Upload, ClipboardList, BookOpen, Users, Clock, Trophy } from 'lucide-react';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
 
@@ -77,9 +77,8 @@ export default function TeacherDashboard() {
       // Get all subject-class assignments for this teacher
       const { data: assignments } = await supabaseUntyped
         .from('teacher_subject_assignments')
-        .select('*, subjects(id, name), classes(id, name, level, grade_level, curriculum)')
-        .eq('teacher_id', teacherId)
-        .eq('is_active', true);
+        .select('*, subjects(name), classes(id, name, level, grade_level, curriculum)')
+        .eq('teacher_id', teacherId);
 
       if (!assignments || assignments.length === 0) {
         setLoadingBests(false);
@@ -137,13 +136,10 @@ export default function TeacherDashboard() {
   };
 
   const quickActions = [
-    { label: 'Upload Results', icon: <Upload className="w-5 h-5" />, link: '/teacher/results/upload', color: 'bg-blue-50 text-blue-600' },
-    { label: 'View Marks', icon: <Eye className="w-5 h-5" />, link: '/teacher/view-marks', color: 'bg-indigo-50 text-indigo-600' },
-    { label: 'Assessment Progress', icon: <BarChart3 className="w-5 h-5" />, link: '/teacher/assessment-progress', color: 'bg-cyan-50 text-cyan-600' },
+    { label: 'Assigned Uploads', icon: <Upload className="w-5 h-5" />, link: '/teacher/results/assigned', color: 'bg-blue-50 text-blue-600' },
     { label: 'Mark Attendance', icon: <ClipboardList className="w-5 h-5" />, link: '/teacher/attendance', color: 'bg-green-50 text-green-600' },
     { label: 'Add Homework', icon: <BookOpen className="w-5 h-5" />, link: '/teacher/homework', color: 'bg-purple-50 text-purple-600' },
-    { label: 'Upload Papers', icon: <FileText className="w-5 h-5" />, link: '/teacher/upload-papers', color: 'bg-pink-50 text-pink-600' },
-    { label: 'My Learners', icon: <Users className="w-5 h-5" />, link: '/teacher/students', color: 'bg-orange-50 text-orange-600' },
+    { label: 'My Students', icon: <Users className="w-5 h-5" />, link: '/teacher/students', color: 'bg-orange-50 text-orange-600' },
   ];
 
   return (
@@ -206,7 +202,7 @@ export default function TeacherDashboard() {
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 bg-blue-50 rounded-xl text-center">
               <div className="text-2xl font-bold text-blue-600">{studentCount}</div>
-              <div className="text-xs text-blue-400 mt-1">My Learners</div>
+              <div className="text-xs text-blue-400 mt-1">My Students</div>
             </div>
             <div className="p-4 bg-purple-50 rounded-xl text-center">
               <div className="text-2xl font-bold text-purple-600">{homeworkCount}</div>

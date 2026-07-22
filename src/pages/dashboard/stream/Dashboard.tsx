@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { BarChart3, Users, Filter, Loader2, TrendingUp, Award, BookOpen, Search } from 'lucide-react';
+import { BarChart3, Users, Filter, Loader2, TrendingUp, Award, BookOpen, Search, ClipboardList } from 'lucide-react';
 import { getSchoolLevelBand } from '@/lib/grading';
 
 interface StudentRanking {
@@ -37,6 +37,8 @@ export default function StreamDashboard() {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'rankings' | 'subjects'>('rankings');
   const [classInfo, setClassInfo] = useState<any>(null);
+  const [exams, setExams] = useState<any[]>([]);
+  const [selectedExam, setSelectedExam] = useState<string>('');
 
   useEffect(() => {
     if (user?.schoolId) fetchInitialData();
@@ -44,7 +46,7 @@ export default function StreamDashboard() {
 
   useEffect(() => {
     if (selectedClass && selectedTerm) fetchStreamData();
-  }, [selectedClass, selectedTerm]);
+  }, [selectedClass, selectedTerm, selectedExam]);
 
   const fetchInitialData = async () => {
     setLoading(true);
@@ -68,6 +70,14 @@ export default function StreamDashboard() {
         .order('academic_year', { ascending: false });
       setTerms(termsData || []);
       if (termsData && termsData.length > 0) setSelectedTerm(termsData[0].id);
+
+      const { data: examsData } = await supabaseUntyped
+        .from('school_exams')
+        .select('id, name, type, is_active')
+        .eq('school_id', user?.schoolId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+      setExams(examsData || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -96,14 +106,20 @@ export default function StreamDashboard() {
         return;
       }
 
-      // Fetch all results for this class and term
-      const { data: results } = await supabaseUntyped
+      // Fetch all results for this class and term (optionally filtered by assessment)
+      let resultsQuery = supabaseUntyped
         .from('results')
-        .select('student_id, subject_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_844, points_844, subjects(id, name)')
+        .select('student_id, subject_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_, points_, exam_id, subjects(id, name)')
         .eq('class_id', selectedClass)
         .eq('term_id', selectedTerm);
+      
+      if (selectedExam) {
+        resultsQuery = resultsQuery.eq('exam_id', selectedExam);
+      }
+      
+      const { data: results } = await resultsQuery;
 
-      const is844 = String(cls?.curriculum || '').toUpperCase() === '844';
+      const is = String(cls?.curriculum || '').toUpperCase() === '';
 
       // Build student performance map
       const studentMap: Record<string, { total: number; count: number; points: number; subjects: Record<string, any> }> = {};
@@ -116,8 +132,8 @@ export default function StreamDashboard() {
         const pct = r.percentage ?? (r.out_of > 0 ? Math.round((r.marks / r.out_of) * 100) : 0);
         studentMap[r.student_id].total += pct;
         studentMap[r.student_id].count += 1;
-        studentMap[r.student_id].points += r.cbc_points ?? r.points_844 ?? 0;
-        const grade = is844 ? (r.grade_844 || '') : (r.cbc_sublevel || r.cbc_grade || '');
+        studentMap[r.student_id].points += r.cbc_points ?? r.points_ ?? 0;
+        const grade = is ? (r.grade_ || '') : (r.cbc_sublevel || r.cbc_grade || '');
         const subName = r.subjects?.name || r.subject_id;
         studentMap[r.student_id].subjects[subName] = { pct, grade };
 
@@ -214,10 +230,20 @@ export default function StreamDashboard() {
           {terms.length > 0 && (
             <select
               value={selectedTerm}
-              onChange={e => setSelectedTerm(e.target.value)}
+              onChange={e => { setSelectedTerm(e.target.value); setSelectedExam(''); }}
               className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
             >
               {terms.map(t => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
+            </select>
+          )}
+          {exams.length > 0 && (
+            <select
+              value={selectedExam}
+              onChange={e => setSelectedExam(e.target.value)}
+              className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
+            >
+              <option value="">All Assessments</option>
+              {exams.map(e => <option key={e.id} value={e.id}>{e.name} {e.type ? `(${e.type})` : ''}</option>)}
             </select>
           )}
         </div>
@@ -234,7 +260,7 @@ export default function StreamDashboard() {
           <div className="text-2xl font-bold text-gray-900">{classAvg !== null ? `${classAvg}%` : '—'}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">Learning Areas</span></div>
+          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">Subjects</span></div>
           <div className="text-2xl font-bold text-gray-900">{subjectSummaries.length}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -289,7 +315,7 @@ export default function StreamDashboard() {
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Student</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Adm No</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg %</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learning Areas</th>
+                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subjects</th>
                     {subjectSummaries.slice(0, 4).map(sub => (
                       <th key={sub.id} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{sub.name.substring(0, 6)}</th>
                     ))}
@@ -382,7 +408,7 @@ export default function StreamDashboard() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">#</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learning Area</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Average</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Highest</th>
                         <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Lowest</th>

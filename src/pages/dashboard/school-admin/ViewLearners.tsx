@@ -31,6 +31,7 @@ export default function ViewLearners() {
   const [loading, setLoading] = useState(true);
   const [expandedClass, setExpandedClass] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // Issue 11: Add grade/level filter
   const [selectedLevel, setSelectedLevel] = useState<string>('');
 
   useEffect(() => {
@@ -86,10 +87,12 @@ export default function ViewLearners() {
     window.print();
   };
 
+  // Issue 11: Get unique levels for filter dropdown
   const uniqueLevels = Array.from(new Set(classGroups.map(g => g.level).filter(l => l !== null))).sort((a, b) => (a as number) - (b as number));
 
   const filteredGroups = classGroups
     .filter(group => {
+      // Issue 11: Filter by selected level/grade
       if (selectedLevel && String(group.level) !== selectedLevel) return false;
       return true;
     })
@@ -147,12 +150,13 @@ export default function ViewLearners() {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search learners by name, assessment number, or parent name..."
+            placeholder="Search learners by name, admission number, or parent name..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
           />
         </div>
+        {/* Issue 11: Grade/Level filter dropdown */}
         <div className="relative">
           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <select
@@ -194,9 +198,9 @@ export default function ViewLearners() {
                     <div className="text-left">
                       <h3 className="font-semibold text-gray-900">{group.className} {group.stream && `(${group.stream})`}</h3>
                       <p className="text-xs text-gray-500">
-                        {group.level ? `Grade ${group.level}` : 'Level -'} &middot; {group.students.length} learners
-                        {group.totalBoys > 0 && ` &middot; ${group.totalBoys} boys`}
-                        {group.totalGirls > 0 && ` &middot; ${group.totalGirls} girls`}
+                        {group.level ? `Grade ${group.level}` : 'Level -'} • {group.students.length} learners
+                        {group.totalBoys > 0 && ` • ${group.totalBoys} boys`}
+                        {group.totalGirls > 0 && ` • ${group.totalGirls} girls`}
                       </p>
                     </div>
                   </div>
@@ -224,7 +228,7 @@ export default function ViewLearners() {
                       <thead>
                         <tr className="border-b bg-gray-50">
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Assessment #</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Admission #</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Gender</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Parent</th>
