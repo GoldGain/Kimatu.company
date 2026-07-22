@@ -10,7 +10,6 @@ import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
-import { useTrial } from '@/contexts/TrialContext';
 
 type SortField = 'name' | 'assessment_number' | 'class' | 'gender';
 type SortDir = 'asc' | 'desc';
@@ -27,8 +26,7 @@ const KENYA_COUNTIES = [
 
 export default function SchoolAdminStudents() {
   const { user } = useAuth();
-  const { trialStatus } = useTrial();
-  const { students, loading, refetch } = useStudents(user?.schoolId || undefined);
+    const { students, loading, refetch } = useStudents(user?.schoolId || undefined);
   const [classes, setClasses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [filterClassId, setFilterClassId] = useState('');
@@ -394,22 +392,7 @@ export default function SchoolAdminStudents() {
 
   const handlePrint = () => window.print();
 
-  // If trial is expired, show payment lock
-  if (trialStatus?.isExpired) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Learners</h1>
-          <p className="text-sm text-gray-500">Manage your learners</p>
-        </div>
-        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-8 text-center">
-          <h2 className="text-lg font-semibold text-red-800 mb-2">Trial Period Expired</h2>
-          <p className="text-sm text-red-600 mb-4">Please subscribe to continue managing learners.</p>
-        </div>
-      </div>
-    );
-  }
-
+  
   const inputCls = "w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]";
   const labelCls = "block text-xs text-gray-500 mb-1";
 

@@ -30,7 +30,7 @@ export default function CTA() {
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link
-                to="/get-started"
+                to="/register-school"
                 className="inline-flex items-center gap-2 bg-white px-8 py-4 rounded-full text-base font-bold hover:bg-gray-100 transition-colors shadow-lg"
                 style={{ color: '#1A365D' }}
               >

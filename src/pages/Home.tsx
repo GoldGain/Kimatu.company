@@ -38,7 +38,7 @@ export default function Home() {
           applicationCategory: 'EducationApplication',
           operatingSystem: 'Web',
           inLanguage: 'en-KE',
-          offers: { '@type': 'Offer', price: '0', priceCurrency: 'KES', description: 'Free trial available for 3 months' },
+          offers: { '@type': 'Offer', priceCurrency: 'KES', description: 'Affordable school management plans for Kenyan schools' },
           author: { '@type': 'Organization', name: 'Kimatu Analytics', url: 'https://kimatu.company' },
           keywords: 'Kimatu, Analytics, School Management, CBE, 8-4-4, Kenya, Education, School System, Learner Management',
         }}

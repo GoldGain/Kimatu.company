@@ -4,7 +4,6 @@ import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { Link } from 'react-router';
 import { Users, CreditCard, Bell, BookOpen, AlertTriangle, ChevronRight, BarChart3, UserCheck } from 'lucide-react';
 import PromoteToNextTermModal from '@/components/PromoteToNextTermModal';
-import TrialCountdown from '@/components/TrialCountdown';
 
 interface SchoolStats {
   totalStudents: number;
@@ -108,11 +107,7 @@ export default function SchoolAdminDashboard() {
           <p className="text-sm text-[#666666]">Welcome back, {user?.firstName}</p>
         </div>
       </div>
-
-      {/* Trial Countdown Banner */}
-      <TrialCountdown />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card, i) => (
           <Link key={i} to={card.link} className="bg-white rounded-2xl p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.12)] transition-all">
             <div className={`w-10 h-10 ${card.color} rounded-xl flex items-center justify-center text-white mb-3`}>{card.icon}</div>

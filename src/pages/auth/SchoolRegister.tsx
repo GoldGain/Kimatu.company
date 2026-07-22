@@ -515,7 +515,7 @@ export default function SchoolRegister() {
                   ))}
                 </div>
                 <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-900">
-                  No subscription payment is required now. Your school starts on a trial workspace and appears in the reseller portal after creation.
+                  After registration your school appears in the reseller portal. Our team will help you activate billing and onboarding.
                 </div>
                 <div className="flex justify-between pt-2">
                   <button type="button" className="btn-ghost" onClick={() => setStep(3)}>Back</button>

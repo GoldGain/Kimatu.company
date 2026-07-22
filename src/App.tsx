@@ -105,16 +105,6 @@ import StudentPapers from '@/pages/dashboard/student/Papers';
 import AssignedSubjectsUpload from '@/pages/dashboard/teacher/AssignedSubjectsUpload';
 import TeacherClassList from '@/pages/dashboard/teacher/ClassList';
 import TeacherMarklist from '@/pages/dashboard/teacher/Marklist';
-import AdvancedAnalytics from '@/pages/dashboard/school-admin/AdvancedAnalytics';
-import BulkOperations from '@/pages/dashboard/school-admin/BulkOperations';
-import LessonPlannerPage from '@/pages/dashboard/teacher/LessonPlanner';
-import StudentProgressTracker from '@/pages/dashboard/teacher/StudentProgressTracker';
-import LearningResources from '@/pages/dashboard/student/LearningResources';
-import GoalSetting from '@/pages/dashboard/student/GoalSetting';
-import CommunicationCenter from '@/pages/dashboard/parent/CommunicationCenter';
-import FeeManagement from '@/pages/dashboard/parent/FeeManagement';
-import CurriculumMapping from '@/pages/dashboard/dean-of-studies/CurriculumMapping';
-import TeacherEvaluation from '@/pages/dashboard/dean-of-studies/TeacherEvaluation';
 import SchoolPortalLockGate from '@/components/SchoolPortalLockGate';
 
 function LoadingSpinner() {
@@ -312,20 +302,10 @@ function AppRoutes() {
       <Route path="/reseller-admin/students" element={<ProtectedRoute allowedRoles={['reseller_super_admin','master_super_admin']}><ResellerStudents /></ProtectedRoute>} />
       <Route path="/school-admin/access-control" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><SchoolAdminAccessControl /></ProtectedRoute>} />
       <Route path="/school-admin/graduated-students" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><GraduatedStudents /></ProtectedRoute>} />
-      <Route path="/school-admin/advanced-analytics" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><AdvancedAnalytics /></ProtectedRoute>} />
-      <Route path="/school-admin/bulk-operations" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><BulkOperations /></ProtectedRoute>} />
       <Route path="/teacher/results/assigned" element={<ProtectedRoute allowedRoles={['teacher']}><AssignedSubjectsUpload /></ProtectedRoute>} />
       <Route path="/teacher/class-list" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherClassList /></ProtectedRoute>} />
       <Route path="/teacher/marklist" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherMarklist /></ProtectedRoute>} />
-      <Route path="/teacher/lesson-planner" element={<ProtectedRoute allowedRoles={['teacher']}><LessonPlannerPage /></ProtectedRoute>} />
-      <Route path="/teacher/progress-tracker" element={<ProtectedRoute allowedRoles={['teacher']}><StudentProgressTracker /></ProtectedRoute>} />
       <Route path="/student/papers" element={<ProtectedRoute allowedRoles={['student']}><StudentPapers /></ProtectedRoute>} />
-      <Route path="/student/learning-resources" element={<ProtectedRoute allowedRoles={['student']}><LearningResources /></ProtectedRoute>} />
-      <Route path="/student/goals" element={<ProtectedRoute allowedRoles={['student']}><GoalSetting /></ProtectedRoute>} />
-      <Route path="/parent/communication" element={<ProtectedRoute allowedRoles={['parent']}><CommunicationCenter /></ProtectedRoute>} />
-      <Route path="/parent/fee-management" element={<ProtectedRoute allowedRoles={['parent']}><FeeManagement /></ProtectedRoute>} />
-      <Route path="/dean-of-studies/curriculum-mapping" element={<ProtectedRoute allowedRoles={['dean_of_studies','school_admin','super_admin']}><CurriculumMapping /></ProtectedRoute>} />
-      <Route path="/dean-of-studies/teacher-evaluation" element={<ProtectedRoute allowedRoles={['dean_of_studies','school_admin','super_admin']}><TeacherEvaluation /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
