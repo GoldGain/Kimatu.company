@@ -1,5 +1,8 @@
-import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  useState } from 'react';
+import { Link,
+  useLocation,
+  useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
 import PhotoZoomModal from '@/components/PhotoZoomModal';
@@ -33,6 +36,12 @@ import {
   DollarSign,
   Building2,
   TrendingUp,
+  Target,
+  Map,
+  ClipboardCheck,
+  GraduationCap,
+  FileSpreadsheet,
+  Shield
 } from 'lucide-react';
 
 interface NavItem {
@@ -54,8 +63,11 @@ const navConfig: Record<string, NavItem[]> = {
   'reseller-super-admin': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/reseller-admin' },
     { label: 'My Schools', icon: <School className="w-5 h-5" />, path: '/reseller-admin/schools' },
+    { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/reseller-admin/students' },
     { label: 'School Admins', icon: <UserCheck className="w-5 h-5" />, path: '/reseller-admin/school-admins' },
     { label: 'My Payments', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/payments' },
+    { label: 'Pricing', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/pricing' },
+    { label: 'Access Control', icon: <Shield className="w-5 h-5" />, path: '/reseller-admin/access-control' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/reseller-admin/change-password' },
   ],
   'super-admin': [
@@ -66,8 +78,11 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'school-admin': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin' },
+    { label: 'Advanced Analytics', icon: <TrendingUp className="w-5 h-5" />, path: '/school-admin/advanced-analytics' },
+    { label: 'Bulk Operations', icon: <Upload className="w-5 h-5" />, path: '/school-admin/bulk-operations' },
     { label: 'View Learners', icon: <Users className="w-5 h-5" />, path: '/school-admin/view-learners' },
     { label: 'Learner Management', icon: <Users className="w-5 h-5" />, path: '/school-admin/students' },
+    { label: 'Graduated Students', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/graduated-students' },
     { label: 'Teachers', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teachers' },
     { label: 'Grades', icon: <School className="w-5 h-5" />, path: '/school-admin/classes' },
     { label: 'Learning Areas', icon: <Library className="w-5 h-5" />, path: '/school-admin/subjects' },
@@ -83,6 +98,8 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Promote Class', icon: <TrendingUp className="w-5 h-5" />, path: '/school-admin/promote-class' },
     { label: 'Assign Roles', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/assign-roles' },
     { label: 'Dean of Studies', icon: <BarChart3 className="w-5 h-5" />, path: '/dean-of-studies' },
+    { label: 'Curriculum Mapping', icon: <Map className="w-5 h-5" />, path: '/dean-of-studies/curriculum-mapping' },
+    { label: 'Teacher Evaluation', icon: <ClipboardCheck className="w-5 h-5" />, path: '/dean-of-studies/teacher-evaluation' },
     { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/stream-dashboard' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
     { label: 'Communicate', icon: <MessageSquare className="w-5 h-5" />, path: '/school-admin/communicate' },
@@ -93,6 +110,8 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'teacher': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/teacher' },
+    { label: 'Lesson Planner', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/lesson-planner' },
+    { label: 'Progress Tracker', icon: <Target className="w-5 h-5" />, path: '/teacher/progress-tracker' },
     { label: 'Class Dashboard', icon: <Users className="w-5 h-5" />, path: '/teacher/class-dashboard' },
     { label: 'Dean of Studies', icon: <BarChart3 className="w-5 h-5" />, path: '/dean-of-studies' },
     { label: 'Learning Area Dashboard', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/subject-dashboard' },
@@ -106,7 +125,9 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Homework', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/homework' },
     { label: 'Upload Papers', icon: <Upload className="w-5 h-5" />, path: '/teacher/upload-papers' },
     { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/analytics' },
+    { label: 'Marklist', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/teacher/marklist' },
     { label: 'My Learners', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
+    { label: 'Class List', icon: <Users className="w-5 h-5" />, path: '/teacher/class-list' },
     { label: 'Lesson Plans', icon: <FileText className="w-5 h-5" />, path: '/teacher/lesson-plan' },
     { label: 'Curriculum Navigator', icon: <Brain className="w-5 h-5" />, path: '/teacher/curriculum' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/teacher/profile' },
@@ -114,8 +135,11 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'student': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/student' },
+    { label: 'Learning Resources', icon: <BookOpen className="w-5 h-5" />, path: '/student/learning-resources' },
+    { label: 'Goals', icon: <Target className="w-5 h-5" />, path: '/student/goals' },
     { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/timetable' },
     { label: 'My Results', icon: <Award className="w-5 h-5" />, path: '/student/results' },
+    { label: 'Papers', icon: <FileText className="w-5 h-5" />, path: '/student/papers' },
     { label: 'My Portfolio', icon: <FileText className="w-5 h-5" />, path: '/student/portfolio' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/student/fees' },
     { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/student/attendance' },
@@ -125,9 +149,11 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'parent': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/parent' },
+    { label: 'Communication', icon: <MessageSquare className="w-5 h-5" />, path: '/parent/communication' },
     { label: 'My Children', icon: <Users className="w-5 h-5" />, path: '/parent/children' },
     { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/parent/timetable' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/parent/fees' },
+    { label: 'Fee Management', icon: <CreditCard className="w-5 h-5" />, path: '/parent/fee-management' },
     { label: 'Fee Transcript', icon: <FileText className="w-5 h-5" />, path: '/parent/fee-transcript' },
     { label: 'Conferences', icon: <MessageSquare className="w-5 h-5" />, path: '/parent/conferences' },
     { label: 'AI Assistant', icon: <Bot className="w-5 h-5" />, path: '/parent/chatbot' },

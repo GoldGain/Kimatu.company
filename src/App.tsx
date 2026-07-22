@@ -2,9 +2,11 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { TrialProvider } from '@/contexts/TrialContext';
 import MainLayout from '@/components/layout/MainLayout';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import KimatuCopilot from '@/components/KimatuCopilot';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import PWAFloatingButton from '@/components/PWAFloatingButton';
 import Home from '@/pages/Home';
@@ -92,6 +94,28 @@ import TeacherProfile from '@/pages/dashboard/teacher/Profile';
 import SchoolAdminProfile from '@/pages/dashboard/school-admin/Profile';
 import ParentProfile from '@/pages/dashboard/parent/Profile';
 import ParentFeeTranscript from '@/pages/dashboard/parent/FeeTranscript';
+import SchoolRegister from '@/pages/auth/SchoolRegister';
+import PathwayFinder from '@/components/PathwayFinder';
+import ResellerAccessControl from '@/pages/dashboard/reseller-admin/AccessControl';
+import ResellerPricing from '@/pages/dashboard/reseller-admin/Pricing';
+import ResellerStudents from '@/pages/dashboard/reseller-admin/Students';
+import SchoolAdminAccessControl from '@/pages/dashboard/school-admin/AccessControl';
+import GraduatedStudents from '@/pages/dashboard/school-admin/GraduatedStudents';
+import StudentPapers from '@/pages/dashboard/student/Papers';
+import AssignedSubjectsUpload from '@/pages/dashboard/teacher/AssignedSubjectsUpload';
+import TeacherClassList from '@/pages/dashboard/teacher/ClassList';
+import TeacherMarklist from '@/pages/dashboard/teacher/Marklist';
+import AdvancedAnalytics from '@/pages/dashboard/school-admin/AdvancedAnalytics';
+import BulkOperations from '@/pages/dashboard/school-admin/BulkOperations';
+import LessonPlannerPage from '@/pages/dashboard/teacher/LessonPlanner';
+import StudentProgressTracker from '@/pages/dashboard/teacher/StudentProgressTracker';
+import LearningResources from '@/pages/dashboard/student/LearningResources';
+import GoalSetting from '@/pages/dashboard/student/GoalSetting';
+import CommunicationCenter from '@/pages/dashboard/parent/CommunicationCenter';
+import FeeManagement from '@/pages/dashboard/parent/FeeManagement';
+import CurriculumMapping from '@/pages/dashboard/dean-of-studies/CurriculumMapping';
+import TeacherEvaluation from '@/pages/dashboard/dean-of-studies/TeacherEvaluation';
+import SchoolPortalLockGate from '@/components/SchoolPortalLockGate';
 
 function LoadingSpinner() {
   return (
@@ -281,6 +305,27 @@ function AppRoutes() {
       <Route path="/timetable" element={<ProtectedRoute allowedRoles={['school_admin', 'teacher', 'student', 'parent', 'super_admin', 'reseller_super_admin', 'master_super_admin']}><TimetableView /></ProtectedRoute>} />
 
       {/* Catch all */}
+      <Route path="/register-school" element={<SchoolRegister />} />
+      <Route path="/pathway-finder" element={<MainLayout><PathwayFinder /></MainLayout>} />
+      <Route path="/reseller-admin/access-control" element={<ProtectedRoute allowedRoles={['reseller_super_admin','master_super_admin']}><ResellerAccessControl /></ProtectedRoute>} />
+      <Route path="/reseller-admin/pricing" element={<ProtectedRoute allowedRoles={['reseller_super_admin','master_super_admin']}><ResellerPricing /></ProtectedRoute>} />
+      <Route path="/reseller-admin/students" element={<ProtectedRoute allowedRoles={['reseller_super_admin','master_super_admin']}><ResellerStudents /></ProtectedRoute>} />
+      <Route path="/school-admin/access-control" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><SchoolAdminAccessControl /></ProtectedRoute>} />
+      <Route path="/school-admin/graduated-students" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><GraduatedStudents /></ProtectedRoute>} />
+      <Route path="/school-admin/advanced-analytics" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><AdvancedAnalytics /></ProtectedRoute>} />
+      <Route path="/school-admin/bulk-operations" element={<ProtectedRoute allowedRoles={['school_admin','super_admin']}><BulkOperations /></ProtectedRoute>} />
+      <Route path="/teacher/results/assigned" element={<ProtectedRoute allowedRoles={['teacher']}><AssignedSubjectsUpload /></ProtectedRoute>} />
+      <Route path="/teacher/class-list" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherClassList /></ProtectedRoute>} />
+      <Route path="/teacher/marklist" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherMarklist /></ProtectedRoute>} />
+      <Route path="/teacher/lesson-planner" element={<ProtectedRoute allowedRoles={['teacher']}><LessonPlannerPage /></ProtectedRoute>} />
+      <Route path="/teacher/progress-tracker" element={<ProtectedRoute allowedRoles={['teacher']}><StudentProgressTracker /></ProtectedRoute>} />
+      <Route path="/student/papers" element={<ProtectedRoute allowedRoles={['student']}><StudentPapers /></ProtectedRoute>} />
+      <Route path="/student/learning-resources" element={<ProtectedRoute allowedRoles={['student']}><LearningResources /></ProtectedRoute>} />
+      <Route path="/student/goals" element={<ProtectedRoute allowedRoles={['student']}><GoalSetting /></ProtectedRoute>} />
+      <Route path="/parent/communication" element={<ProtectedRoute allowedRoles={['parent']}><CommunicationCenter /></ProtectedRoute>} />
+      <Route path="/parent/fee-management" element={<ProtectedRoute allowedRoles={['parent']}><FeeManagement /></ProtectedRoute>} />
+      <Route path="/dean-of-studies/curriculum-mapping" element={<ProtectedRoute allowedRoles={['dean_of_studies','school_admin','super_admin']}><CurriculumMapping /></ProtectedRoute>} />
+      <Route path="/dean-of-studies/teacher-evaluation" element={<ProtectedRoute allowedRoles={['dean_of_studies','school_admin','super_admin']}><TeacherEvaluation /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
@@ -291,10 +336,13 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
+        <TrialProvider>
         <AppRoutes />
+        <KimatuCopilot />
         <PWAInstallBanner />
         <PWAFloatingButton />
         <Toaster position="top-right" richColors closeButton />
+      </TrialProvider>
       </AuthProvider>
     </ErrorBoundary>
   );
