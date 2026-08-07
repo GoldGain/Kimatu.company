@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, X, LogIn, ArrowRight } from 'lucide-react';
+import { Compass, Menu, X, LogIn, ArrowRight } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
@@ -34,6 +34,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               <a href="#pricing" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">Pricing</a>
               <a href="#testimonials" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">Testimonials</a>
               <a href="#faq" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">FAQ</a>
+              <Link to="/pathway-finder" className="inline-flex items-center gap-1.5 text-sm font-medium bg-[#F0D060] text-[#1A365D] px-3 py-1.5 rounded-full hover:bg-[#E8C44A] transition-colors">
+                <Compass className="w-3.5 h-3.5" /> Pathway Finder
+              </Link>
               <PWAInstallButton variant="nav" />
               {user ? (
                 <div className="flex items-center gap-3">
@@ -79,6 +82,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 <a href="#pricing" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>Pricing</a>
                 <a href="#testimonials" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>Testimonials</a>
                 <a href="#faq" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>FAQ</a>
+                <Link to="/pathway-finder" className="text-sm font-bold bg-[#F0D060] text-[#1A365D] px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>✦ Pathway Finder</Link>
                 {user ? (
                   <>
                     <Link to={user.role === 'master_super_admin' ? '/master-admin' : user.role === 'reseller_super_admin' ? '/reseller-admin' : `/${user.role.replace(/_/g, '-')}`} className="text-base font-medium bg-[#1A365D] text-white px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>
