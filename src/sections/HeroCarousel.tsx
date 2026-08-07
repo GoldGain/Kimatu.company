@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, LogIn, MessageCircle, Sparkles } from 'lucide-react';
+import { ArrowRight, Compass, LogIn, MessageCircle, Sparkles } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const heroImages = [
@@ -141,7 +141,17 @@ export default function HeroCarousel() {
 
           <WhatsAppButton />
 
-          <div className="flex flex-wrap items-center justify-center gap-8 mt-12">
+          {/* Pathway Finder — prominent button (like Zamifu) */}
+          <div className="flex justify-center mt-4 mb-6">
+            <Link to="/pathway-finder">
+              <span className="inline-flex items-center gap-2 bg-[#F0D060] text-[#1A365D] px-7 py-3 rounded-full text-sm font-bold hover:bg-[#E8C44A] transition-colors cursor-pointer shadow-lg">
+                <Compass className="w-4 h-4" />
+                Pathway Finder — Discover Your Career Path
+              </span>
+            </Link>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-8 mt-6">
             {[
               ['2,000+', 'Schools'],
               ['500K+', 'Learners'],
