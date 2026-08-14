@@ -21,7 +21,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <div className="max-w-7xl mx-auto px-4 md:px-8">
           <div className="flex items-center justify-between h-16">
             <Link to="/" className="flex items-center gap-2">
-              <img src="/images/logo.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
+              <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
               <span className="text-xl font-bold text-[#111111]">Kimatu Analytics</span>
             </Link>
 
@@ -101,7 +101,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <div className="grid md:grid-cols-3 gap-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <img src="/images/logo.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
+                <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
                 <span className="text-lg font-bold">Kimatu Analytics</span>
               </div>
               <p className="text-sm text-gray-400">Connecting Schools, Students, and Parents for a brighter future in Kenyan education. Smarter Schools, Brighter Futures.</p>

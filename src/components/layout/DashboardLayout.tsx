@@ -272,7 +272,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {schoolData?.logo_url ? (
               <img src={schoolData.logo_url} alt={schoolData.name} className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
             ) : (
-              <img src="/logo.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg object-contain" />
+              <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg object-contain" />
             )}
             <span className="text-lg font-bold truncate max-w-[140px]">{schoolData?.name || 'Kimatu Analytics'}</span>
           </Link>
@@ -378,7 +378,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {schoolData?.logo_url ? (
                 <img src={schoolData.logo_url} alt={schoolData.name} className="w-7 h-7 rounded-lg object-contain bg-gray-100 p-0.5" />
               ) : (
-                <img src="/logo.png" alt="Kimatu Analytics" className="w-7 h-7 rounded-lg object-contain" />
+                <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-7 h-7 rounded-lg object-contain" />
               )}
               <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'Kimatu Analytics'}</span>
             </div>
