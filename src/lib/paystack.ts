@@ -2,7 +2,7 @@
 // Pricing: Ksh 50 per learner per term
 // Secret Key: Store in SUPABASE_EDGE_FUNCTION or .env (NEVER in client code)
 
-const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 'pk_live_f711df1d32dec5d0c2a5a393a76904b1ebfa89bf';
+const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 'pk_live_c15b4c6c95f06f7408326b14395eb727147a8935';
 
 export interface PaystackPaymentParams {
   email: string;

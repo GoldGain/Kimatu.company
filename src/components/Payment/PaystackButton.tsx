@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Loader2, Lock, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 import { PRICE_PER_LEARNER } from '@/lib/trial';
+import { PAYSTACK_PUBLIC_KEY } from '@/lib/paystack';
 
 interface PaystackButtonProps {
   learnersCount: number;
@@ -12,8 +13,6 @@ interface PaystackButtonProps {
   onClose: () => void;
   feePerLearner?: number;
 }
-
-const PAYSTACK_PUBLIC_KEY = 'pk_live_c15b4c6c95f06f7408326b14395eb727147a8935';
 
 export const PaystackButton: React.FC<PaystackButtonProps> = ({
   learnersCount,
