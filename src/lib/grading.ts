@@ -1,5 +1,17 @@
-export type Curriculum = 'CBE';
+export type Curriculum = 'CBE' | '844';
 export type SchoolLevelBand = 'primary' | 'junior' | 'senior';
+
+/** Returns true if the class uses the 8-4-4 curriculum */
+export function is844Curriculum(classData?: { curriculum?: string | null }): boolean {
+  return String(classData?.curriculum || '').toUpperCase() === '844';
+}
+
+export interface NumericGrade844 {
+  grade: string;
+  points: number;
+  descriptor: string;
+  band: '844';
+}
 
 export interface CompetencyGrade {
   subLevel: string;
@@ -15,6 +27,8 @@ function normalizePercentage(value: number): number {
 }
 
 export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }): SchoolLevelBand {
+  // 8-4-4 curriculum: treat Form 1-4 as senior band for CBE display
+  if (is844Curriculum(classData)) return 'senior';
   // Use grade_level first (new column), fall back to level (legacy)
   const rawLevel = classData?.grade_level ?? classData?.level;
   const parsedLevel = typeof rawLevel === 'number' ? rawLevel : parseInt(String(rawLevel || '').replace(/[^0-9]/g, ''), 10);
@@ -36,6 +50,9 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
   if (/senior|grade\s*1[012]|\b1[012]\b/.test(name)) return 'senior';
   if (/junior|jss|grade\s*[789]|\b[789]\b/.test(name)) return 'junior';
   if (/pp1|pp2|pre.?primary|grade\s*[1-6]/i.test(name)) return 'primary';
+  // 8-4-4 form names (fallback if curriculum not set)
+  if (/form\s*[34]/i.test(name)) return 'senior';
+  if (/form\s*[12]/i.test(name)) return 'junior';
   return 'primary';
 }
 
@@ -72,13 +89,27 @@ export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 
   return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band };
 }
 
-export function calculateResultGrades(percentage: number, classData?: { curriculum?: Curriculum | string | null; level?: number | string | null; name?: string | null }) {
+export function calculateResultGrades(percentage: number, classData?: { curriculum?: Curriculum | string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }) {
   const band = getSchoolLevelBand(classData);
-  // Keep Kimatu field name (cbeGrade) used across upload/results pages
-  const cbeGrade = calculateCompetencyGrade(percentage, band === '844' as any ? 'junior' : band);
-  const cbcGrade = cbeGrade; // alias for any Kimatu leftovers
-  const grade844 = typeof calculate844Grade === 'function' ? calculate844Grade(percentage) : undefined;
-  return { band, cbeGrade, cbcGrade, grade844 };
+  const cbeGrade = calculateCompetencyGrade(percentage, band);
+  const grade844 = is844Curriculum(classData) ? calculate844Grade(percentage) : undefined;
+  return { band, cbeGrade, grade844 };
+}
+
+export function calculate844Grade(score: number): NumericGrade844 {
+  const percentage = normalizePercentage(score);
+  if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent', band: '844' };
+  if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good', band: '844' };
+  if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good', band: '844' };
+  if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good', band: '844' };
+  if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good', band: '844' };
+  if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average', band: '844' };
+  if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average', band: '844' };
+  if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average', band: '844' };
+  if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average', band: '844' };
+  if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average', band: '844' };
+  if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average', band: '844' };
+  return { grade: 'E', points: 1, descriptor: 'Poor', band: '844' };
 }
 
 export function gradeDisplayLabel(band: SchoolLevelBand): string {
@@ -126,6 +157,8 @@ function getGradeLabel(pct: number, band: SchoolLevelBand): string {
  * - Compares with previous term performance
  * - Adapts language to curriculum level
  * - Includes class position and encouragement
+ * - Uses ACTUAL subject grade for the specific subject mentioned (not average)
+ * - Includes pathway performance sentence
  */
 export function generateSubjectSpecificComment(
   studentName: string,
@@ -158,11 +191,24 @@ export function generateSubjectSpecificComment(
     s.percentage < s.previousPercentage - 5
   );
 
+  // FIX Issue 1: Use ACTUAL grade for the specific subject mentioned (not the average grade)
+  // When a subject is referenced in the comment, fetch its actual grade, not the overall average.
+  const getActualSubjectGrade = (subjectName: string): string => {
+    const subjectResult = subjects.find(s =>
+      s.name.toLowerCase().includes(subjectName.toLowerCase()) ||
+      subjectName.toLowerCase().includes(s.name.toLowerCase())
+    );
+    if (subjectResult) {
+      return getGradeLabel(subjectResult.percentage, band);
+    }
+    return getGradeLabel(avgPct, band);
+  };
+
   const bestGrade = getGradeLabel(best.percentage, band);
   let comment = '';
   const firstName = studentName.split(' ')[0] || studentName;
 
-  // Opening: congratulate on best subject
+  // Opening: congratulate on best subject — use ACTUAL grade for that subject
   if (isPrimary) {
     comment += `${firstName}, you did very well in ${best.name} (${best.percentage.toFixed(0)}% — ${bestGrade}). `;
   } else {
@@ -221,6 +267,54 @@ export function generateSubjectSpecificComment(
     });
   }
 
+  // FIX Issue 2: Add pathway performance sentence
+  // Group subjects by pathway and find the strongest pathway
+  const SUBJECT_PATHWAY_MAP: Record<string, string> = {
+    'Mathematics': 'STEM',
+    'Integrated Science': 'STEM',
+    'Pre-Technical Studies': 'STEM',
+    'Agriculture and Nutrition': 'STEM',
+    'Agriculture': 'STEM',
+    'Science and Technology': 'STEM',
+    'English': 'Social Sciences',
+    'Kiswahili': 'Social Sciences',
+    'Social Studies': 'Social Sciences',
+    'Religious Education': 'Social Sciences',
+    'CRE': 'Social Sciences',
+    'IRE': 'Social Sciences',
+    'HRE': 'Social Sciences',
+    'Creative Arts and Sports': 'Creative Arts and Sports',
+    'Creative Arts': 'Creative Arts and Sports',
+    'Physical and Health Education': 'Creative Arts and Sports',
+    'Music': 'Creative Arts and Sports',
+    'Art and Craft': 'Creative Arts and Sports',
+  };
+
+  const pathwayScores: Record<string, { total: number; count: number }> = {};
+  subjects.forEach(s => {
+    // Find matching pathway
+    const pathwayKey = Object.keys(SUBJECT_PATHWAY_MAP).find(k =>
+      s.name.toLowerCase().includes(k.toLowerCase()) ||
+      k.toLowerCase().includes(s.name.toLowerCase())
+    );
+    const pathway = pathwayKey ? SUBJECT_PATHWAY_MAP[pathwayKey] : null;
+    if (pathway) {
+      if (!pathwayScores[pathway]) pathwayScores[pathway] = { total: 0, count: 0 };
+      pathwayScores[pathway].total += s.percentage;
+      pathwayScores[pathway].count += 1;
+    }
+  });
+
+  const pathwayAverages = Object.entries(pathwayScores)
+    .filter(([, v]) => v.count > 0)
+    .map(([name, v]) => ({ name, avg: v.total / v.count }))
+    .sort((a, b) => b.avg - a.avg);
+
+  if (pathwayAverages.length > 0) {
+    const strongestPathway = pathwayAverages[0];
+    comment += `Your performance in the ${strongestPathway.name} pathway (${strongestPathway.avg.toFixed(1)}%) shows strong potential. `;
+  }
+
   // Closing encouragement with position
   if (position && totalStudents > 0) {
     if (position === 1) {
@@ -239,21 +333,3 @@ export function generateSubjectSpecificComment(
 
   return comment;
 }
-
-// --- Kimatu 8-4-4 helpers (kept) ---
-export function calculate844Grade(score: number): NumericGrade844 {
-  const percentage = normalizePercentage(score);
-  if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent', band: '844' };
-  if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good', band: '844' };
-  if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good', band: '844' };
-  if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good', band: '844' };
-  if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good', band: '844' };
-  if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average', band: '844' };
-  if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average', band: '844' };
-  if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average', band: '844' };
-  if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average', band: '844' };
-  if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average', band: '844' };
-  if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average', band: '844' };
-  return { grade: 'E', points: 1, descriptor: 'Poor', band: '844' };
-}
-

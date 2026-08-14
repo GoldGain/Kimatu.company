@@ -41,9 +41,9 @@ export interface AiInsight {
 
 const PAGE_GUIDES: Record<string, string> = {
   '/':
-    'Welcome to Kimatu Analytics - Your Smarter Schools, Brighter Futures. This is the main landing page where you can learn about our services, explore educational pathways, and access your account. Use the navigation menu to explore different sections. Click Login to access your dashboard or Get Started to begin your journey.',
+    'Welcome to Kimatu Analytics - Your Intelligent School Management System. This is the main landing page where you can learn about our services, explore educational pathways, and access your account. Use the navigation menu to explore different sections. Click Login to access your dashboard or Get Started to begin your journey.',
   '/pathway-finder':
-    'Welcome to the Pathway Finder. This career guidance tool helps you discover the right educational and career path based on your interests and performance. Here you can: 1. Explore 6 pathways: Core Academic, STEM, Creative Arts and Sports, Social Sciences, Research and Innovation, and Education. 2. Complete interest assessments. 3. Enter Junior School results for the 9 core learning areas with automatic grade descriptions and points. 4. Compare required versus current performance. 5. Unlock full academic guidance and download after paying KSH 50.',
+    'Welcome to the Pathway Finder. This career guidance tool helps you discover the right educational and career path based on your interests and performance. Here you can: 1. Explore 3 pathways: STEM, Creative Arts and Sports, and Social Sciences. 2. Complete interest assessments. 3. Enter Junior School results for the 9 core learning areas with automatic grade descriptions and points. 4. Compare required versus current performance. 5. Unlock full academic guidance and download after paying KSH 20.',
   '/auth/login':
     'Sign in with your school email and password to open the dashboard for your role. Use Forgot Password if you cannot access your account, then contact your school admin if you still need help.',
   '/school-admin':
@@ -89,7 +89,7 @@ const PAGE_GUIDES: Record<string, string> = {
   '/teacher/curriculum-navigator':
     'Welcome to the Curriculum Navigator - Your complete educational resource center. Explore curriculum levels with a Grade 7-9 exam generator focus, create lesson plans and schemes of work, and access embedded resources. Select level, subject, strands, sub-strands, then generate and download exams with marking schemes and image support.',
   '/student':
-    'Welcome Student! This is your personal dashboard where you can: 1. View your daily timetable. 2. Check your results and academic performance. 3. Access your learner portfolio. 4. Explore career pathways and interests. 5. Communicate with your teachers. 6. View your attendance records. 7. Access learning resources and materials.',
+    'Welcome Student! This is your personal dashboard where you can: 1. Check your results and academic performance. 2. Access your learner portfolio. 3. Explore career pathways and interests. 4. Communicate with your teachers. 5. View your attendance records. 6. Access learning resources and materials.',
   '/student/portfolio':
     'Review historical results across years, including records that remain after graduation. Use this page for long-term progress tracking.',
   '/student/results':
@@ -159,7 +159,7 @@ export function roleQuickActions(role?: AiRole): { label: string; query: string 
       { label: 'My results', query: 'Show my recent results' },
       { label: 'Portfolio', query: 'How do I use my portfolio?' },
       { label: 'Fees', query: 'What is my fee balance?' },
-      { label: 'Timetable', query: 'Where do I see my timetable?' },
+      { label: 'Homework', query: 'Show my current homework' },
       { label: 'Progress', query: 'Summarize my academic progress' },
     ];
   }
@@ -504,7 +504,7 @@ async function offlineAnswer(question: string, ctx: AiContext): Promise<string> 
     return 'Assessments\n\nSchool Admin or DoS → Assessments → Create → name + type + term → Save. Names show on report cards and Results.';
   }
   if (q.includes('pathway') || q.includes('interest')) {
-    return 'The Pathway Finder helps you discover the right educational path:\n1. Complete the interest assessment\n2. Review your results in the 9 core Junior School learning areas\n3. Explore the 6 pathways: Core Academic, STEM, Creative Arts and Sports, Social Sciences, Research and Innovation, and Education\n4. See which pathways match your interests and performance\n5. Receive academic guidance and recommendations\n6. Pay KSH 50 to unlock full guidance and download';
+    return 'The Pathway Finder helps you discover the right educational path:\n1. Complete the interest assessment\n2. Review your results in the 9 core Junior School learning areas\n3. Explore the 3 pathways: STEM, Creative Arts and Sports, and Social Sciences\n4. See which pathways match your interests and performance\n5. Receive academic guidance and recommendations\n6. Pay KSH 20 to unlock full guidance and download';
   }
   if (q.includes('portfolio')) {
     return 'Students → Portfolio for all historical results (even after graduation). Only your own records.';

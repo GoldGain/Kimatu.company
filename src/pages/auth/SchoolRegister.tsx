@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 import { sendSMS } from '@/lib/sms';
 import {
   KENYA_COUNTIES,
@@ -57,7 +58,17 @@ const initial: FormState = {
 };
 
 async function callRegister(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke('register-school', { body });
+  // Use a dedicated anonymous Supabase client (no persisted session) to avoid
+  // auto-attaching a stale JWT that causes "unrecognized JWT kid" errors.
+  const anonClient = createClient(
+    import.meta.env.VITE_SUPABASE_URL || 'https://naihzzlszvrkxrxogsuz.supabase.co',
+    import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5haWh6emxzenZya3hyeG9nc3V6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMTI1NDIsImV4cCI6MjA5NDg4ODU0Mn0.aMqkjlgMAWxXqAJ1hkCiE9NldaoqNO3oid8CV7xUgTM'
+  );
+  const { data, error } = await anonClient.functions.invoke('register-school', {
+    body,
+    // Do NOT send any Authorization header — the edge function has verify_jwt:false
+    headers: { Authorization: '' },
+  });
   if (error) {
     let msg = error.message || 'Request failed';
     try {
@@ -515,7 +526,7 @@ export default function SchoolRegister() {
                   ))}
                 </div>
                 <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-900">
-                  After registration your school appears in the reseller portal. Our team will help you activate billing and onboarding.
+                  No subscription payment is required now. Your school starts on a trial workspace and appears in the reseller portal after creation.
                 </div>
                 <div className="flex justify-between pt-2">
                   <button type="button" className="btn-ghost" onClick={() => setStep(3)}>Back</button>

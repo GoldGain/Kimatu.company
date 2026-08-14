@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 
-function calculateCBCGrade(percentage: number): { subLevel: string; grade: string; points: number; descriptor: string } {
+function calculateCBEGrade(percentage: number): { subLevel: string; grade: string; points: number; descriptor: string } {
   if (percentage >= 90) return { subLevel: 'EE1', grade: 'EE', points: 8, descriptor: 'Exceeding Expectation' };
   if (percentage >= 75) return { subLevel: 'EE2', grade: 'EE', points: 7, descriptor: 'Exceeding Expectation' };
   if (percentage >= 58) return { subLevel: 'ME1', grade: 'ME', points: 6, descriptor: 'Meeting Expectation' };
@@ -19,7 +19,7 @@ function calculateCBCGrade(percentage: number): { subLevel: string; grade: strin
   return { subLevel: 'BE2', grade: 'BE', points: 1, descriptor: 'Below Expectation' };
 }
 
-function calculate844Grade(percentage: number): string {
+function calculateGrade(percentage: number): string {
   if (percentage >= 75) return 'A';
   if (percentage >= 70) return 'A-';
   if (percentage >= 65) return 'B+';
@@ -41,8 +41,8 @@ interface ProcessedRow {
   marks: number;
   out_of: number;
   percentage: number;
-  cbcGrade: ReturnType<typeof calculateCBCGrade>;
-  grade844: string;
+  cbcGrade: ReturnType<typeof calculateCBEGrade>;
+  grade: string;
   position?: number;
 }
 
@@ -131,8 +131,8 @@ export default function TeacherResultsUpload() {
             marks,
             out_of: rowOutOf,
             percentage,
-            cbcGrade: calculateCBCGrade(percentage),
-            grade844: calculate844Grade(percentage),
+            cbcGrade: calculateCBEGrade(percentage),
+            grade: calculateGrade(percentage),
           };
         });
         const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
@@ -162,7 +162,7 @@ export default function TeacherResultsUpload() {
         teacher_id: teacherId,
         term_id: selectedTerm,
         academic_year: new Date().getFullYear().toString(),
-        curriculum: selectedClassData?.curriculum || 'CBC',
+        curriculum: selectedClassData?.curriculum || 'CBE',
         marks: row.marks,
         out_of: row.out_of,
         percentage: row.percentage,
@@ -171,7 +171,7 @@ export default function TeacherResultsUpload() {
         cbc_grade: row.cbcGrade.grade,         // e.g. EE, ME
         cbc_points: row.cbcGrade.points,
         cbc_descriptor: row.cbcGrade.descriptor,
-        grade_844: row.grade844,
+        grade_: row.grade,
         position: row.position,
         status: 'submitted' as const,
         submitted_at: new Date().toISOString(),
@@ -248,7 +248,7 @@ export default function TeacherResultsUpload() {
     doc.text(`Out of: ${outOf} marks | Date: ${new Date().toLocaleDateString()}`, 14, 32);
     autoTable(doc, {
       startY: 40,
-      head: [['Pos', 'Student Name', 'Adm #', 'Marks', 'Out Of', '%', 'CBC Grade', 'Points', '8-4-4']],
+      head: [['Pos', 'Student Name', 'Adm #', 'Marks', 'Out Of', '%', 'CBE Grade', 'Points', '']],
       body: csvData.map(row => [
         row.position,
         row.name,
@@ -258,7 +258,7 @@ export default function TeacherResultsUpload() {
         `${row.percentage}%`,
         row.cbcGrade.subLevel,
         row.cbcGrade.points,
-        row.grade844,
+        row.grade,
       ]),
       styles: { fontSize: 8 },
       headStyles: { fillColor: [37, 99, 235] },
@@ -276,9 +276,9 @@ export default function TeacherResultsUpload() {
       Marks: row.marks,
       'Out Of': row.out_of,
       'Percentage (%)': row.percentage,
-      'CBC Grade': row.cbcGrade.subLevel,
+      'CBE Grade': row.cbcGrade.subLevel,
       Points: row.cbcGrade.points,
-      '8-4-4 Grade': row.grade844,
+      ' Grade': row.grade,
       Descriptor: row.cbcGrade.descriptor,
     })));
     const wb = XLSX.utils.book_new();
@@ -297,7 +297,7 @@ export default function TeacherResultsUpload() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#111111]">Upload Results</h1>
-        <p className="text-sm text-[#666666]">Upload student results with automatic CBC grading and ranking</p>
+        <p className="text-sm text-[#666666]">Upload student results with automatic CBE grading and ranking</p>
       </div>
 
       {success && (
@@ -339,7 +339,7 @@ export default function TeacherResultsUpload() {
       </div>
 
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
-        <h3 className="font-semibold text-[#111111] mb-3">CBC Grade Scale (KNEC Official)</h3>
+        <h3 className="font-semibold text-[#111111] mb-3">CBE Grade Scale (KNEC Official)</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
           {[
             { range: '90-100%', grade: 'EE1', pts: 8, color: 'bg-green-100 text-green-700' },
@@ -361,7 +361,7 @@ export default function TeacherResultsUpload() {
 
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <h3 className="font-semibold text-[#111111] mb-4">Step 2: Download Template</h3>
-        <p className="text-sm text-[#666666] mb-4">Download a CSV template pre-filled with student names. The system converts: (marks ÷ {outOf}) × 100 = percentage, then auto-calculates CBC grade.</p>
+        <p className="text-sm text-[#666666] mb-4">Download a CSV template pre-filled with student names. The system converts: (marks ÷ {outOf}) × 100 = percentage, then auto-calculates CBE grade.</p>
         <button onClick={downloadTemplate} disabled={!selectedClass || !students.length} className="flex items-center gap-2 bg-[#E6F24B] text-[#111111] px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-[#d4e044] disabled:opacity-50 disabled:cursor-not-allowed">
           <Download className="w-4 h-4" /> Download CSV Template ({students.length} students)
         </button>
@@ -397,9 +397,9 @@ export default function TeacherResultsUpload() {
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Out Of</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">CBC Grade</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">CBE Grade</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">8-4-4</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -417,7 +417,7 @@ export default function TeacherResultsUpload() {
                     <td className="py-2 px-3 font-semibold">{row.percentage}%</td>
                     <td className="py-2 px-3"><span className={`text-xs font-bold px-2.5 py-1 rounded-full ${gradeColor(row.cbcGrade.subLevel)}`}>{row.cbcGrade.subLevel}</span></td>
                     <td className="py-2 px-3">{row.cbcGrade.points}</td>
-                    <td className="py-2 px-3">{row.grade844}</td>
+                    <td className="py-2 px-3">{row.grade}</td>
                   </tr>
                 ))}
               </tbody>

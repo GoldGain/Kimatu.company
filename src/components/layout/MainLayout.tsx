@@ -1,5 +1,5 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { Compass, Menu, X, LogIn, ArrowRight } from 'lucide-react';
+import { Link, useNavigate } from 'react-router';
+import { GraduationCap, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import PWAInstallButton from '@/components/PWAInstallButton';
@@ -21,45 +21,37 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <div className="max-w-7xl mx-auto px-4 md:px-8">
           <div className="flex items-center justify-between h-16">
             <Link to="/" className="flex items-center gap-2">
-              <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg" />
-              <div className="flex flex-col">
-                <span className="text-xl font-bold" style={{ color: '#1A365D' }}>Kimatu</span>
-                <span className="text-[10px] -mt-1" style={{ color: '#D4AF37' }}>ANALYTICS</span>
-              </div>
+              <img src="/images/logo.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
+              <span className="text-xl font-bold text-[#111111]">Kimatu Analytics</span>
             </Link>
 
             {/* Desktop Nav */}
             <div className="hidden md:flex items-center gap-6">
-              <a href="#features" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">Features</a>
-              <a href="#pricing" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">Pricing</a>
-              <a href="#testimonials" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">Testimonials</a>
-              <a href="#faq" className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium">FAQ</a>
-              <Link to="/pathway-finder" className="inline-flex items-center gap-1.5 text-sm font-medium bg-[#F0D060] text-[#1A365D] px-3 py-1.5 rounded-full hover:bg-[#E8C44A] transition-colors">
-                <Compass className="w-3.5 h-3.5" /> Pathway Finder
-              </Link>
+              <Link to="/pathway-finder" className="text-sm font-medium bg-[#E6F24B] text-[#111111] px-3 py-1.5 rounded-full hover:bg-yellow-300 transition-colors">Pathway Finder</Link>
+              <a href="#features" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">Features</a>
+              <a href="#testimonials" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">Testimonials</a>
+              <a href="#faq" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">FAQ</a>
               <PWAInstallButton variant="nav" />
               {user ? (
                 <div className="flex items-center gap-3">
                   <Link 
                     to={user.role === 'master_super_admin' ? '/master-admin' : user.role === 'reseller_super_admin' ? '/reseller-admin' : `/${user.role.replace(/_/g, '-')}`}
-                    className="text-base font-medium bg-[#1A365D] text-white px-5 py-2.5 rounded-full hover:bg-[#2D4A7C] transition-colors"
+                    className="text-sm font-medium bg-[#2563EB] text-white px-4 py-2 rounded-full hover:bg-[#1d4ed8] transition-colors"
                   >
                     Dashboard
                   </Link>
                   <button 
                     onClick={handleLogout}
-                    className="text-base text-[#666666] hover:text-[#111111] transition-colors font-medium"
+                    className="text-sm text-[#666666] hover:text-[#111111] transition-colors"
                   >
                     Logout
                   </button>
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <Link to="/auth/login" className="inline-flex items-center gap-2 text-base font-bold bg-[#1A365D] text-white px-6 py-2.5 rounded-full hover:bg-[#2D4A7C] transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95">
-                    <LogIn className="w-4 h-4" /> Login
-                  </Link>
-                  <Link to="/get-started" className="inline-flex items-center gap-2 text-base font-bold bg-[#D4AF37] text-white px-6 py-2.5 rounded-full hover:bg-[#C4A030] transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95">
-                    Get Started <ArrowRight className="w-4 h-4" />
+                  <Link to="/auth/login" className="text-sm text-[#666666] hover:text-[#111111] transition-colors">Login</Link>
+                  <Link to="/register-school" className="text-sm font-medium bg-[#2563EB] text-white px-4 py-2 rounded-full hover:bg-[#1d4ed8] transition-colors">
+                    Get Started
                   </Link>
                 </div>
               )}
@@ -78,26 +70,21 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           {mobileMenuOpen && (
             <div className="md:hidden py-4 border-t border-[#E5E5E5]">
               <div className="flex flex-col gap-3">
-                <a href="#features" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>Features</a>
-                <a href="#pricing" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>Pricing</a>
-                <a href="#testimonials" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>Testimonials</a>
-                <a href="#faq" className="text-base text-[#666666] py-2 font-medium" onClick={() => setMobileMenuOpen(false)}>FAQ</a>
-                <Link to="/pathway-finder" className="text-sm font-bold bg-[#F0D060] text-[#1A365D] px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>✦ Pathway Finder</Link>
+                <Link to="/pathway-finder" className="text-sm font-bold bg-[#E6F24B] text-[#111111] px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>✦ Pathway Finder</Link>
+                <a href="#features" className="text-sm text-[#666666] py-2" onClick={() => setMobileMenuOpen(false)}>Features</a>
+                <a href="#testimonials" className="text-sm text-[#666666] py-2" onClick={() => setMobileMenuOpen(false)}>Testimonials</a>
+                <a href="#faq" className="text-sm text-[#666666] py-2" onClick={() => setMobileMenuOpen(false)}>FAQ</a>
                 {user ? (
                   <>
-                    <Link to={user.role === 'master_super_admin' ? '/master-admin' : user.role === 'reseller_super_admin' ? '/reseller-admin' : `/${user.role.replace(/_/g, '-')}`} className="text-base font-medium bg-[#1A365D] text-white px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>
+                    <Link to={user.role === 'master_super_admin' ? '/master-admin' : user.role === 'reseller_super_admin' ? '/reseller-admin' : `/${user.role.replace(/_/g, '-')}`} className="text-sm font-medium bg-[#2563EB] text-white px-4 py-2 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>
                       Dashboard
                     </Link>
-                    <button onClick={handleLogout} className="text-base text-[#666666] py-2 text-left font-medium">Logout</button>
+                    <button onClick={handleLogout} className="text-sm text-[#666666] py-2 text-left">Logout</button>
                   </>
                 ) : (
                   <>
-                    <Link to="/auth/login" className="inline-flex items-center justify-center gap-2 text-base font-medium bg-[#1A365D] text-white px-4 py-2.5 rounded-full" onClick={() => setMobileMenuOpen(false)}>
-                      <LogIn className="w-4 h-4" /> Login
-                    </Link>
-                    <Link to="/get-started" className="text-base font-medium bg-[#D4AF37] text-white px-4 py-2.5 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>
-                      Get Started
-                    </Link>
+                    <Link to="/auth/login" className="text-sm text-[#666666] py-2" onClick={() => setMobileMenuOpen(false)}>Login</Link>
+                    <Link to="/register-school" className="text-sm font-medium bg-[#2563EB] text-white px-4 py-2 rounded-full text-center" onClick={() => setMobileMenuOpen(false)}>Get Started</Link>
                   </>
                 )}
               </div>
@@ -109,69 +96,42 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {children}
 
       {/* Footer */}
-      <footer className="bg-gradient-to-b from-[#1A1A1A] to-[#0F1729] text-white">
+      <footer className="bg-[#1A1A1A] text-white">
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-12">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div className="md:col-span-1">
+          <div className="grid md:grid-cols-3 gap-8">
+            <div>
               <div className="flex items-center gap-2 mb-4">
-                <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg" />
-                <div className="flex flex-col">
-                  <span className="text-lg font-bold">Kimatu</span>
-                  <span className="text-[10px] -mt-1" style={{ color: '#D4AF37' }}>ANALYTICS</span>
-                </div>
+                <img src="/images/logo.png" alt="Kimatu Analytics" className="w-9 h-9 object-contain rounded-lg" />
+                <span className="text-lg font-bold">Kimatu Analytics</span>
               </div>
-              <p className="text-base text-gray-400 mb-4 leading-relaxed">Smarter Schools, Brighter Futures. Empowering schools with data-driven insights for better learner outcomes.</p>
-              <div className="flex flex-col gap-2 text-base text-gray-400">
-                <span className="flex items-center gap-2">
-                  <span className="text-[#D4AF37] font-semibold">Phone:</span> 0114 645 757
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="text-[#D4AF37] font-semibold">Email:</span> martinmakau123@gmail.com
-                </span>
-                <a 
-                  href="https://wa.me/254114645757" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-green-400 hover:text-green-300 transition-colors mt-1"
-                >
-                  <span className="font-semibold">WhatsApp:</span> 0114 645 757
-                </a>
-              </div>
+              <p className="text-sm text-gray-400">Connecting Schools, Students, and Parents for a brighter future in Kenyan education. Smarter Schools, Brighter Futures.</p>
             </div>
             <div>
-              <h4 className="font-semibold mb-3 text-lg" style={{ color: '#D4AF37' }}>Product</h4>
-              <div className="flex flex-col gap-2 text-base text-gray-400">
+              <h4 className="font-semibold mb-3">Product</h4>
+              <div className="flex flex-col gap-2 text-sm text-gray-400">
                 <a href="#features" className="hover:text-white transition-colors">Features</a>
-                <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
-                <a href="#testimonials" className="hover:text-white transition-colors">Testimonials</a>
+                <a href="#" className="hover:text-white transition-colors">Integrations</a>
+              </div>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-3">Support</h4>
+              <div className="flex flex-col gap-2 text-sm text-gray-400">
                 <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-3 text-lg" style={{ color: '#D4AF37' }}>Support</h4>
-              <div className="flex flex-col gap-2 text-base text-gray-400">
                 <a href="#" className="hover:text-white transition-colors">Documentation</a>
-                <a href="#" className="hover:text-white transition-colors">Video Tutorials</a>
-                <a href="#" className="hover:text-white transition-colors">System Status</a>
-                <button onClick={() => window.open('https://wa.me/254114645757', '_blank')} className="text-left hover:text-green-400 transition-colors">
-                  WhatsApp Support
-                </button>
               </div>
             </div>
-            <div>
-              <h4 className="font-semibold mb-3 text-lg" style={{ color: '#D4AF37' }}>Legal</h4>
-              <div className="flex flex-col gap-2 text-base text-gray-400">
-                <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-                <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-                <a href="#" className="hover:text-white transition-colors">Cookie Policy</a>
-              </div>
-            </div>
+
           </div>
           <div className="border-t border-gray-800 mt-8 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-base text-gray-400">&copy; 2026 Kimatu Analytics. All Rights Reserved.</p>
-            <p className="text-base text-gray-400 flex items-center gap-1">
-              Made with <span style={{ color: '#D4AF37' }}>care</span> for Kenyan Schools
-            </p>
+            <p className="text-sm text-gray-400">&copy; {new Date().getFullYear()} Kimatu Analytics. All rights reserved.</p>
+            <nav className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-gray-400">
+              <Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
+              <Link to="/cookie-policy" className="hover:text-white transition-colors">Cookie Policy</Link>
+              <Link to="/data-processing-agreement" className="hover:text-white transition-colors">Data Protection (DPA)</Link>
+              <Link to="/confidentiality" className="hover:text-white transition-colors">Confidentiality</Link>
+            </nav>
+            <p className="text-sm text-gray-400">Designed for Kenyan Schools</p>
           </div>
         </div>
       </footer>

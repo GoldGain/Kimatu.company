@@ -11,7 +11,7 @@ import type { GenderType } from '@/types/database';
 const DEFAULT_TEACHER_PASSWORD = 'Teacher@2025';
 
 export default function SchoolAdminTeachers() {
-  const { user } = useAuth();
+  const { user, schoolData } = useAuth();
   const { teachers, loading, refetch } = useTeachers(user?.schoolId || undefined);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -98,6 +98,29 @@ export default function SchoolAdminTeachers() {
         teacher_number: actualNextTeacherNumber,
       }]);
       if (teacherError) throw new Error(`Teacher record failed: ${teacherError.message}`);
+
+      // Send Welcome SMS to Teacher
+      try {
+        const { sendSMS, generateWelcomeSMS } = await import('@/lib/sms');
+        const welcomeMsg = generateWelcomeSMS(
+          formData.first_name.trim(),
+          'Teacher',
+          formData.email.trim().toLowerCase(),
+          DEFAULT_TEACHER_PASSWORD,
+          schoolData?.name
+        );
+        if (formData.phone) {
+          const smsResult = await sendSMS(formData.phone, welcomeMsg);
+          if (smsResult.success) {
+            toast.success(`Welcome SMS sent to ${formData.first_name}`);
+          } else {
+            console.warn('SMS failed:', smsResult.error);
+          }
+        }
+      } catch (smsErr) {
+        console.warn('Failed to trigger SMS:', smsErr);
+      }
+
       toast.success(`Teacher ${teacherNumberLabel} added. Login: ${formData.email.trim().toLowerCase()} | Password: ${DEFAULT_TEACHER_PASSWORD}`);
       setShowAdd(false);
       setFormData({ first_name: '', last_name: '', email: '', phone: '', gender: '' as GenderType, qualification: '', specialization: '', tsc_number: '' });

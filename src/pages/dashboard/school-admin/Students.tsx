@@ -10,6 +10,7 @@ import { sendSMS, generateWelcomeSMS } from '@/lib/sms';
 import type { GenderType } from '@/types/database';
 import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
+import { useTrial } from '@/contexts/TrialContext';
 
 type SortField = 'name' | 'assessment_number' | 'class' | 'gender';
 type SortDir = 'asc' | 'desc';
@@ -26,7 +27,8 @@ const KENYA_COUNTIES = [
 
 export default function SchoolAdminStudents() {
   const { user } = useAuth();
-    const { students, loading, refetch } = useStudents(user?.schoolId || undefined);
+  const { trialStatus } = useTrial();
+  const { students, loading, refetch } = useStudents(user?.schoolId || undefined);
   const [classes, setClasses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [filterClassId, setFilterClassId] = useState('');
@@ -135,8 +137,34 @@ export default function SchoolAdminStudents() {
     e.preventDefault();
     setAdding(true);
     try {
-      const studentEmail = formData.student_email || `${formData.assessment_number.toLowerCase().replace(/\s+/g, '')}@student.edu`;
+      // Check for duplicate admission number in this class only (allowing any number as long as it's not already used)
+      const { data: existingStudent } = await supabaseUntyped
+        .from('students')
+        .select('id')
+        .eq('class_id', formData.class_id)
+        .eq('admission_number', formData.assessment_number)
+        .maybeSingle();
+      
+      if (existingStudent) {
+        throw new Error('Admission number already exists in this class. Please use a different number.');
+      }
+      
+      // Check for duplicate email
+      const { data: emailExists } = await supabaseUntyped
+        .from('students')
+        .select('id')
+        .eq('student_email', formData.student_email)
+        .maybeSingle();
+      
+      if (emailExists) {
+        throw new Error('Email already registered. Please use a different email.');
+      }
+      
+      // Make student email unique to this school to avoid cross-school conflicts
+      const schoolPrefix = user?.schoolId ? user.schoolId.split('-')[0] : 'student';
+      const studentEmail = formData.student_email || `${formData.assessment_number.toLowerCase().replace(/\s+/g, '')}.${schoolPrefix}@student.edu`;
       const studentPassword = `${formData.assessment_number}@2025`;
+      
       const authData = await createScopedUser({
         email: studentEmail,
         password: studentPassword,
@@ -144,7 +172,10 @@ export default function SchoolAdminStudents() {
         last_name: formData.last_name,
         role: 'student',
         school_id: user?.schoolId || null,
-        metadata: { assessment_number: formData.assessment_number },
+        metadata: { 
+          assessment_number: formData.assessment_number,
+          class_id: formData.class_id // Pass class_id in metadata for Edge Function check
+        },
       });
       const studentUserId = authData.user.id;
       let parentId: string | null = null;
@@ -392,7 +423,22 @@ export default function SchoolAdminStudents() {
 
   const handlePrint = () => window.print();
 
-  
+  // If trial is expired, show payment lock
+  if (trialStatus?.isExpired) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Learners</h1>
+          <p className="text-sm text-gray-500">Manage your learners</p>
+        </div>
+        <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-8 text-center">
+          <h2 className="text-lg font-semibold text-red-800 mb-2">Trial Period Expired</h2>
+          <p className="text-sm text-red-600 mb-4">Please subscribe to continue managing learners.</p>
+        </div>
+      </div>
+    );
+  }
+
   const inputCls = "w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]";
   const labelCls = "block text-xs text-gray-500 mb-1";
 

@@ -1,6 +1,6 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export type CurriculumType = 'CBE' | '844';
+export type CurriculumType = 'CBE' | '';
 export type UserRole = 'super_admin' | 'school_admin' | 'teacher' | 'student' | 'parent';
 export type SubscriptionPlan = 'trial' | 'basic' | 'pro' | 'premium';
 export type SubscriptionStatus = 'active' | 'suspended' | 'expired' | 'trial';
@@ -170,9 +170,9 @@ export interface Database {
           cbc_grade: CBEGrade | null;
           cbc_points: number | null;
           cbc_descriptor: string | null;
-          grade_844: string | null;
-          points_844: number | null;
-          percentage_844: number | null;
+          grade_: string | null;
+          points_: number | null;
+          percentage_: number | null;
           remarks: string | null;
           teacher_comment: string | null;
           status: ResultStatus | null;

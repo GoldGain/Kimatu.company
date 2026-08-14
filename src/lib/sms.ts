@@ -1,15 +1,17 @@
-// ─── Olympus SMS API Integration ─────────────────────────────────────────────
-// Using Olympus SMS with PROCALL sender ID
+// ─── SMS API Integration ─────────────────────────────────────────────────────
+// Supports Olympus SMS (default, no config needed) and Africa's Talking (per-school)
+
+import { calculate844Grade, calculateCompetencyGrade, getSchoolLevelBand, is844Curriculum } from '@/lib/grading';
 
 const OLYMPUS_API_URL = 'https://sms.ots.co.ke/api/v3/sms/send';
 const OLYMPUS_API_TOKEN = '3682|HN95vYSLpT8BcOjhWYj7gBVOXTSp1B3UsZFbtByfbfef70cf';
-const DEFAULT_SENDER_ID = 'PROCALL';
+const OLYMPUS_SENDER_ID = 'PROCALL';
 
 interface SMSPayload {
-  recipient: string;   // Format: 254XXXXXXXXX
-  sender_id: string;   // Sender ID for SMS
-  type: 'plain';       // Must be "plain"
-  message: string;     // Plain text only, no emojis
+  recipient: string;
+  sender_id: string;
+  type: 'plain';
+  message: string;
 }
 
 interface SMSResponse {
@@ -19,49 +21,204 @@ interface SMSResponse {
   error?: string;
 }
 
+export interface SMSConfig {
+  provider: 'olympus' | 'africastalking';
+  apiKey?: string;
+  username?: string;
+  senderId?: string;
+}
+
+export interface ResultsSmsClassData {
+  curriculum?: string | null;
+  grade_level?: number | string | null;
+  level?: number | string | null;
+  name?: string | null;
+}
+
+function getLearnerLevelLabel(classData?: ResultsSmsClassData, fallbackClassName = ''): string {
+  const className = String(classData?.name || fallbackClassName || '').trim();
+  const normalizedName = className.toLowerCase();
+
+  if (/\bpp\s*1\b|pre[-\s]?primary\s*1/.test(normalizedName)) return 'PP1';
+  if (/\bpp\s*2\b|pre[-\s]?primary\s*2/.test(normalizedName)) return 'PP2';
+
+  const rawLevel = classData?.grade_level ?? classData?.level;
+  const parsedLevel = typeof rawLevel === 'number'
+    ? rawLevel
+    : parseInt(String(rawLevel ?? '').replace(/[^0-9]/g, ''), 10);
+  if (Number.isFinite(parsedLevel) && parsedLevel >= 1 && parsedLevel <= 12) {
+    return `Grade ${parsedLevel}`;
+  }
+
+  const gradeMatch = className.match(/grade\s*(\d{1,2})/i);
+  if (gradeMatch) return `Grade ${gradeMatch[1]}`;
+  return className || 'Class';
+}
+
+function normalizePhone(phone: string): string {
+  let normalizedPhone = phone.trim().replace(/\s/g, '');
+  if (normalizedPhone.startsWith('0')) {
+    normalizedPhone = '254' + normalizedPhone.slice(1);
+  }
+  if (normalizedPhone.startsWith('+')) {
+    normalizedPhone = normalizedPhone.slice(1);
+  }
+  return normalizedPhone;
+}
+
+function cleanMessage(message: string): string {
+  return message.replace(/[^\w\s.,;:!?@#$%&*()\-+=/[\]{}|<>~^`\n]/g, '');
+}
+
 /**
- * Send a single SMS via Olympus SMS API
- * @param phone - Phone number in format 254XXXXXXXXX
- * @param message - Plain text message (no emojis or special characters)
+ * Send SMS via Olympus API (default, no config needed)
  */
-export async function sendSMS(phone: string, message: string): Promise<SMSResponse> {
+async function sendViaOlympus(phone: string, message: string): Promise<SMSResponse> {
+  const payload: SMSPayload = {
+    recipient: normalizePhone(phone),
+    sender_id: OLYMPUS_SENDER_ID,
+    type: 'plain',
+    message: cleanMessage(message),
+  };
+
+  const response = await fetch(OLYMPUS_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OLYMPUS_API_TOKEN}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+
+  if (response.ok) {
+    return { success: true, message: 'SMS sent successfully', data };
+  } else {
+    return { success: false, error: data.message || `HTTP ${response.status}` };
+  }
+}
+
+/**
+ * Send SMS via Africa's Talking API (requires API key and username)
+ */
+async function sendViaAfricasTalking(
+  phone: string,
+  message: string,
+  apiKey: string,
+  username: string,
+  senderId: string
+): Promise<SMSResponse> {
+  const url = 'https://api.africastalking.com/version1/messaging';
+  const formData = new URLSearchParams({
+    username,
+    to: `+${normalizePhone(phone)}`,
+    message: cleanMessage(message),
+    from: senderId || '',
+  });
+
   try {
-    // Normalize phone to 254XXXXXXXXX format
-    let normalizedPhone = phone.trim().replace(/\s/g, '');
-    if (normalizedPhone.startsWith('0')) {
-      normalizedPhone = '254' + normalizedPhone.slice(1);
-    }
-    if (normalizedPhone.startsWith('+')) {
-      normalizedPhone = normalizedPhone.slice(1);
-    }
-
-    // Strip emojis and special characters that cause encoding issues
-    const cleanMessage = message.replace(/[^\w\s.,;:!?@#$%&*()\-+=/[\]{}|<>~^`\n]/g, '');
-
-    const payload: SMSPayload = {
-      recipient: normalizedPhone,
-      sender_id: DEFAULT_SENDER_ID,
-      type: 'plain',
-      message: cleanMessage,
-    };
-
-    const response = await fetch(OLYMPUS_API_URL, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OLYMPUS_API_TOKEN}`,
-        'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'apiKey': apiKey,
       },
-      body: JSON.stringify(payload),
+      body: formData.toString(),
     });
 
     const data = await response.json();
+    const recipient = data?.SMSMessageData?.Recipients?.[0];
 
-    if (response.ok) {
+    if (recipient?.status === 'Success' || recipient?.statusCode === 101) {
       return { success: true, message: 'SMS sent successfully', data };
     } else {
-      return { success: false, error: data.message || `HTTP ${response.status}` };
+      return { success: false, error: recipient?.status || 'SMS send failed', data };
     }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to send SMS' };
+  }
+}
+
+/**
+ * Send a single SMS using the configured provider
+ * @param phone - Phone number (any format, will be normalized)
+ * @param message - Message text
+ * @param config - SMS provider config (defaults to Olympus)
+ */
+export async function sendSMS(
+  phone: string,
+  message: string,
+  config?: SMSConfig
+): Promise<SMSResponse> {
+  try {
+    if (!phone || phone.trim().length < 10) {
+      return { success: false, error: 'Invalid phone number' };
+    }
+
+    // Default to Olympus if no config provided
+    if (!config || config.provider === 'olympus') {
+      return await sendViaOlympus(phone, message);
+    }
+
+    // Africa's Talking requires API key and username
+    if (config.provider === 'africastalking') {
+      if (!config.apiKey || !config.username) {
+        // Fall back to Olympus if AT is not configured
+        console.warn('Africa\'s Talking not fully configured, falling back to Olympus');
+        return await sendViaOlympus(phone, message);
+      }
+      return await sendViaAfricasTalking(phone, message, config.apiKey, config.username, config.senderId || 'KIMATU');
+    }
+
+    return await sendViaOlympus(phone, message);
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to send SMS' };
+  }
+}
+
+/**
+ * Send SMS with school-specific config
+ * Fetches settings from school_settings table and sends using configured provider
+ */
+export async function sendSMSWithSchoolConfig(
+  phone: string,
+  message: string,
+  schoolId: string
+): Promise<SMSResponse> {
+  try {
+    const { supabaseUntyped } = await import('@/lib/supabase/client');
+
+    const { data: settings } = await supabaseUntyped
+      .from('school_settings')
+      .select('sms_provider, sms_api_key, sms_username, sms_sender_id')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+
+    const config: SMSConfig = {
+      provider: (settings?.sms_provider as 'olympus' | 'africastalking') || 'olympus',
+      apiKey: settings?.sms_api_key || undefined,
+      username: settings?.sms_username || undefined,
+      senderId: settings?.sms_sender_id || 'KIMATU',
+    };
+
+    const result = await sendSMS(phone, message, config);
+
+    // Log the SMS
+    try {
+      await supabaseUntyped.from('sms_logs').insert({
+        school_id: schoolId,
+        recipient_phone: normalizePhone(phone),
+        message: cleanMessage(message),
+        status: result.success ? 'sent' : 'failed',
+        error_message: result.error || null,
+        sent_at: new Date().toISOString(),
+      }).catch(() => {}); // Non-blocking
+    } catch {}
+
+    return result;
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to send SMS' };
   }
@@ -70,10 +227,14 @@ export async function sendSMS(phone: string, message: string): Promise<SMSRespon
 /**
  * Send bulk SMS to multiple recipients
  * @param recipients - Array of phone numbers
- * @param message - Plain text message
+ * @param message - Message text
+ * @param config - SMS provider config
  */
-export async function sendBulkSMS(recipients: string[], message: string): Promise<SMSResponse> {
-  // Validate inputs
+export async function sendBulkSMS(
+  recipients: string[],
+  message: string,
+  config?: SMSConfig
+): Promise<SMSResponse> {
   if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
     return { success: false, error: 'No recipients provided' };
   }
@@ -86,12 +247,12 @@ export async function sendBulkSMS(recipients: string[], message: string): Promis
   let failCount = 0;
 
   for (const phone of recipients) {
-    if (!phone || typeof phone !== 'string') {
+    if (!phone || typeof phone !== 'string' || phone.trim().length < 10) {
       failCount++;
       results.push({ phone: phone || 'invalid', success: false, error: 'Invalid phone number' });
       continue;
     }
-    const result = await sendSMS(phone, message);
+    const result = await sendSMS(phone, message, config);
     if (result.success) {
       successCount++;
     } else {
@@ -142,23 +303,20 @@ export function generatePasswordResetSMS(otp: string): string {
   return `Kimatu Analytics: Password Reset\n\nYour OTP code is: ${otp}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore.`;
 }
 
-// ─── Legacy compatible functions ─────────────────────────────────────────────
+// ─── SMS Templates ───────────────────────────────────────────────────────────
 
 export const SMS_TEMPLATES = {
-  welcomeSchoolAdmin: (email: string, password?: string) =>
-    generateWelcomeSMS('Admin', 'School Admin', email, password || 'SchoolAdmin@2025'),
+  welcomeSchoolAdmin: (firstName: string, email: string, password?: string, schoolName?: string) =>
+    generateWelcomeSMS(firstName, 'School Admin', email, password || 'SchoolAdmin@2025', schoolName),
 
-  welcomeTeacher: (email: string, password?: string) =>
-    generateWelcomeSMS('Teacher', 'Teacher', email, password || 'Teacher@2025'),
+  welcomeTeacher: (firstName: string, email: string, password?: string, schoolName?: string) =>
+    generateWelcomeSMS(firstName, 'Teacher', email, password || 'Teacher@2025', schoolName),
 
-  welcomeParent: (email: string, password?: string) =>
-    generateWelcomeSMS('Parent', 'Parent', email, password || 'Parent@2025'),
+  welcomeParent: (firstName: string, email: string, password?: string, schoolName?: string) =>
+    generateWelcomeSMS(firstName, 'Parent', email, password || 'Parent@2025', schoolName),
 
-  welcomeStudent: (email: string, admissionNumber: string) =>
-    generateWelcomeSMS('Learner', 'Student', email, `${admissionNumber}@2025`),
-
-  welcomeReseller: (email: string) =>
-    generateWelcomeSMS('Reseller', 'Reseller', email, '123456789'),
+  welcomeStudent: (firstName: string, email: string, admissionNumber: string, schoolName?: string) =>
+    generateWelcomeSMS(firstName, 'Student', email, `${admissionNumber}@2025`, schoolName),
 
   passwordResetOTP: (otp: string) =>
     generatePasswordResetSMS(otp),
@@ -166,9 +324,40 @@ export const SMS_TEMPLATES = {
   passwordResetSuccess: () =>
     'Kimatu Analytics: Your password has been reset successfully. If you did not make this change, contact support.',
 
-  resultsToParent: (studentName: string, className: string, subjects: Array<{ name: string; marks: number; grade: string }>, totalPoints: number, totalPossible: number, rank: number, totalStudents: number, comment: string) => {
-    const subjectLines = subjects.slice(0, 5).map(s => `${s.name}: ${s.marks}% - ${s.grade}`).join('\n');
-    return `Kimatu Analytics\n\nResults for ${studentName} - ${className}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nTotal Points: ${totalPoints}/${totalPossible}\nClass Rank: ${rank}/${totalStudents}\n\nView Full Results:\nhttps://kimatu.company`;
+  resultsToParent: (
+    studentName: string,
+    className: string,
+    subjects: Array<{ name: string; marks: number; grade: string }>,
+    totalPoints: number,
+    totalPossible: number,
+    rank: number,
+    totalStudents: number,
+    comment: string,
+    classData?: ResultsSmsClassData,
+  ) => {
+    const subjectLines = subjects.map(s => `${s.name}: ${s.marks}% - ${s.grade}`).join('\n');
+    const averagePercentage = totalPossible > 0
+      ? Math.round((totalPoints / totalPossible) * 100)
+      : subjects.length > 0
+        ? Math.round(subjects.reduce((sum, subject) => sum + subject.marks, 0) / subjects.length)
+        : 0;
+    const band = getSchoolLevelBand(classData || { name: className });
+    const gradeInfo = is844Curriculum(classData)
+      ? calculate844Grade(averagePercentage)
+      : calculateCompetencyGrade(averagePercentage, band);
+    const averageGrade = gradeInfo.grade === 'EE' || gradeInfo.grade === 'ME' || gradeInfo.grade === 'AE' || gradeInfo.grade === 'BE'
+      ? gradeInfo.subLevel
+      : gradeInfo.grade;
+    const learnerLevel = getLearnerLevelLabel(classData, className);
+    // Total Points: Junior (Grade 7-9) and Senior (Grade 10-12) use points;
+    // Primary (PP1-Grade 6) uses total marks, so no points line there.
+    const pointsLine = band !== 'primary' && totalPossible > 0
+      ? `Total Points: ${totalPoints}/${totalPossible}\n`
+      : '';
+    const rankLine = rank > 0 && totalStudents > 0 ? `Class Rank: ${rank}/${totalStudents}\n` : '';
+    const commentLine = comment.trim() ? `\n${comment.trim()}\n` : '';
+
+    return `Kimatu Analytics\n\nResults for ${studentName} - ${learnerLevel}\n\nLearning Areas:\n${subjectLines}\n\nSummary:\nAverage Marks: ${averagePercentage}%\nAverage Grade: ${averageGrade} (${gradeInfo.descriptor})\n${pointsLine}${rankLine}${commentLine}\nView Full Results:\nhttps://kimatu.company`;
   },
 
   announcement: (schoolName: string, message: string) =>
@@ -192,18 +381,16 @@ export function getDefaultPassword(role: string, admissionNumber?: string): stri
   }
 }
 
-// ─── Legacy functions for backward compatibility ──────────────────────────────
-
 /**
  * Request a password reset OTP via SMS
  */
 export async function requestPasswordResetOTP(phone: string): Promise<{ success: boolean; message: string }> {
-  const { supabase } = await import('./supabase/client');
+  const { supabase } = await import('@/lib/supabase/client');
   const { data: { session } } = await supabase.auth.getSession();
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/reset-password-sms`, {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/send-sms`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -225,11 +412,10 @@ export async function verifyPasswordResetOTP(
   phone: string,
   otp: string
 ): Promise<{ success: boolean; user_id: string; message: string }> {
-  const { supabase } = await import('./supabase/client');
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/reset-password-sms`, {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/send-sms`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -251,11 +437,10 @@ export async function resetPasswordWithOTP(
   otp: string,
   newPassword: string
 ): Promise<{ success: boolean; message: string }> {
-  const { supabase } = await import('./supabase/client');
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/reset-password-sms`, {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/send-sms`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

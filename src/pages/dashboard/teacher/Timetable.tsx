@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Download, Save, RefreshCw, Clock, Calendar, BookOpen, GraduationCap, Loader2, Eye, Edit3 } from 'lucide-react';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 interface TimeSlot {
   id: string;
@@ -44,6 +44,17 @@ const DEFAULT_TIME_SLOTS: TimeSlot[] = [
   { id: '9', day: '', startTime: '13:30', endTime: '14:10', subject: '', room: '' },
   { id: '10', day: '', startTime: '14:10', endTime: '14:50', subject: '', room: '' },
 ];
+
+// Grid rows are anchored to the unique start times of the teacher's actual lessons
+// (every 30/40-minute lesson start is shown, so no lesson is ever hidden).
+// Grid rows are anchored to the actual start times of the teacher's lessons so
+// every lesson is visible even when schools use 40-minute periods. Simultaneous
+// lessons (e.g. two classes starting at the same time) are stacked in the cell.
+const getPersonalGridTimes = (slots: TeacherSlot[]): string[] => {
+  const starts = Array.from(new Set(slots.map(s => s.start_time.substring(0, 5)))).sort();
+  if (starts.length === 0) return VIEW_TIME_SLOTS;
+  return starts;
+};
 
 const VIEW_TIME_SLOTS = [
   '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
@@ -94,54 +105,36 @@ export default function TeacherTimetable() {
 
       setTeacherName(`${teacherData.first_name || ''} ${teacherData.last_name || ''}`);
 
-      // Get teacher's assignments
+      // Show only active class-and-subject assignments belonging to this teacher.
       const { data: assignments } = await supabaseUntyped
         .from('teacher_subject_assignments')
         .select('class_id, subject_id, classes(name), subjects(name)')
-        .eq('teacher_id', teacherData.id);
+        .eq('teacher_id', teacherData.id)
+        .eq('is_active', true);
 
       setTeacherAssignments(assignments || []);
 
-      // Fetch timetable slots for this teacher
-      const { data: timetableSlots } = await supabaseUntyped
-        .from('timetable_slots')
-        .select('*, subjects(name), classes(name)')
+      // timetable_entries is the canonical generated timetable. Joining its time
+      // slots ensures that this page contains only lessons assigned to this teacher.
+      const { data: timetableEntries, error: timetableError } = await supabaseUntyped
+        .from('timetable_entries')
+        .select('id, day_of_week, teacher_id, timetable_time_slots(start_time, end_time), subjects(name), classes(name)')
         .eq('teacher_id', teacherData.id)
-        .order('day')
-        .order('start_time');
+        .in('entry_type', ['lesson', 'class', 'activity'])
+        .order('day_of_week');
+      if (timetableError) throw timetableError;
 
-      // Also check if teacher is a class teacher
-      const { data: teacherInfo } = await supabaseUntyped
-        .from('teachers')
-        .select('class_id')
-        .eq('id', teacherData.id)
-        .single();
-
-      let allSlots: any[] = timetableSlots || [];
-
-      if (teacherInfo?.class_id) {
-        const { data: classSlots } = await supabaseUntyped
-          .from('timetable_slots')
-          .select('*, subjects(name), classes(name)')
-          .eq('class_id', teacherInfo.class_id)
-          .order('day')
-          .order('start_time');
-        if (classSlots) {
-          const existingIds = new Set(allSlots.map((s: any) => s.id));
-          classSlots.forEach((s: any) => { if (!existingIds.has(s.id)) allSlots.push(s); });
-        }
-      }
-
-      const mappedSlots: TeacherSlot[] = allSlots.map((s: any) => ({
-        id: s.id,
-        day: s.day,
-        start_time: s.start_time,
-        end_time: s.end_time,
-        subject_name: s.subjects?.name || s.subject_name || 'Unknown',
-        class_name: s.classes?.name || s.class_name || 'Unknown',
-        room: s.room,
-        teacher_id: s.teacher_id,
-      }));
+      const dayNames: Record<number, string> = {
+        1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday',
+      };
+      const mappedSlots: TeacherSlot[] = (timetableEntries || []).map((entry: any) => ({
+        id: entry.id,
+        day: dayNames[entry.day_of_week] || 'Monday',
+        start_time: entry.timetable_time_slots?.start_time?.toString().substring(0, 5) || '',
+        end_time: entry.timetable_time_slots?.end_time?.toString().substring(0, 5) || '',
+        subject_name: entry.subjects?.name || 'Learning Area',
+        class_name: entry.classes?.name || 'Class',
+      })).sort((a, b) => a.day.localeCompare(b.day) || a.start_time.localeCompare(b.start_time));
 
       setTeacherSlots(mappedSlots);
     } catch (err) {
@@ -154,26 +147,56 @@ export default function TeacherTimetable() {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return;
-      const { data, error } = await supabase
-        .from('teacher_classes')
+      // Resolve the teacher's DB id from the teachers table using profile_id
+      const { data: teacherRow } = await supabaseUntyped
+        .from('teachers')
+        .select('id')
+        .eq('profile_id', authUser.id)
+        .maybeSingle();
+      if (!teacherRow?.id) {
+        // No teacher record found — show empty state instead of error
+        setClasses([]);
+        return;
+      }
+      const { data, error } = await supabaseUntyped
+        .from('teacher_subject_assignments')
         .select('classes(id, name, grade_level)')
-        .eq('teacher_id', authUser.id);
+        .eq('teacher_id', teacherRow.id)
+        .eq('is_active', true);
       if (error) throw error;
-      setClasses(data?.map((tc: any) => tc.classes) || []);
-    } catch { toast.error('Failed to load classes'); }
+      const uniqueClasses = Array.from(new Map((data || []).map((item: any) => [item.classes?.id, item.classes])).values());
+      setClasses(uniqueClasses.filter(Boolean) || []);
+    } catch (err) {
+      console.error('Error loading classes:', err);
+      // Show empty state rather than error toast — teacher may simply have no classes yet
+      setClasses([]);
+    }
   };
 
   const fetchTeacherSubjects = async () => {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return;
-      const { data, error } = await supabase
+      // Resolve the teacher's DB id from the teachers table using profile_id
+      const { data: teacherRow } = await supabaseUntyped
+        .from('teachers')
+        .select('id')
+        .eq('profile_id', authUser.id)
+        .maybeSingle();
+      if (!teacherRow?.id) {
+        setSubjects([]);
+        return;
+      }
+      const { data, error } = await supabaseUntyped
         .from('teacher_subject_assignments')
         .select('subjects(id, name)')
-        .eq('teacher_id', authUser.id);
+        .eq('teacher_id', teacherRow.id);
       if (error) throw error;
-      setSubjects(data?.map((ts: any) => ts.subjects) || []);
-    } catch { toast.error('Failed to load subjects'); }
+      setSubjects(data?.map((ts: any) => ts.subjects).filter(Boolean) || []);
+    } catch (err) {
+      console.error('Error loading subjects:', err);
+      setSubjects([]);
+    }
   };
 
   const fetchTimetable = async () => {
@@ -182,17 +205,61 @@ export default function TeacherTimetable() {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return;
-      const { data, error } = await supabase
-        .from('teacher_timetables')
+      // Get school_id from profile
+      const { data: profileData } = await supabase.from('profiles').select('school_id').eq('id', authUser.id).single();
+      const schoolId = profileData?.school_id;
+      if (!schoolId) { setTimetableData(generateEmptyTimetable()); return; }
+
+      // Fetch time slots for this school/class
+      const { data: slots, error: slotError } = await supabaseUntyped
+        .from('timetable_time_slots')
         .select('*')
-        .eq('teacher_id', authUser.id)
+        .eq('school_id', schoolId)
+        .order('slot_order');
+      if (slotError) throw slotError;
+
+      // Fetch timetable entries for this class
+      const { data: entries, error: entryError } = await supabaseUntyped
+        .from('timetable_entries')
+        .select('*, subjects(name)')
         .eq('class_id', selectedClass)
-        .eq('term', selectedTerm)
-        .eq('academic_year', selectedYear)
-        .single();
-      if (error && (error as any).code !== 'PGRST116') throw error;
-      if (data) { setTimetableData(data.timetable_data || generateEmptyTimetable()); }
-      else { setTimetableData(generateEmptyTimetable()); }
+        .eq('school_id', schoolId);
+      if (entryError) throw entryError;
+
+      // Build timetable data from entries
+      const dayMap: Record<string, string[]> = {
+        'Monday': '08:00', 'Tuesday': '08:00', 'Wednesday': '08:00', 'Thursday': '08:00', 'Friday': '08:00'
+      };
+      const dayNames: Record<number, string> = {
+        1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday'
+      };
+      const timetable: TimetableData = {};
+      const slotsByTime: Map<string, { start_time: string; end_time: string }> = new Map();
+      (slots || []).forEach((s: any) => {
+        slotsByTime.set(s.id, { start_time: s.start_time?.toString().substring(0, 5) || '', end_time: s.end_time?.toString().substring(0, 5) || '' });
+      });
+
+      DAYS_OF_WEEK.forEach(day => { timetable[day] = []; });
+      (entries || []).forEach((e: any) => {
+        const dayName = dayNames[e.day_of_week] || 'Monday';
+        const slot = slotsByTime.get(e.time_slot_id);
+        timetable[dayName].push({
+          id: e.id,
+          day: dayName,
+          startTime: slot?.start_time || '08:00',
+          endTime: slot?.end_time || '08:40',
+          subject: e.entry_type === 'class' ? (e.subjects?.name || e.activity_name || '') : (e.activity_name || e.entry_type || ''),
+          room: undefined,
+          class_name: selectedClass,
+        });
+      });
+
+      // Sort each day by startTime
+      DAYS_OF_WEEK.forEach(day => {
+        timetable[day].sort((a, b) => a.startTime.localeCompare(b.startTime));
+      });
+
+      setTimetableData(timetable);
     } catch { setTimetableData(generateEmptyTimetable()); }
     finally { setLoading(false); }
   };
@@ -216,14 +283,118 @@ export default function TeacherTimetable() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return;
       const { data: school } = await supabase.from('profiles').select('school_id').eq('id', authUser.id).single();
-      const { error } = await supabase.from('teacher_timetables').upsert({
-        teacher_id: authUser.id, school_id: school?.school_id, class_id: selectedClass,
-        term: selectedTerm, academic_year: selectedYear, timetable_data: timetableData, is_published: false,
-      }, { onConflict: 'teacher_id,class_id,term,academic_year' });
-      if (error) throw error;
+      const schoolId = school?.school_id;
+      if (!schoolId) { toast.error('No school found'); return; }
+
+      // Get teacher_id from teachers table
+      const { data: teacherInfo } = await supabaseUntyped
+        .from('teachers')
+        .select('id')
+        .eq('profile_id', authUser.id)
+        .single();
+      const teacherId = teacherInfo?.id;
+
+      const dayToNum: Record<string, number> = {
+        'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5
+      };
+
+      // Get subject IDs for the subjects we have
+      const { data: allSubjects } = await supabaseUntyped
+        .from('subjects')
+        .select('id, name')
+        .eq('school_id', schoolId);
+      const subjectMap = new Map<string, string>();
+      (allSubjects || []).forEach((s: any) => { subjectMap.set(s.name, s.id); });
+
+      // Get time slot IDs for this school
+      const { data: allSlots } = await supabaseUntyped
+        .from('timetable_time_slots')
+        .select('*')
+        .eq('school_id', schoolId)
+        .order('slot_order');
+      const slotsByTime = new Map<string, any>();
+      (allSlots || []).forEach((s: any) => {
+        slotsByTime.set(s.start_time?.toString().substring(0, 5) || '', s);
+      });
+
+      // Build entries from timetableData
+      const entries: any[] = [];
+      DAYS_OF_WEEK.forEach(day => {
+        const dayNum = dayToNum[day] || 1;
+        const slots = timetableData[day] || [];
+        slots.forEach(slot => {
+          const subjectId = subjectMap.get(slot.subject || '') || null;
+          const timeSlot = slotsByTime.get(slot.startTime || '');
+          const entryType = (slot.subject === 'BREAK' || slot.subject === 'LUNCH' || !slot.subject) ? 'break' : 'class';
+          entries.push({
+            school_id: schoolId,
+            day_of_week: dayNum,
+            time_slot_id: timeSlot?.id || null,
+            class_id: selectedClass,
+            subject_id: subjectId,
+            teacher_id: teacherId || null,
+            entry_type: entryType,
+            activity_name: slot.subject || null,
+          });
+        });
+      });
+
+      // Delete existing entries for this class and insert new ones
+      await supabaseUntyped.from('timetable_entries').delete().eq('class_id', selectedClass).eq('school_id', schoolId);
+      if (entries.length > 0) {
+        const { error: insertError } = await supabaseUntyped.from('timetable_entries').insert(entries);
+        if (insertError) throw insertError;
+      }
       toast.success('Timetable saved successfully');
+      // Refresh
+      fetchTimetable();
     } catch (err: any) { toast.error(err.message || 'Failed to save timetable'); }
     finally { setSaving(false); }
+  };
+
+  const exportPersonalTimetablePDF = () => {
+    if (teacherSlots.length === 0) {
+      toast.error('No personal timetable entries are available to export.');
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    doc.setFillColor(37, 99, 235);
+    doc.rect(0, 0, 297, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.text('MY PERSONAL TIMETABLE', 14, 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`${teacherName || 'Teacher'} · Generated ${new Date().toLocaleDateString()}`, 14, 20);
+
+    const timeRanges = Array.from(new Set(teacherSlots.map((slot) => `${slot.start_time}-${slot.end_time}`)))
+      .sort((a, b) => a.localeCompare(b));
+    const body = timeRanges.map((timeRange) => {
+      const [startTime, endTime] = timeRange.split('-');
+      const row = [`${startTime} – ${endTime}`];
+      DAYS_OF_WEEK.forEach((day) => {
+        const slot = teacherSlots.find((item) => item.day === day && item.start_time === startTime && item.end_time === endTime);
+        row.push(slot ? `${slot.subject_name}\n${slot.class_name}${slot.room ? `\nRoom: ${slot.room}` : ''}` : '');
+      });
+      return row;
+    });
+
+    autoTable(doc, {
+      startY: 35,
+      head: [['Time', ...DAYS_OF_WEEK]],
+      body,
+      styles: { fontSize: 8, cellPadding: 3, valign: 'middle' },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [239, 246, 255] },
+      margin: { left: 12, right: 12 },
+    });
+    doc.setFontSize(7);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Kimatu Analytics School Management System', 148.5, 200, { align: 'center' });
+    doc.save(`my-personal-timetable-${new Date().toISOString().slice(0, 10)}.pdf`);
+    toast.success('Personal timetable exported as PDF.');
   };
 
   const exportToPDF = () => {
@@ -243,12 +414,22 @@ export default function TeacherTimetable() {
       });
       tableData.push(row);
     });
-    (doc as any).autoTable({ head: [['Time', ...DAYS_OF_WEEK]], body: tableData, startY: 35, styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: [41, 128, 185], textColor: 255 }, alternateRowStyles: { fillColor: [240, 240, 240] } });
+    autoTable(doc, { head: [['Time', ...DAYS_OF_WEEK]], body: tableData, startY: 35, styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: [41, 128, 185], textColor: 255 }, alternateRowStyles: { fillColor: [240, 240, 240] } });
     doc.save(`${selectedClassObj?.name}-timetable-${selectedYear}.pdf`);
     toast.success('Timetable exported to PDF');
   };
 
   // Helper for personalized view
+  // Slots for a day/time cell — grid rows are anchored to actual lesson start
+  // times, so each lesson appears exactly once in its own start row; cells may
+  // stack multiple simultaneous lessons (e.g. two classes at the same time).
+  const getSlotsForDayTime = (day: string, time: string): TeacherSlot[] => {
+    return teacherSlots.filter(s => {
+      if (s.day.toLowerCase() !== day.toLowerCase()) return false;
+      return s.start_time.substring(0, 5) === time;
+    });
+  };
+
   const getSlotForDayTime = (day: string, time: string): TeacherSlot | null => {
     return teacherSlots.find(s => {
       if (s.day.toLowerCase() !== day.toLowerCase()) return false;
@@ -285,12 +466,7 @@ export default function TeacherTimetable() {
           >
             <Eye className="w-4 h-4" /> My View
           </button>
-          <button
-            onClick={() => setViewMode('edit')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${viewMode === 'edit' ? 'bg-blue-600 text-white' : 'border border-gray-300 hover:bg-gray-50'}`}
-          >
-            <Edit3 className="w-4 h-4" /> Edit Timetable
-          </button>
+          {/* Issue 12: Edit Timetable button removed - teachers cannot edit their timetable */}
         </div>
       </div>
 
@@ -315,6 +491,16 @@ export default function TeacherTimetable() {
           )}
 
           {/* Personalized Timetable Grid */}
+          <div className="flex justify-end">
+            <button
+              onClick={exportPersonalTimetablePDF}
+              disabled={loadingPersonal || teacherSlots.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" /> Download My Timetable (PDF)
+            </button>
+          </div>
+
           <div className="bg-white rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] overflow-hidden">
             {loadingPersonal ? (
               <div className="flex items-center justify-center py-20">
@@ -336,24 +522,22 @@ export default function TeacherTimetable() {
                     </tr>
                   </thead>
                   <tbody>
-                    {VIEW_TIME_SLOTS.map((time, idx) => (
+                    {getPersonalGridTimes(teacherSlots).map((time, idx) => (
                       <tr key={time} className={idx % 2 === 0 ? 'bg-gray-50/50' : ''}>
                         <td className="px-3 py-2 text-xs font-medium text-gray-600 border border-gray-100">{time}</td>
                         {DAYS_OF_WEEK.map(day => {
-                          const slot = getSlotForDayTime(day, time);
-                          const isStart = slot && slot.start_time.substring(0, 5) === time;
-                          if (slot && !isStart) return <td key={day} className="border border-gray-100" />;
+                          const slots = getSlotsForDayTime(day, time);
                           return (
                             <td key={day} className="border border-gray-100 px-1 py-1">
-                              {slot ? (
-                                <div className={`rounded-lg p-2 border ${getSubjectColor(slot.subject_name)}`}>
-                                  <p className="text-xs font-bold truncate">{slot.subject_name}</p>
+                              {slots.map(s => (
+                                <div key={s.id} className={`rounded-lg p-2 border ${getSubjectColor(s.subject_name)}`}>
+                                  <p className="text-xs font-bold truncate">{s.subject_name}</p>
                                   <p className="text-xs flex items-center gap-1 mt-0.5">
-                                    <GraduationCap className="w-3 h-3" /> {slot.class_name}
+                                    <GraduationCap className="w-3 h-3" /> {s.class_name}
                                   </p>
-                                  {slot.room && <p className="text-xs text-gray-500 mt-0.5">Rm: {slot.room}</p>}
+                                  {s.room && <p className="text-xs text-gray-500 mt-0.5">Rm: {s.room}</p>}
                                 </div>
-                              ) : null}
+                              ))}
                             </td>
                           );
                         })}
@@ -368,59 +552,22 @@ export default function TeacherTimetable() {
           {teacherSlots.length === 0 && !loadingPersonal && (
             <div className="bg-white rounded-2xl p-8 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)] text-center">
               <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-lg font-semibold text-gray-700 mb-2">No Timetable Found</h3>
-              <p className="text-sm text-gray-500 mb-2">Your personalized timetable will appear here once your school admin sets it up.</p>
-              <p className="text-xs text-gray-400">You have {teacherAssignments.length} class/subject assignment(s).</p>
+              <h3 className="text-lg font-semibold text-gray-700 mb-2">No Timetable Generated Yet</h3>
+              <p className="text-sm text-gray-500 mb-2">Your personalized timetable will appear here once your school admin generates the timetable.</p>
+              {teacherAssignments.length > 0 ? (
+                <p className="text-xs text-blue-500">You have {teacherAssignments.length} class/subject assignment(s). Ask your admin to generate the timetable.</p>
+              ) : (
+                <p className="text-xs text-gray-400">No class assignments found. Please contact your school admin to assign you to classes.</p>
+              )}
             </div>
           )}
         </>
       )}
 
       {/* EDIT VIEW */}
-      {viewMode === 'edit' && (
+      {/* Issue 12: Edit mode removed - teachers cannot edit their timetable */}
+      {false && (
         <>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Class *</label>
-                <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">Select a class</option>
-                  {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
-                <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="Term 1">Term 1</option>
-                  <option value="Term 2">Term 2</option>
-                  <option value="Term 3">Term 3</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
-                <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {[2024, 2025, 2026, 2027].map(year => <option key={year} value={year.toString()}>{year}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button onClick={fetchTimetable} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
-              <RefreshCw className="w-4 h-4" />
-            </button>
-            <button onClick={exportToPDF} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
-              <Download className="w-4 h-4" /> Export PDF
-            </button>
-            <button onClick={saveTimetable} disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50">
-              <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-
           {loading ? (
             <div className="flex items-center justify-center h-40">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />

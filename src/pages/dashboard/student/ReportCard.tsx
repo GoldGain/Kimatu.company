@@ -8,6 +8,7 @@ import {
   generateUniqueAIComment,
   drawTrendGraph,
   addSignaturesToPDF,
+  drawReportFooter,
   drawReportHeader,
   drawStudentInfo,
   drawResultsTable,
@@ -15,6 +16,7 @@ import {
   drawDeviation,
   drawAchievements,
   drawAIComment,
+  drawNextTermStartDate,
   getPercentage,
   formatPosition,
   addStudentPhotoToPDF,
@@ -83,7 +85,7 @@ export default function StudentReportCard() {
     try {
       const { data } = await supabaseUntyped
         .from('schools')
-        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email')
+        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email, next_term_start_date')
         .eq('id', schoolId)
         .maybeSingle();
       if (data) {
@@ -95,6 +97,7 @@ export default function StudentReportCard() {
           address: data.address || '',
           phone: data.phone || '',
           email: data.email || '',
+          next_term_start_date: data.next_term_start_date || null,
         });
         setSignatures(prev => ({
           ...prev,
@@ -107,18 +110,19 @@ export default function StudentReportCard() {
       try {
         const { data } = await supabaseUntyped
           .from('schools')
-          .select('name, logo_url, principal_name, address, phone, email')
+          .select('name, motto, logo_url, principal_name, address, phone, email, next_term_start_date')
           .eq('id', schoolId)
           .maybeSingle();
         if (data) {
           setSchoolInfo({
             name: data.name?.trim() || 'School',
-            motto: '',
+            motto: data.motto || '',
             logo_url: data.logo_url || null,
             principal_name: data.principal_name || '',
             address: data.address || '',
             phone: data.phone || '',
             email: data.email || '',
+            next_term_start_date: data.next_term_start_date || null,
           });
         } else {
           setSchoolInfo({ name: 'School' });
@@ -146,7 +150,7 @@ export default function StudentReportCard() {
         const { data: teacherSig } = await supabaseUntyped
           .from('teachers')
           .select('signature_url')
-          .eq('id', classTeacherId)
+          .eq('profile_id', classTeacherId)
           .maybeSingle();
         teacherSigUrl = teacherSig?.signature_url || null;
       } catch {}
@@ -293,7 +297,7 @@ export default function StudentReportCard() {
 
       const photoUrl = student.photo_url || null;
       if (photoUrl) {
-        try { await addStudentPhotoToPDF(doc, photoUrl, 163, 30, 35); } catch {}
+        try { await addStudentPhotoToPDF(doc, photoUrl, 172, 4, 24); } catch {}
       }
 
       drawStudentInfo(
@@ -304,32 +308,24 @@ export default function StudentReportCard() {
         term?.name || '',
         term?.academic_year || '',
         positionStr,
+        34,
+        results[0]?.school_exams?.name || undefined,
       );
-
-      // Show assessment name if available
-      const assessmentName = results[0]?.school_exams?.name || '';
-      if (assessmentName) {
-        doc.setFontSize(9);
-        doc.setTextColor(37, 99, 235);
-        doc.text(`Assessment: ${assessmentName}`, 120, 70);
-      }
 
       const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
       const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
-      const devEndY = drawDeviation(doc, deviation, previousAvg, summaryEndY);
+      const devEndY = drawDeviation(doc, deviation, previousAvg, null, summaryEndY);
       let trendEndY = devEndY;
       if (trendData.length >= 2) {
-        drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band, is);
-        trendEndY = devEndY + 55;
+        trendEndY = drawTrendGraph(doc, trendData, 14, devEndY, 182, 50, band);
       }
       const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
       const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
       const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
-      addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
+      await addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
 
-      doc.setFontSize(8);
-      doc.setTextColor(150, 150, 150);
-      doc.text('Kimatu Analytics School Management System | Support: tutorsultimate@gmail.com', 105, 285, { align: 'center' });
+      // Footer anchored to the bottom of the last page (never pushes content down)
+      drawReportFooter(doc);
 
       doc.save(`report_card_${student.first_name}_${student.last_name}_${term?.name}.pdf`);
       toast.success('Report card downloaded!');
@@ -366,6 +362,9 @@ export default function StudentReportCard() {
               <h2 className="text-lg font-bold text-[#111111]">{student.first_name} {student.last_name}</h2>
               <p className="text-sm text-[#666666]">Assessment #: {student.admission_number}</p>
               <p className="text-sm text-[#666666]">Class: {student.classes?.name}</p>
+              {results[0]?.school_exams?.name && (
+                <p className="text-sm font-semibold text-[#6A1B9A] mt-1">Assessment: {results[0].school_exams.name}</p>
+              )}
             </div>
             {zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={student.first_name} onClose={() => setZoomPhoto(null)} />}
             {student.photo_url ? (
@@ -502,7 +501,7 @@ export default function StudentReportCard() {
                   })();
                   return (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2 px-3 font-medium">{r.subjects?.name}</td>
+                      <td className="py-2 px-3 font-medium">{r.subjects?.name === 'Creative Arts' ? 'C-Arts' : r.subjects?.name}</td>
                       <td className="py-2 px-3">{r.marks}</td>
                       <td className="py-2 px-3">{percentage}%</td>
                       <td className="py-2 px-3">

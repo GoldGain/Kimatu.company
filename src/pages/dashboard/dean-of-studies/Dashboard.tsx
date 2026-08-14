@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { Link } from 'react-router';
 import {
   GraduationCap, BarChart3, BookOpen, Users, CheckCircle, XCircle,
   Loader2, AlertCircle, Plus, ChevronDown, ChevronUp, Calendar, Trash2, Edit2
@@ -47,13 +48,10 @@ export default function DeanOfStudiesDashboard() {
   const [selectedTerm, setSelectedTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expandedClass, setExpandedClass] = useState<string | null>(null);
-  // Issue 12: Added class_lists and mark_lists tabs to DOS Dashboard
-  const [activeTab, setActiveTab] = useState<'overview' | 'assessments' | 'class_lists' | 'mark_lists'>('overview');
+  // Mark Lists tab removed per requirements — Class Lists kept
+  const [activeTab, setActiveTab] = useState<'overview' | 'assessments' | 'class_lists'>('overview');
   const [classListStudents, setClassListStudents] = useState<Record<string, any[]>>({});
-  const [markListData, setMarkListData] = useState<any[]>([]);
-  const [selectedMarkClass, setSelectedMarkClass] = useState('');
   const [loadingClassList, setLoadingClassList] = useState(false);
-  const [loadingMarkList, setLoadingMarkList] = useState(false);
   const [showExamModal, setShowExamModal] = useState(false);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [examForm, setExamForm] = useState(defaultExamForm);
@@ -219,6 +217,14 @@ export default function DeanOfStudiesDashboard() {
     if (!confirm('Delete this assessment?')) return;
     setDeletingExamId(id);
     try {
+      const { count: resultCount, error: countError } = await (supabase as any)
+        .from('results')
+        .select('id', { count: 'exact', head: true })
+        .eq('exam_id', id);
+      if (countError) throw countError;
+      if ((resultCount || 0) > 0) {
+        throw new Error('Cannot delete assessment. Results exist for this assessment. Please delete results first.');
+      }
       const { error } = await (supabase as any).from('school_exams').delete().eq('id', id);
       if (error) throw error;
       toast.success('Assessment deleted');
@@ -260,18 +266,26 @@ export default function DeanOfStudiesDashboard() {
             {classes.length} classes · {classes.reduce((sum, c) => sum + (c.student_count || 0), 0)} learners
           </p>
         </div>
-        <select
-          value={selectedTerm}
-          onChange={(e) => setSelectedTerm(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Select Term</option>
-          {terms.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} ({t.academic_year}){t.is_current ? ' ✓' : ''}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/teacher/timetable"
+            className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+          >
+            <Calendar className="w-4 h-4" /> My Personal Timetable
+          </Link>
+          <select
+            value={selectedTerm}
+            onChange={(e) => setSelectedTerm(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Select Term</option>
+            {terms.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.academic_year}){t.is_current ? ' ✓' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Stats */}
@@ -300,9 +314,8 @@ export default function DeanOfStudiesDashboard() {
         {[
           { key: 'overview', label: 'Marks Progress', icon: <BarChart3 className="w-4 h-4" /> },
           { key: 'assessments', label: 'Assessments', icon: <BookOpen className="w-4 h-4" /> },
-          // Issue 12: Added class lists and mark lists tabs
+          // Class Lists kept; Mark Lists removed per requirements
           { key: 'class_lists', label: 'Class Lists', icon: <Users className="w-4 h-4" /> },
-          { key: 'mark_lists', label: 'Mark Lists', icon: <GraduationCap className="w-4 h-4" /> },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -564,48 +577,25 @@ export default function DeanOfStudiesDashboard() {
         </div>
       )}
 
-      {/* Issue 12: Mark Lists Tab */}
-      {activeTab === 'mark_lists' && (
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-            <strong>Mark Lists</strong> — View all marks for a class and term.
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <select
-              value={selectedMarkClass}
-              onChange={e => setSelectedMarkClass(e.target.value)}
-              className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="">Select Class</option>
-              {classes.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <select
-              value={selectedTerm}
-              onChange={e => setSelectedTerm(e.target.value)}
-              className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="">Select Term</option>
-              {terms.map(t => (
-                <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>
-              ))}
-            </select>
-          </div>
-          {selectedMarkClass && selectedTerm && (
-            <MarkListTable classId={selectedMarkClass} termId={selectedTerm} schoolId={schoolId} />
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-// Issue 12: Class List Expander component
+// Class List Expander component
 function ClassListExpander({ cls, schoolId, isExpanded, onToggle }: { cls: ClassInfo; schoolId: string | null; isExpanded: boolean; onToggle: () => void }) {
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [sortField, setSortField] = useState<'name' | 'adm'>('name');
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+
+  const availableColumns = [
+    { id: 'parent_name', label: 'Parent Name' },
+    { id: 'parent_phone', label: 'Parent Phone' },
+    { id: 'dob', label: 'Date of Birth' },
+    { id: 'enrollment_date', label: 'Enrollment Date' },
+  ];
 
   const loadStudents = async () => {
     if (loaded || !schoolId) return;
@@ -613,10 +603,9 @@ function ClassListExpander({ cls, schoolId, isExpanded, onToggle }: { cls: Class
     try {
       const { data } = await (supabase as any)
         .from('students')
-        .select('id, first_name, last_name, admission_number, gender')
+        .select('id, first_name, last_name, admission_number, gender, parent_name, parent_phone, date_of_birth, enrollment_date')
         .eq('class_id', cls.id)
-        .eq('is_active', true)
-        .order('first_name');
+        .eq('is_active', true);
       setStudents(data || []);
       setLoaded(true);
     } catch (err) {
@@ -645,136 +634,106 @@ function ClassListExpander({ cls, schoolId, isExpanded, onToggle }: { cls: Class
         {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
       </button>
       {isExpanded && (
-        <div className="border-t border-gray-100 overflow-x-auto">
-          {loading ? (
-            <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Adm #</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Gender</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.length === 0 ? (
-                  <tr><td colSpan={4} className="text-center py-4 text-gray-500">No learners in this class</td></tr>
-                ) : (
-                  students.map((s, i) => (
-                    <tr key={s.id} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-500">{i + 1}</td>
-                      <td className="px-4 py-3 text-gray-600">{s.admission_number || '-'}</td>
-                      <td className="px-4 py-3 font-medium">{s.first_name} {s.last_name}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${s.gender?.toLowerCase() === 'male' ? 'bg-blue-50 text-blue-600' : s.gender?.toLowerCase() === 'female' ? 'bg-pink-50 text-pink-600' : 'bg-gray-50 text-gray-600'}`}>
-                          {s.gender || '-'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
+        <div className="border-t border-gray-100">
+          <div className="p-3 bg-gray-50/50 flex items-center justify-between border-b border-gray-100">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sort by:</span>
+                <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setSortField('name')}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-colors ${sortField === 'name' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Name (A-Z)
+                  </button>
+                  <button
+                    onClick={() => setSortField('adm')}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-colors ${sortField === 'adm' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Adm No.
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="relative">
+              <button
+                onClick={() => setShowColumnPicker(!showColumnPicker)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Columns
+              </button>
+              {showColumnPicker && (
+                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-xl z-10 p-2 animate-in fade-in zoom-in duration-200">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase px-2 py-1.5 border-b border-gray-50 mb-1">Toggle Columns</p>
+                  {availableColumns.map(col => (
+                    <label key={col.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.includes(col.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setVisibleColumns([...visibleColumns, col.id]);
+                          else setVisibleColumns(visibleColumns.filter(c => c !== col.id));
+                        }}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-medium text-gray-700">{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            {loading ? (
+              <div className="flex items-center justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Adm #</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Gender</th>
+                    {visibleColumns.includes('parent_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Parent</th>}
+                    {visibleColumns.includes('parent_phone') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Phone</th>}
+                    {visibleColumns.includes('dob') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">DOB</th>}
+                    {visibleColumns.includes('enrollment_date') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Enrolled</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.length === 0 ? (
+                    <tr><td colSpan={4 + visibleColumns.length} className="text-center py-4 text-gray-500">No learners in this class</td></tr>
+                  ) : (
+                    [...students]
+                      .sort((a, b) => {
+                        if (sortField === 'name') return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+                        return (a.admission_number || '').localeCompare(b.admission_number || '', undefined, { numeric: true });
+                      })
+                      .map((s, i) => (
+                        <tr key={s.id} className="border-b hover:bg-gray-50">
+                          <td className="px-4 py-3 text-gray-500">{i + 1}</td>
+                          <td className="px-4 py-3 text-gray-600 font-medium">{s.admission_number || '-'}</td>
+                          <td className="px-4 py-3 font-bold text-gray-900">{s.first_name} {s.last_name}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${s.gender?.toLowerCase() === 'male' ? 'bg-blue-100 text-blue-700' : s.gender?.toLowerCase() === 'female' ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {s.gender || '-'}
+                            </span>
+                          </td>
+                          {visibleColumns.includes('parent_name') && <td className="px-4 py-3 text-gray-600">{s.parent_name || '-'}</td>}
+                          {visibleColumns.includes('parent_phone') && <td className="px-4 py-3 text-gray-600">{s.parent_phone || '-'}</td>}
+                          {visibleColumns.includes('dob') && <td className="px-4 py-3 text-gray-600">{s.date_of_birth || '-'}</td>}
+                          {visibleColumns.includes('enrollment_date') && <td className="px-4 py-3 text-gray-600">{s.enrollment_date || '-'}</td>}
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// Issue 12: Mark List Table component
-function MarkListTable({ classId, termId, schoolId }: { classId: string; termId: string; schoolId: string | null }) {
-  const [marks, setMarks] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadMarks();
-  }, [classId, termId]);
-
-  const loadMarks = async () => {
-    if (!classId || !termId) return;
-    setLoading(true);
-    try {
-      const [{ data: studentsData }, { data: resultsData }] = await Promise.all([
-        (supabase as any).from('students').select('id, first_name, last_name, admission_number').eq('class_id', classId).eq('is_active', true).order('first_name'),
-        (supabase as any).from('results').select('student_id, subject_id, marks, out_of, percentage, subjects(name)').eq('class_id', classId).eq('term_id', termId),
-      ]);
-      setStudents(studentsData || []);
-      setMarks(resultsData || []);
-      const uniqueSubjects: any[] = [];
-      const seenIds = new Set();
-      (resultsData || []).forEach((r: any) => {
-        if (r.subject_id && !seenIds.has(r.subject_id)) {
-          seenIds.add(r.subject_id);
-          uniqueSubjects.push({ id: r.subject_id, name: r.subjects?.name || r.subject_id });
-        }
-      });
-      setSubjects(uniqueSubjects);
-    } catch (err) {
-      console.error(err);
-    }
-    setLoading(false);
-  };
-
-  if (loading) return <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
-  if (students.length === 0) return <div className="text-center py-10 text-gray-500">No learners found in this class</div>;
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-gray-50">
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase sticky left-0 bg-gray-50">#</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase sticky left-8 bg-gray-50">Name</th>
-            {subjects.map(s => (
-              <th key={s.id} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{s.name}</th>
-            ))}
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Avg %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {students.map((s, i) => {
-            const studentMarks = marks.filter((m: any) => m.student_id === s.id);
-            const avg = studentMarks.length > 0 ? Math.round(studentMarks.reduce((sum: number, m: any) => sum + (m.percentage ?? (m.out_of > 0 ? Math.round((m.marks / m.out_of) * 100) : 0)), 0) / studentMarks.length) : null;
-            return (
-              <tr key={s.id} className="border-b hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-500 sticky left-0 bg-white">{i + 1}</td>
-                <td className="px-4 py-3 font-medium sticky left-8 bg-white whitespace-nowrap">{s.first_name} {s.last_name}</td>
-                {subjects.map(sub => {
-                  const mark = studentMarks.find((m: any) => m.subject_id === sub.id);
-                  const pct = mark ? (mark.percentage ?? (mark.out_of > 0 ? Math.round((mark.marks / mark.out_of) * 100) : 0)) : null;
-                  return (
-                    <td key={sub.id} className="px-4 py-3 text-center">
-                      {pct !== null ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          pct >= 75 ? 'bg-green-100 text-green-700' :
-                          pct >= 50 ? 'bg-blue-100 text-blue-700' :
-                          pct >= 30 ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>{pct}%</span>
-                      ) : <span className="text-gray-300">—</span>}
-                    </td>
-                  );
-                })}
-                <td className="px-4 py-3 text-center">
-                  {avg !== null ? (
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                      avg >= 75 ? 'bg-green-100 text-green-700' :
-                      avg >= 50 ? 'bg-blue-100 text-blue-700' :
-                      avg >= 30 ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>{avg}%</span>
-                  ) : <span className="text-gray-300">—</span>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}

@@ -13,6 +13,7 @@ export interface SchoolInfo {
   address?: string;
   phone?: string;
   email?: string;
+  next_term_start_date?: string | null;
 }
 
 export interface SignatureInfo {
@@ -26,6 +27,81 @@ export interface StudentResult {
   out_of?: number;
   percentage?: number | null;
   [key: string]: any;
+}
+
+const REPORT_CONTENT_TOP = 18;
+const REPORT_CONTENT_BOTTOM_MARGIN = 8;
+
+/**
+ * COMPACT (ONE-PAGE) MODE
+ * Reduces fonts, paddings and vertical spacing so a full report card
+ * (header + student info + 13-subject table + summary + trend + comment +
+ * signatures) fits on a single A4 page.
+ */
+export const COMPACT_MODE = true;
+const ROW = COMPACT_MODE ? 3.2 : 5;   // vertical row step for student info (further reduced)
+const HDR_H = COMPACT_MODE ? 22 : 28; // header band height (further reduced)
+
+/**
+ * Starts a clean continuation page when a report-card block cannot fit in the
+ * remaining printable space. The returned Y coordinate is always safe to draw.
+ */
+export function ensureReportCardSpace(doc: jsPDF, y: number, requiredHeight: number): number {
+  const pageHeight = doc.internal.pageSize.getHeight();
+  if (y + requiredHeight <= pageHeight - REPORT_CONTENT_BOTTOM_MARGIN) return y;
+  doc.addPage();
+  return REPORT_CONTENT_TOP;
+}
+
+// Pathway Mapping based on Junior School Learning Areas
+export const PATHWAY_MAPPING: Record<string, string> = {
+  'Mathematics': 'STEM',
+  'Integrated Science': 'STEM',
+  'Pre-Technical Studies': 'STEM',
+  'Agriculture and Nutrition': 'STEM',
+  'Agriculture': 'STEM',
+  'Science and Technology': 'STEM',
+  'English': 'Social Sciences',
+  'Kiswahili': 'Social Sciences',
+  'Social Studies': 'Social Sciences',
+  'Religious Education': 'Social Sciences',
+  'CRE': 'Social Sciences',
+  'IRE': 'Social Sciences',
+  'HRE': 'Social Sciences',
+  'Creative Arts and Sports': 'Arts & Sports',
+  'Creative Arts': 'Arts & Sports',
+  'Physical and Health Education': 'Arts & Sports',
+  'Music': 'Arts & Sports',
+  'Art and Craft': 'Arts & Sports',
+};
+
+export const SUBJECT_ORDER = [
+  'English',
+  'Kiswahili',
+  'Mathematics',
+  'Integrated Science',
+  'Pre-Technical Studies',
+  'Agriculture',
+  'Social Studies',
+  'CRE',
+  'Creative Arts',
+  'Science and Technology',
+  'Physical and Health Education',
+  'IRE',
+  'HRE'
+];
+
+export function sortResultsBySubject(results: any[]) {
+  return [...results].sort((a, b) => {
+    const nameA = a.subjects?.name || '';
+    const nameB = b.subjects?.name || '';
+    const indexA = SUBJECT_ORDER.findIndex(s => nameA.toLowerCase().includes(s.toLowerCase()));
+    const indexB = SUBJECT_ORDER.findIndex(s => nameB.toLowerCase().includes(s.toLowerCase()));
+    if (indexA === -1 && indexB === -1) return nameA.localeCompare(nameB);
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  });
 }
 
 export function getPercentage(result: any): number {
@@ -204,78 +280,57 @@ export function drawTrendGraph(
   width: number,
   height: number,
   band: SchoolLevelBand
-) {
-  if (!trendData || trendData.length < 2) return;
-
-  const padding = 15;
-  const graphX = x + padding;
-  const graphY = y + padding;
-  const graphW = width - padding * 2;
-  const graphH = height - padding * 2;
-
-  // Background
-  doc.setFillColor(250, 250, 252);
-  doc.rect(x, y, width, height, 'F');
-  doc.setDrawColor(200, 200, 210);
-  doc.rect(x, y, width, height, 'S');
-
-  // Title
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(60, 60, 70);
-  doc.text('PERFORMANCE TREND', x + 5, y + 7);
-
-  const maxAvg = Math.max(...trendData.map(d => d.avg), 100);
-  const minAvg = Math.min(...trendData.map(d => d.avg), 0);
-  const range = maxAvg - minAvg || 100;
-
-  // Grid lines
-  for (let i = 0; i <= 4; i++) {
-    const gridY = graphY + (graphH / 4) * i;
-    doc.setDrawColor(230, 230, 235);
-    doc.line(graphX, gridY, graphX + graphW, gridY);
-  }
-
-  const stepX = graphW / Math.max(trendData.length - 1, 1);
-
-  const points = trendData.map((d, i) => ({
-    x: graphX + stepX * i,
-    y: graphY + graphH - ((d.avg - minAvg) / range) * graphH,
-    avg: d.avg,
-    term: d.term,
-  }));
-
-  // Draw connecting line
-  doc.setDrawColor(37, 99, 235);
-  doc.setLineWidth(1.5);
-  for (let i = 0; i < points.length - 1; i++) {
-    doc.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
-  }
-
-  // Draw points
-  points.forEach((p) => {
-    doc.setFillColor(37, 99, 235);
-    doc.circle(p.x, p.y, 2.5, 'F');
-    doc.setFillColor(255, 255, 255);
-    doc.circle(p.x, p.y, 1.2, 'F');
-
-    doc.setFontSize(5.5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 100, 110);
-    const termLabel = p.term.length > 10 ? p.term.substring(0, 10) : p.term;
-    doc.text(termLabel, p.x, graphY + graphH + 7, { align: 'center' });
-
-    doc.setFontSize(5.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(37, 99, 235);
-    doc.text(`${p.avg.toFixed(0)}%`, p.x, p.y - 5, { align: 'center' });
-  });
-
-  doc.setLineWidth(0.2);
-  doc.setTextColor(0, 0, 0);
+): number {
+  // REMOVED: Performance Trend Graph is no longer displayed on report cards
+  // This function is kept for backward compatibility but returns immediately
+  return y;
+  
+  // Original code below (disabled):
+  // Performance trend graph has been removed to fit report cards on one page
+  // The graph drawing code is intentionally removed for compact layout
 }
 
 // ── Add Logo to PDF ──────────────────────────────────────────────────────────
+// Helper to compress and convert image to JPEG data URL
+async function compressImage(src: string, maxWidth: number = 400, quality: number = 0.7): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Resource load timeout')), 10000);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      clearTimeout(timeout);
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      // Resize if too large
+      if (width > maxWidth) {
+        height = (maxWidth / width) * height;
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d')!;
+      // Use white background for JPEG conversion
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Convert to JPEG with compression
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      clearTimeout(timeout);
+      reject(new Error('Resource load failed'));
+    };
+    img.src = src;
+  });
+}
+
+// Image cache to prevent redundant processing and bloat in bulk generation
+const imageCache: Record<string, string> = {};
+
 export async function addLogoToPDF(
   doc: jsPDF,
   logoUrl: string | null | undefined,
@@ -285,99 +340,21 @@ export async function addLogoToPDF(
   maxHeight: number
 ): Promise<boolean> {
   if (!logoUrl) return false;
-
-  // Helper: render any image (including SVG/WebP) to PNG data URL via canvas
-  const renderToCanvas = (src: string, timeoutMs = 8000): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Image load timeout')), timeoutMs);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        clearTimeout(timer);
-        const canvas = document.createElement('canvas');
-        // Use 2× resolution for sharpness
-        const scale = 2;
-        canvas.width = (img.naturalWidth || maxWidth * 3.78) * scale;
-        canvas.height = (img.naturalHeight || maxHeight * 3.78) * scale;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = (e) => { clearTimeout(timer); reject(e); };
-      img.src = src;
-    });
-
   try {
-    let dataUrl: string;
-
-    const getSafeUrl = (url: string) => {
-      if (url.startsWith('data:')) return url;
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}t=${Date.now()}`;
-    };
-
-    if (logoUrl.startsWith('data:')) {
-      dataUrl = await renderToCanvas(logoUrl);
-    } else {
-      // Strip existing query params for a clean fetch URL
-      const fetchUrl = logoUrl.split('?')[0];
-      let blob: Blob | null = null;
-
-      // Attempt 1: fetch with explicit CORS headers and cache-control
-      try {
-        const resp = await fetch(getSafeUrl(fetchUrl), {
-          mode: 'cors',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-          },
-        });
-        if (resp.ok) blob = await resp.blob();
-      } catch { /* fall through to next attempt */ }
-
-      // Attempt 2: fetch without custom headers (some CDNs reject extra headers)
-      if (!blob) {
-        try {
-          const resp = await fetch(fetchUrl, { mode: 'cors' });
-          if (resp.ok) blob = await resp.blob();
-        } catch { /* fall through */ }
-      }
-
-      // Attempt 3: fetch without mode restriction (default browser behavior)
-      if (!blob) {
-        try {
-          const resp = await fetch(fetchUrl);
-          if (resp.ok) blob = await resp.blob();
-        } catch { /* fall through */ }
-      }
-
-      if (blob) {
-        const blobUrl = URL.createObjectURL(blob);
-        try {
-          dataUrl = await renderToCanvas(blobUrl);
-        } finally {
-          URL.revokeObjectURL(blobUrl);
-        }
-      } else {
-        // Fallback: direct img src (works if CORS headers are set on bucket)
-        console.warn('All fetch attempts failed for logo, trying direct img src:', logoUrl);
-        try {
-          dataUrl = await renderToCanvas(getSafeUrl(logoUrl));
-        } catch {
-          dataUrl = await renderToCanvas(logoUrl);
-        }
-      }
+    let dataUrl = imageCache[logoUrl];
+    if (!dataUrl) {
+      dataUrl = await compressImage(logoUrl, 300, 0.7);
+      imageCache[logoUrl] = dataUrl;
     }
-
-    doc.addImage(dataUrl, 'PNG', x, y, maxWidth, maxHeight);
+    doc.addImage(dataUrl, 'JPEG', x, y, maxWidth, maxHeight, undefined, 'FAST');
     return true;
   } catch (err) {
-    console.error('Logo rendering failed:', err);
+    console.error('Logo add error:', err);
     return false;
   }
 }
 
-// ── Add Student Photo to PDF ─────────────────────────────────────────────────
+// ── Add Student Photo to PDF ──────────────────────────────────────────────────
 export async function addStudentPhotoToPDF(
   doc: jsPDF,
   photoUrl: string | null | undefined,
@@ -387,184 +364,150 @@ export async function addStudentPhotoToPDF(
 ): Promise<boolean> {
   if (!photoUrl) return false;
   try {
-    let dataUrl = photoUrl;
-    if (!photoUrl.startsWith('data:')) {
-      const fetchUrl = photoUrl.split('?')[0];
-      let blob: Blob | null = null;
-
-      // Attempt 1: fetch with CORS mode and cache-busting
-      try {
-        const resp = await fetch(`${fetchUrl}?t=${Date.now()}`, {
-          mode: 'cors',
-          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
-        });
-        if (resp.ok) blob = await resp.blob();
-      } catch { /* fall through */ }
-
-      // Attempt 2: fetch without custom headers
-      if (!blob) {
-        try {
-          const resp = await fetch(fetchUrl, { mode: 'cors' });
-          if (resp.ok) blob = await resp.blob();
-        } catch { /* fall through */ }
-      }
-
-      // Attempt 3: no-cors mode as last resort
-      if (!blob) {
-        try {
-          const resp = await fetch(fetchUrl);
-          if (resp.ok) blob = await resp.blob();
-        } catch { /* fall through */ }
-      }
-
-      if (blob) {
-        dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob!);
-        });
-      } else {
-        console.warn('Student photo fetch failed, skipping photo');
-        return false;
-      }
+    let dataUrl = imageCache[photoUrl];
+    if (!dataUrl) {
+      dataUrl = await compressImage(photoUrl, 200, 0.6);
+      imageCache[photoUrl] = dataUrl;
     }
-    // Render to canvas for circular crop at high resolution
-    const canvas = document.createElement('canvas');
-    const px = Math.round(size * 3.78 * 2); // ~2x resolution for clarity
-    canvas.width = px;
-    canvas.height = px;
-    const ctx = canvas.getContext('2d')!;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = reject;
-      img.src = dataUrl;
-    });
-    // Circular clip
-    ctx.beginPath();
-    ctx.arc(px / 2, px / 2, px / 2, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(img, 0, 0, px, px);
-    const circularDataUrl = canvas.toDataURL('image/png');
-    // Blue border circle
-    doc.setDrawColor(37, 99, 235);
-    doc.setLineWidth(0.8);
-    doc.circle(x + size / 2, y + size / 2, size / 2, 'S');
-    doc.addImage(circularDataUrl, 'PNG', x, y, size, size);
+    
+    // Add a nice border around the student photo
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(1);
+    doc.rect(x - 0.5, y - 0.5, size + 1, size + 1, 'D');
+    
+    doc.addImage(dataUrl, 'JPEG', x, y, size, size, undefined, 'FAST');
+    
+    // Add a subtle outer shadow/border
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.1);
+    doc.rect(x - 0.6, y - 0.6, size + 1.2, size + 1.2, 'D');
+    
     return true;
-  } catch {
+  } catch (err) {
+    console.error('Photo add error:', err);
     return false;
   }
 }
 
+// ── Draw Report Header ───────────────────────────────────────────────────────
+export async function drawReportHeader(doc: jsPDF, school: SchoolInfo) {
+  doc.setFillColor(245, 166, 35); doc.rect(0, 0, 210, HDR_H, 'F');
+  const logoAdded = school.logo_url ? await addLogoToPDF(doc, school.logo_url, 14, 3, 22, 22) : false;
+  doc.setTextColor(26, 35, 126); doc.setFontSize(COMPACT_MODE ? 14 : 16); doc.setFont('helvetica', 'bold');
+  doc.text(school.name || 'School Name', logoAdded ? 40 : 105, 10, { align: logoAdded ? 'left' : 'center' });
+  doc.setFontSize(COMPACT_MODE ? 8 : 9); doc.setFont('helvetica', 'normal');
+  doc.text(school.motto || '', logoAdded ? 40 : 105, 15.5, { align: logoAdded ? 'left' : 'center' });
+  const contactLine = `${school.address || ''} | ${school.phone || ''} | ${school.email || ''}`;
+  const maxContactW = Math.min(160, 210 - (logoAdded ? 40 : 105) - 14);
+  const contactLines = doc.splitTextToSize(contactLine, maxContactW);
+  doc.text(contactLines, logoAdded ? 40 : 105, 21, { align: logoAdded ? 'left' : 'center' });
+}
+
 // ── Add Signatures to PDF ────────────────────────────────────────────────────
-export function addSignaturesToPDF(
+export async function addSignaturesToPDF(
   doc: jsPDF,
   signatures: SignatureInfo,
   y: number,
   schoolInfo?: SchoolInfo
 ) {
+  // Compact mode shrinks the signature block so it fits on page 1
+  const sigBlockH = COMPACT_MODE ? 14 : 34;
+  const sigImgH = COMPACT_MODE ? 8 : 16;
+  const sigImgY = COMPACT_MODE ? 0.5 : 3;
+  const sigLabelY = COMPACT_MODE ? 9 : 22;
+  y = ensureReportCardSpace(doc, y, sigBlockH + (schoolInfo?.next_term_start_date ? 8 : 5));
   const hasPrincipalSig = signatures.principal_signature_url && signatures.principal_signature_url.startsWith('data:');
   const hasTeacherSig = signatures.teacher_signature_url && signatures.teacher_signature_url.startsWith('data:');
-
-  doc.setFontSize(7);
+  doc.setFontSize(COMPACT_MODE ? 6 : 7);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(60, 60, 70);
-
   if (hasTeacherSig || hasPrincipalSig) {
-    doc.text('DIGITAL SIGNATURES', 14, y);
-
+    if (!COMPACT_MODE) doc.text('DIGITAL SIGNATURES', 14, y);
     if (hasTeacherSig) {
       try {
-        doc.addImage(signatures.teacher_signature_url!, 'PNG', 14, y + 3, 45, 16);
+        let sigUrl = imageCache[signatures.teacher_signature_url!];
+        if (!sigUrl) {
+          sigUrl = await compressImage(signatures.teacher_signature_url!, 200, 0.6);
+          imageCache[signatures.teacher_signature_url!] = sigUrl;
+        }
+        doc.addImage(sigUrl, 'JPEG', 14, y + sigImgY, 40, sigImgH, undefined, 'FAST');
       } catch {
         doc.setDrawColor(150, 150, 155);
-        doc.line(14, y + 16, 60, y + 16);
+        doc.line(14, y + sigLabelY - 2, 56, y + sigLabelY - 2);
       }
     } else {
       doc.setDrawColor(150, 150, 155);
-      doc.line(14, y + 16, 60, y + 16);
+      doc.line(14, y + sigLabelY - 2, 56, y + sigLabelY - 2);
     }
-    doc.setFontSize(6);
+    doc.setFontSize(COMPACT_MODE ? 5.5 : 6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
-    doc.text('Class Teacher Signature', 14, y + 22);
-
+    doc.text('Class Teacher Signature', 14, y + sigLabelY);
     if (hasPrincipalSig) {
       try {
-        doc.addImage(signatures.principal_signature_url!, 'PNG', 120, y + 3, 45, 16);
+        let sigUrl = imageCache[signatures.principal_signature_url!];
+        if (!sigUrl) {
+          sigUrl = await compressImage(signatures.principal_signature_url!, 200, 0.6);
+          imageCache[signatures.principal_signature_url!] = sigUrl;
+        }
+        doc.addImage(sigUrl, 'JPEG', 118, y + sigImgY, 40, sigImgH, undefined, 'FAST');
       } catch {
         doc.setDrawColor(150, 150, 155);
-        doc.line(120, y + 16, 165, y + 16);
+        doc.line(118, y + sigLabelY - 2, 160, y + sigLabelY - 2);
       }
     } else {
       doc.setDrawColor(150, 150, 155);
-      doc.line(120, y + 16, 165, y + 16);
+      doc.line(118, y + sigLabelY - 2, 160, y + sigLabelY - 2);
     }
-    doc.setFontSize(6);
+    doc.setFontSize(COMPACT_MODE ? 5.5 : 6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
-    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 22);
+    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 118, y + sigLabelY);
   } else {
     doc.setDrawColor(150, 150, 155);
-    doc.line(14, y + 12, 75, y + 12);
-    doc.line(120, y + 12, 181, y + 12);
-    doc.setFontSize(7);
+    doc.line(14, y + (COMPACT_MODE ? 9 : 12), 75, y + (COMPACT_MODE ? 9 : 12));
+    doc.line(118, y + (COMPACT_MODE ? 9 : 12), 181, y + (COMPACT_MODE ? 9 : 12));
+    doc.setFontSize(COMPACT_MODE ? 6 : 7);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(80, 80, 85);
-    doc.text('Class Teacher Signature', 14, y + 18);
-    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 120, y + 18);
+    doc.text('Class Teacher Signature', 14, y + (COMPACT_MODE ? 15 : 18));
+    doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 118, y + (COMPACT_MODE ? 15 : 18));
   }
-
   // Date
-  doc.setFontSize(7);
+  doc.setFontSize(COMPACT_MODE ? 6 : 7);
   doc.setTextColor(80, 80, 85);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y + 27);
-
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y + (COMPACT_MODE ? 12 : 27));
   // School stamp area
   doc.setDrawColor(180, 180, 185);
   doc.setLineDashPattern([2, 2], 0);
-  doc.rect(120, y + 3, 35, 22);
+  doc.rect(118, y + sigImgY, 32, sigImgH + 2);
   doc.setLineDashPattern([], 0);
   doc.setFontSize(5.5);
   doc.setTextColor(150, 150, 155);
-  doc.text('OFFICIAL STAMP', 137.5, y + 15, { align: 'center' });
+  doc.text('OFFICIAL STAMP', 134, y + sigImgY + sigImgH / 2, { align: 'center' });
+
+  // Move "Next term begins on" to AFTER the signatures as requested
+  if (schoolInfo?.next_term_start_date) {
+    const dateObj = new Date(schoolInfo.next_term_start_date);
+    const formattedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    doc.setTextColor(0, 102, 102);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
+    doc.text(`Next term begins on: ${formattedDate}`, 14, y + sigBlockH + (COMPACT_MODE ? 2 : 4));
+    doc.setTextColor(0, 0, 0);
+    return y + sigBlockH + (COMPACT_MODE ? 6 : 10);
+  }
+
+  return y + sigBlockH;
 }
 
-// ── Draw Header with Logo ────────────────────────────────────────────────────
-export async function drawReportHeader(
-  doc: jsPDF,
-  schoolInfo: SchoolInfo,
-  subtitle: string = 'STUDENT REPORT CARD'
-) {
-  // Blue header background
-  doc.setFillColor(37, 99, 235);
-  doc.rect(0, 0, 210, 32, 'F');
-
-  // Try to add logo (left side, bigger)
-  const logoAdded = schoolInfo.logo_url
-    ? await addLogoToPDF(doc, schoolInfo.logo_url, 10, 3, 26, 26)
-    : false;
-
-  doc.setTextColor(255, 255, 255);
-  // School name — always prominent, never fall back to generic 'School'
-  const displayName = schoolInfo.name?.trim() || 'School';
-  doc.setFontSize(logoAdded ? 14 : 16);
-  doc.setFont('helvetica', 'bold');
-  doc.text(displayName, logoAdded ? 40 : 105, logoAdded ? 11 : 11, { align: logoAdded ? 'left' : 'center' });
-
-  doc.setFontSize(9);
+// ── Draw Footer ──────────────────────────────────────────────────────────────
+export function drawReportFooter(doc: jsPDF) {
+  const pageHeight = doc.internal.pageSize.getHeight();
+  doc.setFontSize(8);
+  doc.setTextColor(150, 150, 150);
   doc.setFont('helvetica', 'normal');
-  doc.text(subtitle, logoAdded ? 40 : 105, logoAdded ? 20 : 20, { align: logoAdded ? 'left' : 'center' });
-
-  if (schoolInfo.motto) {
-    doc.setFontSize(6.5);
-    doc.setFont('helvetica', 'italic');
-    doc.text(`"${schoolInfo.motto}"`, logoAdded ? 40 : 105, 27, { align: logoAdded ? 'left' : 'center' });
-  }
+  doc.text('Kimatu Analytics School Management System | Support: tutorsultimate@gmail.com', 105, pageHeight - 6, { align: 'center' });
 }
 
 // ── Draw Student Info ────────────────────────────────────────────────────────
@@ -577,27 +520,23 @@ export function drawStudentInfo(
   academicYear: string,
   position: string,
   y: number = 38,
-  // Issue 10: Added assessmentName parameter to show on report card
   assessmentName?: string
 ) {
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
+  // Compact: two-column grid, denser rows so the info block uses <= 14mm
+  const fs = COMPACT_MODE ? 8 : 9;
+  doc.setTextColor(0, 0, 0); doc.setFontSize(fs); doc.setFont('helvetica', 'normal');
   doc.text(`Learner: ${studentName}`, 14, y);
-  doc.text(`Adm No: ${admissionNo}`, 14, y + 6);
-  doc.text(`Class: ${className}`, 14, y + 12);
-  // Issue 10: Show assessment name if provided, otherwise show term name
+  doc.text(`Adm No: ${admissionNo}`, 14, y + ROW);
+  doc.text(`Class: ${className}`, 14, y + ROW * 2);
   doc.text(`Term: ${termName} ${academicYear}`, 120, y);
   if (assessmentName) {
-    doc.text(`Assessment: ${assessmentName}`, 120, y + 6);
-    doc.text(`Position: ${position}`, 120, y + 12);
+    doc.text(`Assessment: ${assessmentName}`, 120, y + ROW);
+    doc.text(`Position: ${position}`, 120, y + ROW * 2);
   } else {
-    doc.text(`Position: ${position}`, 120, y + 6);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + 12);
+    doc.text(`Position: ${position}`, 120, y + ROW);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + ROW * 2);
   }
-
-  doc.setDrawColor(37, 99, 235);
-  doc.line(14, y + 17, 196, y + 17);
+  doc.setDrawColor(106, 27, 154); doc.line(14, y + ROW * 2 + 3, 196, y + ROW * 2 + 3);
 }
 
 // ── Draw Results Table ───────────────────────────────────────────────────────
@@ -607,37 +546,54 @@ export function drawResultsTable(
   classData: any,
   startY: number
 ): number {
+  startY = ensureReportCardSpace(doc, startY, 24);
+  const sorted = sortResultsBySubject(results);
   const isPrimary = getSchoolLevelBand(classData) === 'primary';
-
-  const tableHead = isPrimary
-    ? ['#', 'Learning Area', 'Marks', 'Out Of', '%', 'CBE Grade']
-    : ['#', 'Learning Area', 'Marks', 'Out Of', '%', 'CBE Grade', 'Points'];
-
-  const tableBody = results.map((r, i) => {
+  const tableHead = isPrimary ? ['#', 'Learning Area', 'Marks', 'Out Of', 'Score & Grade'] : ['#', 'Learning Area', 'Marks', 'Out Of', 'Score & Grade', 'Points'];
+  const tableBody = sorted.map((r, i) => {
     const pct = getPercentage(r);
     const grading = gradeFromPercentage(pct, classData);
-    const row: any[] = [
-      i + 1,
-      r.subjects?.name || 'N/A',
-      String(r.marks || '0'),
-      String(r.out_of || 100),
-      `${pct}%`,
-      grading.grade,
-    ];
+    const subjectName = r.subjects?.name === 'Creative Arts' ? 'C-Arts' : (r.subjects?.name || 'N/A');
+    const row: any[] = [i + 1, subjectName, String(r.marks || '0'), String(r.out_of || 100), `${pct}% ${grading.grade}`];
     if (!isPrimary) row.push(grading.points ?? '—');
     return row;
   });
-
   autoTable(doc, {
     startY,
     head: [tableHead],
     body: tableBody,
-    styles: { fontSize: 8, cellPadding: 1.5 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
-    alternateRowStyles: { fillColor: [245, 247, 255] },
-    margin: { left: 14, right: 14 },
+    styles: { fontSize: COMPACT_MODE ? 6.8 : 8, cellPadding: COMPACT_MODE ? 0.6 : 1.5 },
+    headStyles: { fillColor: [106, 27, 154], textColor: 255, fontSize: COMPACT_MODE ? 7.2 : 8, cellPadding: 0.8 },
+    alternateRowStyles: { fillColor: [232, 234, 246] }, margin: { left: 14, right: 14 },
   });
+  return (doc as any).lastAutoTable.finalY;
+}
 
+// ── Draw Pathway Performance ──────────────────────────────────────────────────
+export function drawPathwayPerformance(
+  doc: jsPDF,
+  results: any[],
+  startY: number
+): number {
+  const pathways = ['STEM', 'Arts & Sports', 'Social Sciences'];
+  const pathwayData = pathways.map(pathway => {
+    const relevantResults = results.filter(r => {
+      const subjectName = r.subjects?.name || '';
+      return PATHWAY_MAPPING[subjectName] === pathway;
+    });
+    const areasUsed = relevantResults.map(r => r.subjects?.name).join(', ');
+    const score = relevantResults.reduce((sum, r) => sum + (Number(r.marks) || 0), 0);
+    const outOf = relevantResults.reduce((sum, r) => sum + (Number(r.out_of) || 100), 0);
+    const percentage = outOf > 0 ? (score / outOf) * 100 : 0;
+    return [pathway, areasUsed || 'None', `${score}/${outOf}`, `${percentage.toFixed(1)}%`];
+  });
+  doc.setFontSize(COMPACT_MODE ? 9 : 10); doc.setFont('helvetica', 'bold'); doc.setTextColor(26, 35, 126);
+  doc.text('Pathway Performance Profile', 14, startY + (COMPACT_MODE ? 5 : 6));
+  autoTable(doc, {
+    startY: startY + (COMPACT_MODE ? 6 : 8), head: [['Pathway', 'Learning Areas Used', 'Score', 'Performance']], body: pathwayData,
+    styles: { fontSize: COMPACT_MODE ? 7.5 : 8, cellPadding: COMPACT_MODE ? 1 : 2 }, headStyles: { fillColor: [106, 27, 154], textColor: 255 },
+    alternateRowStyles: { fillColor: [255, 248, 225] }, margin: { left: 14, right: 14 },
+  });
   return (doc as any).lastAutoTable.finalY;
 }
 
@@ -651,25 +607,43 @@ export function drawSummaryBox(
   classData: any,
   startY: number
 ): number {
+  const boxH = COMPACT_MODE ? 13 : 22;
+  startY = ensureReportCardSpace(doc, startY, boxH + 2);
   const isPrimary = getSchoolLevelBand(classData) === 'primary';
   const totalMarks = results.reduce((s, r) => s + (Number(r.marks || 0)), 0);
   const overallGrading = gradeFromPercentage(avgPercentage, classData);
+  doc.setFillColor(0, 137, 123); doc.rect(14, startY, 182, boxH, 'F');
+  const fs = COMPACT_MODE ? 7.2 : 8;
+  const gap = COMPACT_MODE ? 5.8 : 8;
+  doc.setFontSize(fs); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
+  doc.text(`Learning Areas: ${results.length}`, 20, startY + gap);
+  doc.text(`Total Marks: ${totalMarks}`, 65, startY + gap);
+  doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 130, startY + gap);
+  doc.text(`Position: ${position}`, 20, startY + gap * 2);
+  doc.text(`Grade: ${overallGrading.grade}`, 65, startY + gap * 2);
+  if (!isPrimary && totalPoints !== null) doc.text(`Total Points: ${totalPoints}`, 130, startY + gap * 2);
+  return startY + boxH + (COMPACT_MODE ? 1 : 4);
+}
 
-  doc.setFillColor(245, 247, 255);
-  doc.rect(14, startY, 182, 22, 'F');
-  doc.setFontSize(8);
+// ── Draw Next Term Start Date ──────────────────────────────────────────────────
+export function drawNextTermStartDate(
+  doc: jsPDF,
+  nextTermStartDate: string | null | undefined,
+  startY: number
+): number {
+  if (!nextTermStartDate) return startY;
+  
+  startY = ensureReportCardSpace(doc, startY, COMPACT_MODE ? 8 : 10);
+  const dateObj = new Date(nextTermStartDate);
+  const formattedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  
+  doc.setTextColor(0, 102, 102);
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
+  doc.text(`Next term begins on: ${formattedDate}`, 14, startY);
   doc.setTextColor(0, 0, 0);
-  doc.text(`Learning Areas: ${results.length}`, 20, startY + 7);
-  doc.text(`Total Marks: ${totalMarks}`, 65, startY + 7);
-  doc.text(`Average: ${avgPercentage.toFixed(1)}%`, 130, startY + 7);
-  doc.text(`Position: ${position}`, 20, startY + 15);
-  doc.text(`Grade: ${overallGrading.grade}`, 65, startY + 15);
-  if (!isPrimary && totalPoints !== null) {
-    doc.text(`Total Points: ${totalPoints}`, 130, startY + 15);
-  }
-
-  return startY + 26;
+  
+  return startY + (COMPACT_MODE ? 7 : 8);
 }
 
 // ── Draw Deviation ───────────────────────────────────────────────────────────
@@ -677,25 +651,27 @@ export function drawDeviation(
   doc: jsPDF,
   deviation: number | null,
   previousAvg: number | null,
+  previousPosition: number | null,
   startY: number
 ): number {
-  if (deviation !== null) {
+  startY = ensureReportCardSpace(doc, startY, COMPACT_MODE ? 10 : 12);
+  if (deviation !== null && previousAvg !== null) {
     const arrow = deviation >= 0 ? '\u25B2' : '\u25BC';
     const sign = deviation >= 0 ? '+' : '';
-    if (deviation >= 0) doc.setTextColor(22, 163, 74);
-    else doc.setTextColor(220, 38, 38);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text(`${arrow} ${sign}${deviation.toFixed(1)}% vs previous term (Prev: ${previousAvg?.toFixed(1)}%)`, 14, startY);
+    if (deviation >= 0) doc.setTextColor(76, 175, 80); else doc.setTextColor(244, 67, 54);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
+    doc.text(`${arrow} ${sign}${deviation.toFixed(1)}% vs previous (Prev: ${previousAvg?.toFixed(1)}% - Pos: ${previousPosition || 'N/A'})`, 14, startY);
+    doc.setTextColor(0, 0, 0);
+  } else if (previousAvg !== null) {
+    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
+    doc.text(`Previous performance: ${previousAvg.toFixed(1)}% - Position: ${previousPosition || 'N/A'}`, 14, startY);
     doc.setTextColor(0, 0, 0);
   } else {
-    doc.setTextColor(100, 100, 100);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
     doc.text('First Term — No previous data for comparison', 14, startY);
     doc.setTextColor(0, 0, 0);
   }
-  return startY + 8;
+  return startY + (COMPACT_MODE ? 7 : 8);
 }
 
 // ── Draw Achievements ────────────────────────────────────────────────────────
@@ -705,40 +681,111 @@ export function drawAchievements(
   startY: number
 ): number {
   if (bestSubjects.length === 0) return startY;
-
-  doc.setFillColor(254, 249, 195);
-  doc.rect(14, startY, 182, 5 + bestSubjects.length * 5, 'F');
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(202, 138, 4);
-  doc.text('ACHIEVEMENT:', 18, startY + 4);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
+  const rowH = COMPACT_MODE ? 4.5 : 5;
+  const boxHeight = 4 + bestSubjects.length * rowH;
+  startY = ensureReportCardSpace(doc, startY, boxHeight + (COMPACT_MODE ? 4 : 6));
+  doc.setFillColor(255, 248, 225); doc.rect(14, startY, 182, boxHeight, 'F');
+  doc.setFontSize(COMPACT_MODE ? 6.5 : 7); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
+  doc.text('ACHIEVEMENT:', 18, startY + 3.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0);
   bestSubjects.forEach((b, bi) => {
     const pts = b.points !== null ? ` (${b.points} pts)` : '';
-    doc.setFontSize(7);
-    doc.text(`Best in ${b.subjectName}: ${b.percentage}% — ${b.gradeLabel}${pts}`, 18, startY + 9 + bi * 5);
+    doc.text(`Best in ${b.subjectName}: ${b.studentName} (${b.percentage}% — ${b.gradeLabel}${pts})`, 18, startY + 8 + bi * rowH);
   });
-  return startY + 5 + bestSubjects.length * 5 + 5;
+  return startY + boxHeight + (COMPACT_MODE ? 1 : 5);
 }
 
 // ── Draw AI Comment ──────────────────────────────────────────────────────────
+
+/**
+ * Word-wrap text using measured widths, so wrapping is always correct
+ * regardless of which font is active when splitting happens. The text font
+ * is configured BEFORE measuring to guarantee accurate line widths.
+ */
+function wrapCommentText(doc: jsPDF, text: string): string[] {
+  // Configure the exact font/size that the text will be drawn with.
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(COMPACT_MODE ? 7 : 7.5);
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const textX = 18;
+  const rightMargin = 14;
+  // Wrap width: leave a safety margin on both sides of the page.
+  const maxWidth = Math.min(165, Math.max(60, pageWidth - textX - rightMargin));
+
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if (!word) continue;
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const width = doc.getTextWidth(testLine);
+    if (width <= maxWidth || !currentLine) {
+      // Allow a single very long word to occupy its own line even if it
+      // exceeds maxWidth (better than losing characters).
+      currentLine = testLine;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+
+  return lines.length > 0 ? lines : ['No class teacher comment provided.'];
+}
+
 export function drawAIComment(
   doc: jsPDF,
   comment: string,
   startY: number
 ): number {
-  const commentLines = doc.splitTextToSize(comment, 168);
-  const boxHeight = Math.max(20, commentLines.length * 4.5 + 10);
+  // Set the drawing font FIRST so all width measurements match the draw font.
+  const fontSize = COMPACT_MODE ? 7 : 7.5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(fontSize);
 
-  doc.setFillColor(254, 252, 232);
-  doc.rect(14, startY, 182, boxHeight, 'F');
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0, 0, 0);
-  doc.text("Class Teacher's Comment:", 18, startY + 6);
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(7.5);
-  doc.text(commentLines, 18, startY + 12);
-  return startY + boxHeight + 4;
+  const commentLines = wrapCommentText(doc, (comment || 'No class teacher comment provided.').trim());
+  // Measured line step: font size + small gap for readability.
+  const lineHeight = COMPACT_MODE ? fontSize * 0.55 + 0.6 : fontSize * 0.62 + 0.8;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let remainingLines = [...commentLines];
+  let y = startY;
+  let isContinuation = false;
+
+  while (remainingLines.length > 0) {
+    const minBlockH = COMPACT_MODE ? 26 : 35;
+    y = ensureReportCardSpace(doc, y, minBlockH);
+    const availableHeight = pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - y;
+    const maxLines = Math.max(3, Math.floor((availableHeight - (COMPACT_MODE ? 12 : 15)) / lineHeight));
+    const chunk = remainingLines.splice(0, maxLines);
+    // Box height derives from the actual wrapped line count plus the header.
+    const boxHeight = Math.max(COMPACT_MODE ? 14 : 30, (COMPACT_MODE ? 7 : 14) + chunk.length * lineHeight + 2);
+
+    doc.setDrawColor(100, 120, 180);
+    doc.setLineWidth(0.5);
+    doc.setFillColor(232, 234, 246);
+    doc.rect(14, y, 182, boxHeight, 'FD');
+    doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 35, 126);
+    doc.text(isContinuation ? "Class Teacher's Comment (continued):" : "Class Teacher's Comment:", 18, y + (COMPACT_MODE ? 4 : 7));
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(fontSize);
+    doc.setTextColor(0, 0, 0);
+
+    // Draw each wrapped line explicitly at a measured vertical step so the
+    // last line can never be clipped by the box bottom.
+    for (let i = 0; i < chunk.length; i++) {
+      doc.text(chunk[i], 18, y + (COMPACT_MODE ? 7 : 14) + i * lineHeight);
+    }
+    y += boxHeight + (COMPACT_MODE ? 1 : 5);
+
+    if (remainingLines.length > 0) {
+      doc.addPage();
+      y = REPORT_CONTENT_TOP;
+      isContinuation = true;
+    }
+  }
+
+  return y;
 }

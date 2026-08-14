@@ -8,7 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Upload, Download, FileText, Loader2, CheckCircle, AlertCircle, ClipboardEdit, BookOpen, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand } from '@/lib/grading';
+import { calculateResultGrades, gradeDisplayLabel, getSchoolLevelBand, is844Curriculum, calculate844Grade } from '@/lib/grading';
 import {
   fetchTeacherAssignments,
   verifyTeacherSubjectAssignment,
@@ -23,6 +23,7 @@ interface ProcessedRow {
   out_of: number;
   percentage: number;
   cbcGrade: ReturnType<typeof calculateResultGrades>['cbeGrade'];
+  grade844?: ReturnType<typeof calculate844Grade>;
   position?: number;
 }
 
@@ -48,6 +49,7 @@ export default function TeacherResultsUpload() {
   const [exams, setExams] = useState<any[]>([]);
   const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
   const [assignmentsLoaded, setAssignmentsLoaded] = useState(false);
+  const [isDoS, setIsDoS] = useState(false);
   const [outOf, setOutOf] = useState(100);
 
   const [csvData, setCsvData] = useState<ProcessedRow[]>([]);
@@ -62,10 +64,19 @@ export default function TeacherResultsUpload() {
   useEffect(() => {
     const fetchData = async () => {
       const schoolId = user?.schoolId ?? '';
+      let dosUser = false;
+      if (user?.id && schoolId) {
+        const { data: teacherRecord } = await supabaseUntyped.from('teachers').select('id, school_id').eq('profile_id', user.id).maybeSingle();
+        if (teacherRecord?.school_id === schoolId) {
+          const { data: schoolRecord } = await supabaseUntyped.from('schools').select('dean_of_studies_id').eq('id', schoolId).maybeSingle();
+          dosUser = schoolRecord?.dean_of_studies_id === teacherRecord.id;
+        }
+      }
+      setIsDoS(dosUser);
       const [{ data: c }, { data: t }, { data: ex }, assignmentResult] = await Promise.all([
         supabase.from('classes').select('*').eq('school_id', schoolId).order('level'),
         supabase.from('terms').select('*').eq('school_id', schoolId).order('academic_year', { ascending: false }),
-        (supabase as any).from('school_exams').select('id, name, type, term_id').eq('school_id', schoolId).eq('is_active', true).order('created_at', { ascending: false }),
+        (supabase as any).from('school_exams').select('id, name, type, term_id, target_type, target_class_id, target_grade_level').eq('school_id', schoolId).eq('is_active', true).order('created_at', { ascending: false }),
         fetchTeacherAssignments(user?.id),
       ]);
 
@@ -74,7 +85,7 @@ export default function TeacherResultsUpload() {
       setAssignmentsLoaded(true);
 
       const assignedClassIds = [...new Set(assignments.map((a) => a.class_id).filter(Boolean))];
-      const filteredClasses = (c || []).filter((cls: any) => assignedClassIds.includes(cls.id));
+      const filteredClasses = dosUser ? (c || []) : (c || []).filter((cls: any) => assignedClassIds.includes(cls.id));
       setClasses(filteredClasses);
 
       const subjectMap = new Map<string, any>();
@@ -83,15 +94,20 @@ export default function TeacherResultsUpload() {
           subjectMap.set(a.subject_id, { id: a.subject_id, name: a.subject_name || 'Learning Area' });
         }
       });
-      setSubjects(Array.from(subjectMap.values()));
+      if (dosUser) {
+        const { data: allSubjects } = await supabaseUntyped.from('subjects').select('id, name').order('name');
+        setSubjects(allSubjects || []);
+      } else {
+        setSubjects(Array.from(subjectMap.values()));
+      }
       setExams(ex || []);
 
       const qClass = searchParams.get('classId') || '';
       const qSubject = searchParams.get('subjectId') || '';
-      if (qClass && assignedClassIds.includes(qClass)) {
+      if (qClass && (dosUser || assignedClassIds.includes(qClass))) {
         setSelectedClass(qClass);
       }
-      if (qSubject && assignments.some((a) => a.subject_id === qSubject && (!qClass || a.class_id === qClass))) {
+      if (qSubject && (dosUser || assignments.some((a) => a.subject_id === qSubject && (!qClass || a.class_id === qClass)))) {
         setSelectedSubject(qSubject);
       }
 
@@ -125,9 +141,15 @@ export default function TeacherResultsUpload() {
         .from('students')
         .select('id, first_name, last_name, admission_number')
         .eq('class_id', selectedClass)
-        .eq('is_active', true)
-        .order('first_name');
-      const studs = data || [];
+        .eq('is_active', true);
+      
+      // Issue: Natural sort for admission numbers (e.g., 2 before 10)
+      const studs = (data || []).sort((a, b) => {
+        const aNum = a.admission_number || '';
+        const bNum = b.admission_number || '';
+        return aNum.localeCompare(bNum, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
       setStudents(studs);
       setManualRows(studs.map((s: any) => ({
         student_id: s.id,
@@ -141,12 +163,12 @@ export default function TeacherResultsUpload() {
     fetchStudents();
     setSelectedSubject((prev) => {
       if (!prev) return '';
-      const stillValid = teacherAssignments.some(
+      const stillValid = isDoS || teacherAssignments.some(
         (a) => a.class_id === selectedClass && a.subject_id === prev
       );
       return stillValid ? prev : '';
     });
-  }, [selectedClass, teacherAssignments]);
+  }, [selectedClass, teacherAssignments, isDoS]);
 
   const currentClassData = classes.find((c: any) => c.id === selectedClass);
   const currentBand = getSchoolLevelBand(currentClassData);
@@ -154,12 +176,29 @@ export default function TeacherResultsUpload() {
 
   const assignedSubjectsForClass = useMemo(() => {
     if (!selectedClass) return [] as { id: string; name: string }[];
+    if (isDoS) return subjects;
     const map = new Map<string, string>();
     teacherAssignments
       .filter((a) => a.class_id === selectedClass && a.subject_id)
       .forEach((a) => map.set(a.subject_id, a.subject_name || 'Learning Area'));
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [selectedClass, teacherAssignments]);
+  }, [selectedClass, teacherAssignments, isDoS, subjects]);
+
+  const availableExams = useMemo(() => {
+    if (!selectedClass) return [];
+    const selectedGrade = currentClassData?.grade_level ?? currentClassData?.level;
+    return exams.filter((exam: any) => {
+      if (selectedTerm && exam.term_id && exam.term_id !== selectedTerm) return false;
+      const targetType = exam.target_type || 'school';
+      if (targetType === 'class') return exam.target_class_id === selectedClass;
+      if (targetType === 'grade') return String(exam.target_grade_level) === String(selectedGrade);
+      return true;
+    });
+  }, [exams, selectedClass, selectedTerm, currentClassData]);
+
+  useEffect(() => {
+    setSelectedExam((current) => current && !availableExams.some((exam: any) => exam.id === current) ? '' : current);
+  }, [availableExams]);
 
   const updateManualMark = (idx: number, value: string) => {
     // Issue 24: Prevent marks above max
@@ -211,6 +250,7 @@ export default function TeacherResultsUpload() {
         out_of: outOf,
         percentage,
         cbcGrade: grades.cbeGrade,
+        grade844: grades.grade844,
       };
     });
     const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
@@ -221,8 +261,9 @@ export default function TeacherResultsUpload() {
   };
 
   // ── Download helpers ─────────────────────────────────────────────────────────
-  const getMainGrade = (row: ProcessedRow) => row.cbcGrade?.subLevel || row.cbcGrade?.grade || '—';
-  const getMainPoints = (row: ProcessedRow) => row.cbcGrade?.points ?? 0;
+  const is844Class = is844Curriculum(currentClassData);
+  const getMainGrade = (row: ProcessedRow) => is844Class && row.grade844 ? row.grade844.grade : row.cbcGrade.subLevel;
+  const getMainPoints = (row: ProcessedRow) => is844Class && row.grade844 ? row.grade844.points : row.cbcGrade.points;
 
   const downloadManualPDF = () => {
     if (!manualPreview.length) return;
@@ -279,13 +320,14 @@ export default function TeacherResultsUpload() {
   const checkDuplicateSubject = async (): Promise<boolean> => {
     if (!selectedClass || !selectedSubject || !selectedTerm) return false;
     try {
-      const { data: existing } = await supabaseUntyped
+      let duplicateQuery = supabaseUntyped
         .from('results')
         .select('id')
         .eq('class_id', selectedClass)
         .eq('subject_id', selectedSubject)
-        .eq('term_id', selectedTerm)
-        .limit(1);
+        .eq('term_id', selectedTerm);
+      duplicateQuery = selectedExam ? duplicateQuery.eq('exam_id', selectedExam) : duplicateQuery.is('exam_id', null);
+      const { data: existing } = await duplicateQuery.limit(1);
       return (existing || []).length > 0;
     } catch {
       return false;
@@ -298,9 +340,15 @@ export default function TeacherResultsUpload() {
       toast.error('Please select class, learning area, and term');
       return;
     }
+    if (selectedExam && !availableExams.some((exam: any) => exam.id === selectedExam)) {
+      toast.error('The selected assessment is not available for this class.');
+      return;
+    }
 
-    // CRITICAL: backend verification — teacher must be assigned to this class + subject
-    const verification = await verifyTeacherSubjectAssignment(user?.id, selectedClass, selectedSubject);
+    // DoS users may enter marks for any class and learning area; ordinary teachers remain assignment-scoped.
+    const verification = isDoS
+      ? { allowed: true, teacherId: (await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).maybeSingle()).data?.id, reason: '' }
+      : await verifyTeacherSubjectAssignment(user?.id, selectedClass, selectedSubject);
     if (!verification.allowed || !verification.teacherId) {
       toast.error(verification.reason || 'You are not assigned to this learning area.');
       setError(verification.reason || 'Upload rejected: not assigned to this learning area.');
@@ -341,7 +389,7 @@ export default function TeacherResultsUpload() {
         cbc_grade: row.cbcGrade.grade,
         cbc_points: isPrimaryClass ? null : row.cbcGrade.points,
         cbc_descriptor: row.cbcGrade.descriptor,
-        grade_844: row.cbcGrade.grade,
+        grade_844: is844Class && row.grade844 ? row.grade844.grade : row.cbcGrade.grade,
         exam_id: selectedExam || null,
         position: row.position,
         status: asDraft ? 'draft' as const : 'submitted' as const,
@@ -457,6 +505,7 @@ export default function TeacherResultsUpload() {
             out_of: rowOutOf,
             percentage,
             cbcGrade: grades.cbeGrade,
+            grade844: grades.grade844,
           };
         });
         const sorted = [...processed].sort((a, b) => b.percentage - a.percentage);
@@ -524,10 +573,10 @@ export default function TeacherResultsUpload() {
     <div className="space-y-6">
       <div>
         <Link to="/teacher/results/assigned" className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mb-2">
-          <ArrowLeft className="w-4 h-4" /> Assigned learning areas
+          <ArrowLeft className="w-4 h-4" /> {isDoS ? 'Results upload hub' : 'Assigned learning areas'}
         </Link>
         <h1 className="text-2xl font-bold text-[#111111]">Upload Results</h1>
-        <p className="text-sm text-[#666666]">Enter marks only for learning areas assigned to you. Unassigned subjects are blocked.</p>
+        <p className="text-sm text-[#666666]">{isDoS ? 'As Dean of Studies, you can enter marks for every class and learning area in your school.' : 'Enter marks only for learning areas assigned to you. Unassigned subjects are blocked.'}</p>
       </div>
 
       {assignmentsLoaded && teacherAssignments.length === 0 && (
@@ -573,7 +622,7 @@ export default function TeacherResultsUpload() {
             {selectedClass && (
               <div className="flex items-center gap-1 mb-1">
                 <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">{bandLabel}</span>
-                <span className="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">Assigned only</span>
+                <span className="text-xs text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full">{isDoS ? 'All learning areas' : 'Assigned only'}</span>
               </div>
             )}
             <select
@@ -605,17 +654,24 @@ export default function TeacherResultsUpload() {
             {terms.map((t: any) => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
           </select>
 
-          {/* Assessment / Exam selector */}
-          <select
-            value={selectedExam}
-            onChange={e => setSelectedExam(e.target.value)}
-            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-          >
-            <option value="">Select Assessment (optional)</option>
-            {exams.filter(ex => !selectedTerm || ex.term_id === selectedTerm || !ex.term_id).map((ex: any) => (
-              <option key={ex.id} value={ex.id}>{ex.name} {ex.type ? `(${ex.type})` : ''}</option>
-            ))}
-          </select>
+          {/* Assessment / Exam selector — scoped to this class or grade */}
+          <div className="space-y-1">
+            <select
+              value={selectedExam}
+              onChange={e => setSelectedExam(e.target.value)}
+              disabled={!selectedClass}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white disabled:bg-gray-100"
+            >
+              <option value="">{!selectedClass ? 'Select class first' : 'Select Assessment (optional)'}</option>
+              {availableExams.map((exam: any) => {
+                const scope = exam.target_type === 'class' ? 'Class' : exam.target_type === 'grade' ? `Grade ${exam.target_grade_level}` : 'Whole School';
+                return <option key={exam.id} value={exam.id}>{exam.name} {exam.type ? `(${exam.type})` : ''} — {scope}</option>;
+              })}
+            </select>
+            {selectedClass && availableExams.length === 0 && (
+              <p className="text-xs text-amber-700">No assessment is currently targeted to this class or grade.</p>
+            )}
+          </div>
 
           {/* Out of */}
           <div>

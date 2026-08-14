@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { BarChart3, Users, Filter, Loader2, TrendingUp, Award, BookOpen, Search, ClipboardList } from 'lucide-react';
-import { getSchoolLevelBand } from '@/lib/grading';
+import { BarChart3, Users, Filter, Loader2, TrendingUp, Award, BookOpen, Search, ClipboardList, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { getSchoolLevelBand, is844Curriculum } from '@/lib/grading';
 
 interface StudentRanking {
   id: string;
@@ -99,27 +101,45 @@ export default function StreamDashboard() {
         .eq('is_active', true)
         .order('first_name');
 
-      if (!students || students.length === 0) {
-        setRankings([]);
+      // Class and term selectors are loaded from the authenticated school. Scope the
+      // result query by those foreign keys directly; this matches the Results page and
+      // avoids dropping valid rows when legacy results have a stale/null school_id.
+      let resultsQuery = supabaseUntyped
+        .from('results')
+        .select('student_id, subject_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_844, points_844, exam_id')
+        .eq('class_id', selectedClass)
+        .eq('term_id', selectedTerm);
+
+      if (selectedExam) resultsQuery = resultsQuery.eq('exam_id', selectedExam);
+
+      const { data: results, error: resultsError } = await resultsQuery;
+      if (resultsError) throw resultsError;
+
+      if (!results || results.length === 0) {
+        setRankings((students || []).map((s: any) => ({ id: s.id, first_name: s.first_name, last_name: s.last_name, admission_number: s.admission_number, avgPercentage: null, totalPoints: null, position: null, subjectResults: {} })));
         setSubjectSummaries([]);
         setLoadingData(false);
         return;
       }
 
-      // Fetch all results for this class and term (optionally filtered by assessment)
-      let resultsQuery = supabaseUntyped
-        .from('results')
-        .select('student_id, subject_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_, points_, exam_id, subjects(id, name)')
-        .eq('class_id', selectedClass)
-        .eq('term_id', selectedTerm);
-      
-      if (selectedExam) {
-        resultsQuery = resultsQuery.eq('exam_id', selectedExam);
-      }
-      
-      const { data: results } = await resultsQuery;
+      // Results can outlive a learner's current class assignment. Build the ranking
+      // roster from the selected result rows so historical class results remain visible.
+      const resultStudentIds = [...new Set(results.map((r: any) => r.student_id).filter(Boolean))];
+      const { data: resultStudents, error: resultStudentsError } = await supabaseUntyped
+        .from('students')
+        .select('id, first_name, last_name, admission_number')
+        .in('id', resultStudentIds);
+      if (resultStudentsError) throw resultStudentsError;
+      const rankingStudents = resultStudents && resultStudents.length > 0 ? resultStudents : (students || []);
 
-      const is = String(cls?.curriculum || '').toUpperCase() === '';
+      const subjectIds = [...new Set((results || []).map((r: any) => r.subject_id).filter(Boolean))];
+      const { data: subjectRows, error: subjectsError } = subjectIds.length > 0
+        ? await supabaseUntyped.from('subjects').select('id, name').in('id', subjectIds)
+        : { data: [], error: null };
+      if (subjectsError) throw subjectsError;
+      const subjectNames = new Map((subjectRows || []).map((s: any) => [s.id, s.name]));
+
+      const is844 = is844Curriculum(cls);
 
       // Build student performance map
       const studentMap: Record<string, { total: number; count: number; points: number; subjects: Record<string, any> }> = {};
@@ -132,9 +152,9 @@ export default function StreamDashboard() {
         const pct = r.percentage ?? (r.out_of > 0 ? Math.round((r.marks / r.out_of) * 100) : 0);
         studentMap[r.student_id].total += pct;
         studentMap[r.student_id].count += 1;
-        studentMap[r.student_id].points += r.cbc_points ?? r.points_ ?? 0;
-        const grade = is ? (r.grade_ || '') : (r.cbc_sublevel || r.cbc_grade || '');
-        const subName = r.subjects?.name || r.subject_id;
+        studentMap[r.student_id].points += r.cbc_points ?? r.points_844 ?? 0;
+        const grade = is844 ? (r.grade_844 || '') : (r.cbc_sublevel || r.cbc_grade || '');
+        const subName = subjectNames.get(r.subject_id) || r.subject_id;
         studentMap[r.student_id].subjects[subName] = { pct, grade };
 
         // Subject summary
@@ -144,7 +164,7 @@ export default function StreamDashboard() {
       });
 
       // Build rankings
-      const rankList: StudentRanking[] = students.map((s: any) => {
+      const rankList: StudentRanking[] = rankingStudents.map((s: any) => {
         const data = studentMap[s.id];
         return {
           id: s.id,
@@ -202,6 +222,29 @@ export default function StreamDashboard() {
     `${s.first_name} ${s.last_name}`.toLowerCase().includes(search.toLowerCase()) ||
     s.admission_number?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const downloadStreamRanking = () => {
+    if (rankings.length === 0) return;
+    const subjects = subjectSummaries.map(s => s.name);
+    const rows = rankings.map(s => [
+      s.position ?? '', `${s.first_name} ${s.last_name}`, s.admission_number || '',
+      s.avgPercentage ?? '', ...subjects.map(subject => s.subjectResults[subject]?.pct ?? '')
+    ]);
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    doc.setFontSize(14);
+    doc.text(`Stream Ranking — ${classInfo?.name || 'Class'}`, 14, 15);
+    doc.setFontSize(9);
+    doc.text(`Term: ${terms.find(t => t.id === selectedTerm)?.name || selectedTerm}`, 14, 21);
+    autoTable(doc, {
+      startY: 26,
+      head: [['Position', 'Student', 'Admission Number', 'Average %', ...subjects]],
+      body: rows.map(row => row.map(value => String(value ?? ''))),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235] },
+      theme: 'grid',
+    });
+    doc.save(`stream_ranking_${classInfo?.name || 'class'}_${selectedTerm || 'term'}.pdf`.replace(/\\s+/g, '_'));
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
 
@@ -299,8 +342,11 @@ export default function StreamDashboard() {
       {/* Rankings Tab */}
       {activeTab === 'rankings' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3">
             <h3 className="font-bold text-gray-900">Student Rankings — {classInfo?.name}</h3>
+            <button onClick={downloadStreamRanking} disabled={rankings.length === 0} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50">
+              <Download className="w-4 h-4" /> Download Ranking
+            </button>
           </div>
           {loadingData ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
@@ -316,7 +362,7 @@ export default function StreamDashboard() {
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Adm No</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg %</th>
                     <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subjects</th>
-                    {subjectSummaries.slice(0, 4).map(sub => (
+                    {subjectSummaries.map(sub => (
                       <th key={sub.id} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{sub.name.substring(0, 6)}</th>
                     ))}
                   </tr>
@@ -337,12 +383,12 @@ export default function StreamDashboard() {
                         {s.avgPercentage !== null ? `${s.avgPercentage}%` : '—'}
                       </td>
                       <td className="py-3 px-6 text-gray-500">{Object.keys(s.subjectResults).length}</td>
-                      {subjectSummaries.slice(0, 4).map(sub => {
+                      {subjectSummaries.map(sub => {
                         const sr = s.subjectResults[sub.name];
                         return (
                           <td key={sub.id} className="py-3 px-6">
                             {sr ? (
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(sr.grade)}`}>{sr.grade || `${sr.pct}%`}</span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(sr.grade)}`}>{sr.pct}%{sr.grade ? ` · ${sr.grade}` : ''}</span>
                             ) : <span className="text-gray-300">—</span>}
                           </td>
                         );

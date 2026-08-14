@@ -1,7 +1,12 @@
+import { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase/client';
+import PWAInstallButton from '@/components/PWAInstallButton';
+import PhotoZoomModal from '@/components/PhotoZoomModal';
 import {
-  useState } from 'react';import { Link,
-  useLocation,
-  useNavigate } from 'react-router-dom';import { useAuth } from '@/contexts/AuthContext';import PWAInstallButton from '@/components/PWAInstallButton';import PhotoZoomModal from '@/components/PhotoZoomModal';import {  LayoutDashboard,
+  GraduationCap,
+  LayoutDashboard,
   Users,
   BookOpen,
   Library,
@@ -11,32 +16,32 @@ import {
   LogOut,
   Menu,
   X,
+  Eye,
   School,
   UserCheck,
   CreditCard,
   BarChart3,
   MessageSquare,
   Bot,
+  Send,
   Home,
   Upload,
   ClipboardList,
   Award,
+  Clock,
+  Download,
+  Palette,
+  Sparkles,
+  Share2,
+  DollarSign,
+  Building2,
   Calendar,
   Zap,
   Brain,
   User,
-  Palette,
-  Share2,
-  DollarSign,
-  Building2,
-  TrendingUp,
-  Target,
-  Map,
-  ClipboardCheck,
-  GraduationCap,
+  RefreshCw,
   FileSpreadsheet,
   Shield,
-  Sparkles
 } from 'lucide-react';
 
 interface NavItem {
@@ -51,7 +56,7 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/master-admin' },
     { label: 'Resellers', icon: <Building2 className="w-5 h-5" />, path: '/master-admin/resellers' },
     { label: 'All Schools', icon: <School className="w-5 h-5" />, path: '/master-admin/schools' },
-    { label: 'All Students', icon: <Users className="w-5 h-5" />, path: '/master-admin/students' },
+    { label: 'All Learners', icon: <Users className="w-5 h-5" />, path: '/master-admin/students' },
     { label: 'All Payments', icon: <DollarSign className="w-5 h-5" />, path: '/master-admin/payments' },
     { label: 'Platform Settings', icon: <Settings className="w-5 h-5" />, path: '/master-admin/settings' },
   ],
@@ -60,8 +65,8 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'My Schools', icon: <School className="w-5 h-5" />, path: '/reseller-admin/schools' },
     { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/reseller-admin/students' },
     { label: 'School Admins', icon: <UserCheck className="w-5 h-5" />, path: '/reseller-admin/school-admins' },
-    { label: 'My Payments', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/payments' },
-    { label: 'Pricing', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/pricing' },
+    { label: 'Payments', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/payments' },
+    { label: 'Pricing', icon: <CreditCard className="w-5 h-5" />, path: '/reseller-admin/pricing' },
     { label: 'Access Control', icon: <Shield className="w-5 h-5" />, path: '/reseller-admin/access-control' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/reseller-admin/change-password' },
   ],
@@ -73,70 +78,68 @@ const navConfig: Record<string, NavItem[]> = {
   ],
   'school-admin': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin' },
-    { label: 'View Learners', icon: <Users className="w-5 h-5" />, path: '/school-admin/view-learners' },
-    { label: 'Learner Management', icon: <Users className="w-5 h-5" />, path: '/school-admin/students' },
+    { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/school-admin/students' },
+    { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/school-admin/attendance' },
     { label: 'Graduated Students', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/graduated-students' },
     { label: 'Teachers', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teachers' },
     { label: 'Grades', icon: <School className="w-5 h-5" />, path: '/school-admin/classes' },
     { label: 'Learning Areas', icon: <Library className="w-5 h-5" />, path: '/school-admin/subjects' },
+    { label: 'Communicate', icon: <MessageSquare className="w-5 h-5" />, path: '/school-admin/communicate' },
+    { label: 'SMS Settings', icon: <Settings className="w-5 h-5" />, path: '/school-admin/sms-settings' },
     { label: 'Teacher Assignments', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teacher-assignments' },
     { label: 'Timetable Setup', icon: <Settings className="w-5 h-5" />, path: '/school-admin/timetable/setup' },
     { label: 'Generate Timetable', icon: <Zap className="w-5 h-5" />, path: '/school-admin/timetable/generate' },
     { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/timetable/view' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/school-admin/fees' },
     { label: 'Results', icon: <FileText className="w-5 h-5" />, path: '/school-admin/results' },
-    { label: 'Exams', icon: <Award className="w-5 h-5" />, path: '/school-admin/exams' },
-    { label: 'Assessments', icon: <FileText className="w-5 h-5" />, path: '/school-admin/assessments' },
+    { label: 'Assessments', icon: <BookOpen className="w-5 h-5" />, path: '/school-admin/assessments' },
     { label: 'Marks Overview', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/marks-overview' },
-    { label: 'Promote Class', icon: <TrendingUp className="w-5 h-5" />, path: '/school-admin/promote-class' },
     { label: 'Assign Roles', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/assign-roles' },
-    { label: 'Dean of Studies', icon: <BarChart3 className="w-5 h-5" />, path: '/dean-of-studies' },
     { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/stream-dashboard' },
+    { label: 'Promote Grade', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/promote-class' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
     { label: 'Branding & Notifications', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
-    { label: 'Communicate & SMS', icon: <MessageSquare className="w-5 h-5" />, path: '/school-admin/bulk-sms' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/school-admin/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/school-admin/change-password' },
   ],
   'teacher': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/teacher' },
-    { label: 'Class Dashboard', icon: <Users className="w-5 h-5" />, path: '/teacher/class-dashboard' },
-    { label: 'Dean of Studies', icon: <BarChart3 className="w-5 h-5" />, path: '/dean-of-studies' },
-    { label: 'Learning Area Dashboard', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/subject-dashboard' },
+    { label: 'Class Teacher Workspace', icon: <Users className="w-5 h-5" />, path: '/teacher/class-dashboard' },
+    { label: 'DoS Dashboard', icon: <GraduationCap className="w-5 h-5" />, path: '/dean-of-studies' },
+    { label: 'DoS Results', icon: <FileText className="w-5 h-5" />, path: '/dean-of-studies/results' },
+    { label: 'Class Results', icon: <FileText className="w-5 h-5" />, path: '/teacher/results' },
+    { label: 'Subject Teacher Workspace', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/subject-dashboard' },
     { label: 'My Learning Areas', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/my-subjects' },
-    { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/timetable' },
-    { label: 'Upload Results', icon: <Upload className="w-5 h-5" />, path: '/teacher/results/upload' },
-    { label: 'View Marks', icon: <FileText className="w-5 h-5" />, path: '/teacher/view-marks' },
-    { label: 'Assessment Progress', icon: <TrendingUp className="w-5 h-5" />, path: '/teacher/assessment-progress' },
-    { label: 'CATs & Exams', icon: <Award className="w-5 h-5" />, path: '/teacher/cats' },
+    { label: 'My Personal Timetable', icon: <Calendar className="w-5 h-5" />, path: '/teacher/timetable' },
+    { label: 'Results Upload', icon: <Upload className="w-5 h-5" />, path: '/teacher/results/assigned' },
+    { label: 'View My Marks', icon: <Eye className="w-5 h-5" />, path: '/teacher/view-marks' },
+    // Marklist removed per requirements — Class List kept
+    { label: 'Class List', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/teacher/class-list' },
+    { label: 'Assessment Progress', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/assessment-progress' },
     { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/teacher/attendance' },
-    { label: 'Homework', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/homework' },
+    { label: 'Homework & Papers', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/homework' },
     { label: 'Upload Papers', icon: <Upload className="w-5 h-5" />, path: '/teacher/upload-papers' },
-    { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: '/teacher/analytics' },
-    { label: 'Marklist', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/teacher/marklist' },
     { label: 'My Learners', icon: <Users className="w-5 h-5" />, path: '/teacher/students' },
-    { label: 'Class List', icon: <Users className="w-5 h-5" />, path: '/teacher/class-list' },
-    { label: 'Lesson Plans', icon: <FileText className="w-5 h-5" />, path: '/teacher/lesson-plan' },
+    { label: 'Lesson Plans', icon: <Sparkles className="w-5 h-5" />, path: '/teacher/lesson-plan' },
     { label: 'Curriculum Navigator', icon: <Brain className="w-5 h-5" />, path: '/teacher/curriculum' },
+    { label: 'Exam Generator', icon: <FileText className="w-5 h-5" />, path: '/teacher/exam-generator' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/teacher/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/teacher/change-password' },
   ],
   'student': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/student' },
-    { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/timetable' },
     { label: 'My Results', icon: <Award className="w-5 h-5" />, path: '/student/results' },
-    { label: 'Papers', icon: <FileText className="w-5 h-5" />, path: '/student/papers' },
-    { label: 'My Portfolio', icon: <FileText className="w-5 h-5" />, path: '/student/portfolio' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/student/fees' },
     { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/student/attendance' },
     { label: 'Homework', icon: <BookOpen className="w-5 h-5" />, path: '/student/homework' },
+    { label: 'Papers', icon: <FileText className="w-5 h-5" />, path: '/student/papers' },
     { label: 'Report Card', icon: <FileText className="w-5 h-5" />, path: '/student/report-card' },
+    { label: 'My Portfolio', icon: <Award className="w-5 h-5" />, path: '/student/portfolio' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/student/change-password' },
   ],
   'parent': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/parent' },
     { label: 'My Children', icon: <Users className="w-5 h-5" />, path: '/parent/children' },
-    { label: 'Timetable', icon: <Calendar className="w-5 h-5" />, path: '/parent/timetable' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/parent/fees' },
     { label: 'Fee Transcript', icon: <FileText className="w-5 h-5" />, path: '/parent/fee-transcript' },
     { label: 'Conferences', icon: <MessageSquare className="w-5 h-5" />, path: '/parent/conferences' },
@@ -147,6 +150,16 @@ const navConfig: Record<string, NavItem[]> = {
   ],
 };
 
+const ROLE_DASHBOARDS: Record<string, string> = {
+  'school_admin': '/school-admin',
+  'teacher': '/teacher',
+  'student': '/student',
+  'parent': '/parent',
+  'super_admin': '/super-admin',
+  'reseller_super_admin': '/reseller-admin',
+  'master_super_admin': '/master-admin',
+};
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [zoomAvatar, setZoomAvatar] = useState(false);
@@ -154,8 +167,84 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [additionalRoles, setAdditionalRoles] = useState<string[]>([]);
+  const [isClassTeacher, setIsClassTeacher] = useState(false);
+  const [hasSubjectAssignments, setHasSubjectAssignments] = useState(false);
+  const [isDoS, setIsDoS] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const checkRoles = async () => {
+      try {
+        const { data: profileData } = await (supabase as any)
+          .from('profiles')
+          .select('secondary_roles')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (profileData?.secondary_roles && Array.isArray(profileData.secondary_roles)) {
+          setAdditionalRoles(profileData.secondary_roles);
+        }
+      } catch (err) { /* secondary_roles column may not exist yet */ }
+
+      if (user.role === 'teacher') {
+        const { data: teacherData } = await (supabase as any)
+          .from('teachers')
+          .select('is_class_teacher, id, school_id')
+          .eq('profile_id', user.id)
+          .maybeSingle();
+        setIsClassTeacher(Boolean(teacherData?.is_class_teacher));
+        if (teacherData?.id) {
+          const { count: assignmentCount } = await (supabase as any)
+            .from('teacher_subject_assignments')
+            .select('id', { count: 'exact', head: true })
+            .eq('teacher_id', teacherData.id)
+            .eq('is_active', true);
+          setHasSubjectAssignments((assignmentCount || 0) > 0);
+        }
+        if (teacherData?.school_id) {
+          const { data: schoolInfo } = await (supabase as any)
+            .from('schools')
+            .select('dean_of_studies_id')
+            .eq('id', teacherData.school_id)
+            .maybeSingle();
+          if (schoolInfo?.dean_of_studies_id === teacherData.id) setIsDoS(true);
+        }
+      }
+    };
+    checkRoles();
+  }, [user?.id, user?.role]);
+
   const roleKey = user?.role?.replace(/_/g, '-') || '';
-  const navItems = navConfig[roleKey] || [];
+  let navItems = [...(navConfig[roleKey] || [])];
+
+  // Add Assessments nav link for DoS users
+  if (user?.role === 'teacher' && isDoS) {
+    // Insert the Assessments link after Assessment Progress
+    const assessmentProgressIndex = navItems.findIndex(item => item.path === '/teacher/assessment-progress');
+    const assessmentsLink: NavItem = { 
+      label: 'Manage Assessments', 
+      icon: <BookOpen className="w-5 h-5" />, 
+      path: '/teacher/assessments' 
+    };
+    if (assessmentProgressIndex >= 0) {
+      navItems.splice(assessmentProgressIndex + 1, 0, assessmentsLink);
+    } else {
+      navItems.push(assessmentsLink);
+    }
+  }
+
+  if (user?.role === 'teacher') {
+    navItems = navItems.filter(item => {
+      if (item.path === '/teacher/class-dashboard' && !isClassTeacher) return false;
+      if (item.path === '/teacher/subject-dashboard' && !hasSubjectAssignments) return false;
+      if ((item.path === '/dean-of-studies' || item.path === '/dean-of-studies/results') && !isDoS) return false;
+      if (item.path === '/teacher/results' && !isClassTeacher) return false;
+      return true;
+    });
+  }
+
+  const canSwitchToAdmin = user?.role === 'teacher' && additionalRoles.includes('school_admin');
+  const canSwitchToTeacher = user?.role === 'school_admin' && additionalRoles.includes('teacher');
 
   const handleLogout = async () => {
     await signOut();
@@ -164,13 +253,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleWhatsAppShare = () => {
     const url = encodeURIComponent(window.location.href);
-    const text = encodeURIComponent(`Check out Kimatu Analytics - School Management System: ${window.location.origin}`);
+    const text = encodeURIComponent(`Check out Kimatu Analytics - Intelligent School Management System: ${window.location.origin}`);
     window.open(`https://wa.me/?text=${text}%20${url}`, '_blank');
   };
 
   return (
     <div className="min-h-screen bg-[#F5F3EF]">
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
@@ -178,19 +266,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         />
       )}
 
-      {/* Sidebar */}
       <aside className={`fixed top-0 left-0 z-50 h-full w-64 bg-[#1A1A1A] text-white transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between p-4 border-b border-gray-800">
           <Link to="/" className="flex items-center gap-2">
             {schoolData?.logo_url ? (
               <img src={schoolData.logo_url} alt={schoolData.name} className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
             ) : (
-              <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg" />
+              <img src="/logo.png" alt="Kimatu Analytics" className="w-8 h-8 rounded-lg object-contain" />
             )}
-            <div className="flex flex-col">
-              <span className="text-sm font-bold truncate max-w-[140px]">{schoolData?.name || 'Kimatu'}</span>
-              {!schoolData?.name && <span className="text-[8px] -mt-0.5" style={{ color: '#D4AF37' }}>ANALYTICS</span>}
-            </div>
+            <span className="text-lg font-bold truncate max-w-[140px]">{schoolData?.name || 'Kimatu Analytics'}</span>
           </Link>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
             <X className="w-5 h-5" />
@@ -200,7 +284,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 flex flex-col h-[calc(100%-65px)]">
           <div className="flex items-center gap-3 mb-6 px-2 py-3 bg-gray-800/50 rounded-xl">
             <div
-              className="w-16 h-16 rounded-full bg-[#1A365D] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+              className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
               onClick={() => user?.avatarUrl && setZoomAvatar(true)}
               title={user?.avatarUrl ? 'Click to zoom' : undefined}
             >
@@ -208,7 +292,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
             <div>
               <p className="text-sm font-medium">{user?.firstName} {user?.lastName}</p>
-              <p className="text-xs text-gray-400 capitalize">{user?.role?.replace('_', ' ')}</p>
+              <p className="text-xs text-gray-400 capitalize">{user?.role?.replace(/_/g, ' ')}</p>
+              {isClassTeacher && (
+                <p className="text-xs text-emerald-400 mt-0.5 font-medium">Class Teacher</p>
+              )}
+              {hasSubjectAssignments && (
+                <p className="text-xs text-sky-400 mt-0.5 font-medium">Subject Teacher</p>
+              )}
+              {isDoS && (
+                <p className="text-xs text-purple-400 mt-0.5 font-medium">Dean of Studies</p>
+              )}
+              {additionalRoles.length > 0 && (
+                <p className="text-xs text-blue-400 mt-0.5">+{additionalRoles.map(r => r.replace(/_/g, ' ')).join(', ')}</p>
+              )}
             </div>
           </div>
 
@@ -220,7 +316,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${
                   location.pathname === item.path 
-                    ? 'text-white bg-[#1A365D]' 
+                    ? 'bg-[#2563EB] text-white' 
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`}
               >
@@ -231,6 +327,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </nav>
 
           <div className="mt-4 pt-4 border-t border-gray-800 space-y-2">
+            {canSwitchToAdmin && (
+              <Link
+                to="/school-admin"
+                onClick={() => setSidebarOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-yellow-400 hover:bg-yellow-600 hover:text-white transition-all w-full font-medium"
+              >
+                <RefreshCw className="w-5 h-5" />
+                Switch to Admin View
+              </Link>
+            )}
+            {canSwitchToTeacher && (
+              <Link
+                to="/teacher"
+                onClick={() => setSidebarOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-yellow-400 hover:bg-yellow-600 hover:text-white transition-all w-full font-medium"
+              >
+                <RefreshCw className="w-5 h-5" />
+                Switch to Teacher View
+              </Link>
+            )}
             <button
               onClick={handleWhatsAppShare}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-green-400 hover:bg-green-600 hover:text-white transition-all w-full font-medium"
@@ -249,9 +365,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="lg:ml-64 min-h-screen">
-        {/* Top bar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-[#E5E5E5] px-4 md:px-6 py-3">
           <div className="flex items-center justify-between">
             <button 
@@ -264,12 +378,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {schoolData?.logo_url ? (
                 <img src={schoolData.logo_url} alt={schoolData.name} className="w-7 h-7 rounded-lg object-contain bg-gray-100 p-0.5" />
               ) : (
-                <img src="/kimatu-icon.png" alt="Kimatu Analytics" className="w-7 h-7 rounded-lg" />
+                <img src="/logo.png" alt="Kimatu Analytics" className="w-7 h-7 rounded-lg object-contain" />
               )}
-              <div className="flex flex-col">
-                <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'Kimatu'}</span>
-                {!schoolData?.name && <span className="text-[8px] -mt-0.5" style={{ color: '#D4AF37' }}>ANALYTICS</span>}
-              </div>
+              <span className="text-base font-bold text-[#111111]">{schoolData?.name || 'Kimatu Analytics'}</span>
             </div>
             <div className="flex items-center gap-3">
               <PWAInstallButton variant="icon" />
@@ -303,19 +414,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <img
                   src={user.avatarUrl}
                   alt={user.firstName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-zoom-in hover:border-[#1A365D] hover:shadow-md transition-all"
+                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-zoom-in hover:border-blue-400 hover:shadow-md transition-all"
                   onClick={() => setZoomAvatar(true)}
                   title="Click to zoom"
                 />
               ) : (
-                <div className="w-16 h-16 rounded-full bg-[#1A365D] flex items-center justify-center text-white text-sm font-bold">
+                <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-sm font-bold">
                   {user?.firstName?.[0]}{user?.lastName?.[0]}
                 </div>
               )}
             </div>
           </div>
         </header>
-
         <main className="p-4 md:p-6">
           {children}
         </main>

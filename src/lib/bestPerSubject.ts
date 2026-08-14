@@ -66,9 +66,9 @@ export function computeBestPerSubject(
         ? `${topRow.students.first_name || ''} ${topRow.students.last_name || ''}`.trim()
         : topRow.student_name || 'Unknown';
 
-    const g = calculateCompetencyGrade(topPct, isPrimary ? 'primary' : (band as any) === '844' ? 'junior' : band);
-    const gradeLabel = g?.subLevel || g?.grade || '—';
-    const points = isPrimary ? null : (g?.points ?? null);
+    const g = calculateCompetencyGrade(topPct, isPrimary ? 'primary' : band);
+    const gradeLabel = g.subLevel;
+    const points = isPrimary ? null : g.points;
 
     best.push({
       subjectName,

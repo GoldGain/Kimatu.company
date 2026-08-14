@@ -13,7 +13,7 @@ interface PaystackButtonProps {
   feePerLearner?: number;
 }
 
-const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 'pk_live_f711df1d32dec5d0c2a5a393a76904b1ebfa89bf';
+const PAYSTACK_PUBLIC_KEY = 'pk_live_c15b4c6c95f06f7408326b14395eb727147a8935';
 
 export const PaystackButton: React.FC<PaystackButtonProps> = ({
   learnersCount,
@@ -147,13 +147,22 @@ export const PaystackButton: React.FC<PaystackButtonProps> = ({
             },
           ],
         },
-        callback: async (response: any) => {
-          handlePaymentSuccess(learnersCount, response.reference);
-          await recordSubscriptionPayment(response.reference);
-          toast.success(
-            `Payment successful! KES ${amountKsh.toLocaleString()} paid for ${learnersCount} learners.`,
-            { duration: 5000 }
-          );
+        // NOTE: Paystack V1 inline.js validates callbacks with
+        // `Object.prototype.toString.call(t) === "[object Function]"`, which
+        // REJECTS async arrow functions ("[object AsyncFunction]") and throws
+        // "Attribute callback must be a valid function". Wrap async logic in
+        // a plain synchronous function so the payment flow works.
+        callback: (response: any) => {
+          const ref = response?.reference || reference;
+          handlePaymentSuccess(learnersCount, ref);
+          recordSubscriptionPayment(ref).then(() => {
+            toast.success(
+              `Payment successful! KES ${amountKsh.toLocaleString()} paid for ${learnersCount} learners.`,
+              { duration: 5000 }
+            );
+          }).catch(() => {
+            toast.warning('Payment successful, but the record could not be saved. Contact support if the subscription does not activate.');
+          });
           setProcessing(false);
           onSuccess();
         },
