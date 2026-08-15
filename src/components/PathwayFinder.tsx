@@ -517,7 +517,7 @@ export default function PathwayFinder() {
       const reference = `pathway_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       // @ts-ignore Paystack global
       const handler = window.PaystackPop?.setup({
-        key: 'pk_live_c15b4c6c95f06f7408326b14395eb727147a8935',
+        key: 'pk_live_f711df1d32dec5d0c2a5a393a76904b1ebfa89bf',
         email: 'pathway@kimatu.company',
         amount: 50 * 100, // KES 50
         currency: 'KES',
