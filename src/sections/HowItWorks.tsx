@@ -52,7 +52,7 @@ export default function HowItWorks() {
   }, []);
 
   return (
-    <section className="py-16 md:py-20 bg-[#F5F3EF]" ref={sectionRef}>
+    <section id="how-it-works" className="py-16 md:py-20 bg-[#F5F3EF]" ref={sectionRef}>
       <div className="max-w-7xl mx-auto px-4 md:px-8">
         <div className="text-center mb-12">
           <span className="text-sm font-medium text-[#2563EB] mb-2 block">HOW IT WORKS</span>

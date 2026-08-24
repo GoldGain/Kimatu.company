@@ -266,29 +266,51 @@ export default function SchoolRegister() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
-        <div className="mb-6 flex items-center justify-between gap-3">
-          <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-700">
-            <ArrowLeft className="w-4 h-4" /> Back to home
-          </Link>
-          <Link to="/auth/login" className="text-sm font-medium text-blue-700 hover:underline">
-            Already registered? Sign in
-          </Link>
-        </div>
-
-        <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-8 text-white">
-            <div className="inline-flex items-center gap-2 bg-white/15 rounded-full px-3 py-1 text-xs font-medium mb-3">
-              <Sparkles className="w-3.5 h-3.5" /> No subscription required at registration
+    <div className="min-h-screen bg-[#F6F3EA] text-[#10233F]">
+      <div className="mx-auto grid min-h-screen max-w-[1500px] gap-5 px-3 py-3 sm:px-5 sm:py-5 lg:grid-cols-[0.72fr_1.28fr] lg:gap-6">
+        <aside className="relative hidden min-h-[720px] overflow-hidden rounded-[2rem] bg-[#10233F] lg:block">
+          <img src="/images/hero3.jpg" alt="Kenyan primary pupils learning with tablets in class" className="absolute inset-0 h-full w-full object-cover opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#071426] via-[#10233F]/55 to-[#10233F]/10" />
+          <div className="relative flex h-full flex-col justify-between p-8 xl:p-10">
+            <Link to="/" className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-bold text-white backdrop-blur-md transition hover:bg-white/15">
+              <ArrowLeft className="h-4 w-4" /> Return to Kimatu
+            </Link>
+            <div>
+              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#D8F23F]/30 bg-[#D8F23F]/10 px-3 py-2 text-[0.68rem] font-black uppercase tracking-[0.18em] text-[#E7F995]">
+                <Sparkles className="h-3.5 w-3.5" /> A clearer start
+              </div>
+              <h2 className="max-w-md text-4xl font-black leading-[1.02] tracking-[-0.04em] text-white xl:text-5xl">Give your school one calm place to work.</h2>
+              <p className="mt-5 max-w-md text-sm leading-7 text-[#C5D0DE]">Set up the foundation for better records, smoother communication, and confident school decisions.</p>
+              <div className="mt-8 grid max-w-md grid-cols-2 gap-3">
+                {['Learners in view', 'CBE ready', 'Secure records', 'Built for phones'].map((label) => (
+                  <div key={label} className="rounded-2xl border border-white/15 bg-white/10 px-3 py-3 text-xs font-bold text-white backdrop-blur-sm">{label}</div>
+                ))}
+              </div>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Register Your School</h1>
-            <p className="text-blue-100 mt-2 text-sm sm:text-base max-w-xl">
-              Create your Kimatu workspace, verify school contacts, and get school admin login credentials in minutes.
-            </p>
           </div>
+        </aside>
 
-          <div className="px-6 pt-6">
+        <main className="flex items-start justify-center py-2 sm:py-5 lg:items-center">
+          <div className="w-full max-w-3xl">
+            <div className="mb-5 flex items-center justify-between gap-3 px-1">
+              <Link to="/" className="inline-flex items-center gap-2 text-sm font-bold text-[#60708A] transition hover:text-[#10233F] lg:hidden">
+                <ArrowLeft className="h-4 w-4" /> Back to home
+              </Link>
+              <Link to="/auth/login" className="ml-auto text-sm font-bold text-[#60708A] transition hover:text-[#10233F]">
+                Already registered? <span className="text-[#587000]">Sign in</span>
+              </Link>
+            </div>
+
+            <div className="overflow-hidden rounded-[2rem] border border-[#DDE3D5] bg-white shadow-[0_24px_80px_rgba(16,35,63,.12)]">
+              <div className="bg-[#10233F] px-6 py-8 text-white sm:px-8 sm:py-9">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#D8F23F]/30 bg-[#D8F23F]/10 px-3 py-1.5 text-[0.68rem] font-black uppercase tracking-[0.15em] text-[#E7F995]">
+                  <Sparkles className="h-3.5 w-3.5" /> No payment required to begin
+                </div>
+                <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">Set up your school workspace.</h1>
+                <p className="mt-3 max-w-xl text-sm leading-7 text-[#C5D0DE] sm:text-base">Tell us about your school, verify the right contact, and create the administrator account that will bring everything together.</p>
+              </div>
+
+              <div className="px-5 pt-6 sm:px-8">
             <div className="flex items-center justify-between gap-2 mb-8">
               {[
                 { n: 1, t: 'School' },
@@ -526,7 +548,7 @@ export default function SchoolRegister() {
                   ))}
                 </div>
                 <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-900">
-                  No subscription payment is required now. Your school starts on a trial workspace and appears in the reseller portal after creation.
+                  No subscription payment is required now. Your workspace will be created and appear in the reseller portal after setup.
                 </div>
                 <div className="flex justify-between pt-2">
                   <button type="button" className="btn-ghost" onClick={() => setStep(3)}>Back</button>
@@ -569,10 +591,12 @@ export default function SchoolRegister() {
             )}
           </div>
         </div>
+      </div>
 
-        <p className="text-center text-xs text-slate-500 mt-6">
+        <p className="text-center text-xs text-[#60708A] mt-6">
           Teachers and learners are onboarded by the school admin after login — not during registration.
         </p>
+      </main>
       </div>
 
       <style>{`
