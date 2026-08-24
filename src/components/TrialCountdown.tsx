@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTrial } from '@/contexts/TrialContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase/client';
-import { Clock, AlertTriangle, CheckCircle, CreditCard, Info, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, CreditCard, Info, Loader2 } from 'lucide-react';
 import { PaystackButton } from './Payment/PaystackButton';
 
 export const TrialCountdown: React.FC = () => {
@@ -47,7 +47,7 @@ export const TrialCountdown: React.FC = () => {
     );
   }
 
-  const { isPaid, isExpired, daysRemaining, progressPercent } = trialStatus;
+  const { isPaid, isExpired } = trialStatus;
   const annualFee = annualPricePerLearner > 0 ? annualPricePerLearner : 50;
   const selectedFee = billingPeriod === 'annual' ? annualFee : pricePerLearner;
   const annualBaseline = pricePerLearner * 3;
@@ -180,50 +180,37 @@ export const TrialCountdown: React.FC = () => {
     );
   }
 
-  // Active trial — show countdown
-  const progressColor = daysRemaining <= 7 ? 'bg-red-500' : daysRemaining <= 30 ? 'bg-orange-500' : 'bg-blue-500';
-  const bgColor = daysRemaining <= 7 ? 'bg-red-50 border-red-200' : daysRemaining <= 30 ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200';
-  const textColor = daysRemaining <= 7 ? 'text-red-800' : daysRemaining <= 30 ? 'text-orange-800' : 'text-blue-800';
-  const subTextColor = daysRemaining <= 7 ? 'text-red-600' : daysRemaining <= 30 ? 'text-orange-600' : 'text-blue-600';
-
+  // Active billing period — no trial countdown is shown.
   return (
-    <div className={`${bgColor} border rounded-2xl px-4 py-3`}>
+    <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
       <div className="flex items-center gap-3">
-        <Clock className={`w-5 h-5 ${subTextColor} flex-shrink-0`} />
+        <CreditCard className="w-5 h-5 text-blue-600 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <p className={`text-sm font-semibold ${textColor}`}>
-              Free Trial: {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} remaining
-            </p>
+            <div>
+              <p className="text-sm font-semibold text-blue-800">Subscription &amp; billing</p>
+              <p className="text-xs text-blue-600">Manage your school subscription and payment plan.</p>
+            </div>
             <button
               onClick={() => setExpanded(!expanded)}
-              className={`text-xs ${subTextColor} hover:underline ml-2 flex-shrink-0`}
+              className="text-xs text-blue-600 hover:underline ml-2 flex-shrink-0"
             >
-              {expanded ? 'Hide' : 'Details'}
+              {expanded ? 'Hide' : 'View plans'}
             </button>
-          </div>
-          {/* Progress bar */}
-          <div className="mt-2 h-2 bg-white/60 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${progressColor} rounded-full transition-all duration-500`}
-              style={{ width: `${progressPercent}%` }}
-            />
           </div>
           {expanded && (
             <div className="mt-3 pt-3 border-t border-current border-opacity-20">
               {!showPayment ? (
                 <div className="flex items-start gap-2">
                   <Info className="w-4 h-4 mt-0.5 flex-shrink-0 opacity-60" />
-                  <div className={`text-xs ${subTextColor} space-y-1`}>
-                    <p>Trial started: {new Date(trialStatus.trialData.trialStartDate).toLocaleDateString()}</p>
-                    <p>Trial ends: {new Date(trialStatus.trialData.trialEndDate).toLocaleDateString()}</p>
+                  <div className="text-xs text-blue-600 space-y-1">
                     <p>Price: KES {pricePerLearner} per learner per term or KES {annualFee} per learner annually.</p>
                     <p className="font-semibold">Annual payment saves KES {annualSavings} per learner compared with three terms.</p>
                     <button
                       onClick={() => setShowPayment(true)}
                       className="mt-2 text-xs font-medium underline"
                     >
-                      Subscribe early to avoid interruption
+                      Choose a subscription plan
                     </button>
                   </div>
                 </div>
