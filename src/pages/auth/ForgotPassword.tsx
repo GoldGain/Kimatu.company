@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
-import { sendSMS } from '@/lib/sms';
+import { lookupPasswordResetAccounts, requestPasswordResetOTP, verifyPasswordResetOTP, resetPasswordWithOTP, type PasswordResetAccountSummary } from '@/lib/sms';
 import { Loader2, ArrowLeft, Check, Mail, User, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -12,17 +12,13 @@ export default function ForgotPassword() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [foundEmail, setFoundEmail] = useState('');
+  const [matchedAccount, setMatchedAccount] = useState<PasswordResetAccountSummary | null>(null);
+  const [accountChoices, setAccountChoices] = useState<PasswordResetAccountSummary[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [resetUserId, setResetUserId] = useState('');
-
-  // Generate a 6-digit OTP
-  const generateOTP = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,79 +27,19 @@ export default function ForgotPassword() {
 
     try {
       if (resetMethod === 'phone') {
-        // Phone number-based reset using Olympus SMS
-        let phone = identifier.trim();
-        
-        // Normalize phone number
-        if (phone.startsWith('0')) {
-          phone = '254' + phone.slice(1);
-        }
-        if (phone.startsWith('+')) {
-          phone = phone.slice(1);
-        }
-
-        // Find user by phone number - check in profiles, students, teachers, parents
-        let foundUser = null;
-        
-        // Check profiles table
-        const { data: profileData } = await supabaseUntyped
-          .from('profiles')
-          .select('id, phone, first_name, last_name, role')
-          .or(`phone.eq.${phone},phone.eq.0${phone.slice(3)}`)
-          .maybeSingle();
-        
-        if (profileData) {
-          foundUser = profileData;
-        }
-
-        // Check students table
-        if (!foundUser) {
-          const { data: studentData } = await supabaseUntyped
-            .from('students')
-            .select('id, parent_phone, first_name, last_name')
-            .or(`parent_phone.eq.${phone},parent_phone.eq.0${phone.slice(3)}`)
-            .maybeSingle();
-          
-          if (studentData) {
-            foundUser = { ...studentData, phone: studentData.parent_phone, role: 'student' };
-          }
-        }
-
-        // Check teachers table
-        if (!foundUser) {
-          const { data: teacherData } = await supabaseUntyped
-            .from('teachers')
-            .select('id, phone, first_name, last_name')
-            .or(`phone.eq.${phone},phone.eq.0${phone.slice(3)}`)
-            .maybeSingle();
-          
-          if (teacherData) {
-            foundUser = { ...teacherData, role: 'teacher' };
-          }
-        }
-
-        if (!foundUser) {
-          setError('No account found with this phone number. Please check and try again.');
-          setLoading(false);
+        const phone = identifier.trim();
+        setAccountChoices([]);
+        setSelectedAccountId('');
+        setMatchedAccount(null);
+        const result = await lookupPasswordResetAccounts(phone);
+        if (!result.accounts?.length) {
+          setError(result.message || 'No account is registered with this phone number.');
           return;
         }
-
-        // Generate and send OTP
-        const newOtp = generateOTP();
-        setGeneratedOtp(newOtp);
-        setResetUserId(foundUser.id);
-
-        const message = `Your Kimatu Analytics password reset code is: ${newOtp}. This code will expire in 15 minutes. Do not share this code with anyone.`;
-        
-        const result = await sendSMS(phone, message);
-        
-        if (result.success) {
-          setOtpSent(true);
-          toast.success('OTP sent to your phone via SMS!');
-        } else {
-          setError('Failed to send SMS. Please try again or use email method.');
-          toast.error('SMS delivery failed');
-        }
+        setAccountChoices(result.accounts);
+        setSelectedAccountId(result.accounts.length === 1 ? result.accounts[0].id : '');
+        setError('');
+        toast.success(result.accounts.length === 1 ? 'Account found. Confirm it to receive an OTP.' : 'Select the account you want to reset.');
       } else {
         let email = identifier;
 
@@ -146,8 +82,32 @@ export default function ForgotPassword() {
         setSuccess(true);
         toast.success('Password reset link sent! Check your email.');
       }
-    } catch (err) {
-      setError('An error occurred. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'We could not process the request. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    if (!selectedAccountId) {
+      setError('Select the account you want to reset first.');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+    try {
+      const result = await requestPasswordResetOTP(identifier.trim(), selectedAccountId);
+      if (!result.success) {
+        setError(result.message || 'We could not send the reset code. Please try again.');
+        return;
+      }
+      setMatchedAccount(result.account || accountChoices.find((account) => account.id === selectedAccountId) || null);
+      setOtpSent(true);
+      toast.success('A password reset code has been sent to your phone.');
+    } catch (err: any) {
+      setError(err?.message || 'We could not send the reset code. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -157,10 +117,6 @@ export default function ForgotPassword() {
     e.preventDefault();
     setError('');
 
-    if (otp !== generatedOtp) {
-      setError('Invalid OTP. Please check and try again.');
-      return;
-    }
 
     if (!newPassword || newPassword.length < 6) {
       setError('Password must be at least 6 characters');
@@ -174,15 +130,17 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      // Update password using admin auth or direct update
-      // For phone reset, we need to find the user's auth account
-      // Since we can't directly set password without session, we need to use admin functions
-      // or create a magic link. For now, we'll show success and instruct user.
-      
-      toast.success('OTP verified! Please contact your school admin to complete password reset.');
+      // Verify and reset through the server-side Edge Function. The OTP is
+      // never trusted from browser state and the password is never changed client-side.
+      if (!selectedAccountId) {
+        throw new Error('Please select the account you want to reset.');
+      }
+      await verifyPasswordResetOTP(identifier.trim(), otp.trim(), selectedAccountId);
+      await resetPasswordWithOTP(identifier.trim(), otp.trim(), newPassword, selectedAccountId);
+      toast.success('Password reset successfully. You can now sign in.');
       setSuccess(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to reset password');
+      setError(err.message || 'Failed to reset password. Please request a new code.');
     } finally {
       setLoading(false);
     }
@@ -196,11 +154,11 @@ export default function ForgotPassword() {
             <Check className="w-8 h-8 text-green-600" />
           </div>
           <h2 className="text-2xl font-bold text-[#111111] mb-2">
-            {resetMethod === 'phone' ? 'Password Reset Request Submitted' : 'Check Your Email'}
+            {resetMethod === 'phone' ? 'Password Reset Complete' : 'Check Your Email'}
           </h2>
           <p className="text-sm text-[#666666] mb-4">
             {resetMethod === 'phone' 
-              ? 'Your identity has been verified. Please contact your school administrator to set a new password.'
+              ? 'Your password has been changed successfully. You can now sign in with the new password.'
               : `We sent a password reset link to ${foundEmail || identifier}`
             }
           </p>
@@ -232,6 +190,13 @@ export default function ForgotPassword() {
             </Link>
             <h1 className="text-2xl font-bold text-[#111111]">Verify OTP</h1>
             <p className="text-sm text-[#666666] mt-1">Enter the 6-digit code sent to your phone</p>
+            {matchedAccount && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-left text-xs text-blue-900">
+                <p className="font-semibold">Account matched</p>
+                <p>{matchedAccount.display_name} · {matchedAccount.role.replace(/_/g, ' ')}</p>
+                {matchedAccount.masked_email && <p className="text-blue-700">{matchedAccount.masked_email}</p>}
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl p-6 md:p-8 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)]">
@@ -290,7 +255,7 @@ export default function ForgotPassword() {
             </form>
 
             <button
-              onClick={() => { setOtpSent(false); setOtp(''); setGeneratedOtp(''); }}
+              onClick={() => { setOtpSent(false); setOtp(''); setMatchedAccount(null); setAccountChoices([]); setSelectedAccountId(''); setError(''); }}
               className="w-full mt-4 text-sm text-[#2563EB] hover:underline"
             >
               Didn&apos;t receive OTP? Try again
@@ -330,7 +295,7 @@ export default function ForgotPassword() {
           <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-xl">
             <button
               type="button"
-              onClick={() => setResetMethod('email')}
+              onClick={() => { setResetMethod('email'); setMatchedAccount(null); setAccountChoices([]); setSelectedAccountId(''); setError(''); }}
               className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
                 resetMethod === 'email' 
                   ? 'bg-[#2563EB] text-white' 
@@ -341,7 +306,7 @@ export default function ForgotPassword() {
             </button>
             <button
               type="button"
-              onClick={() => setResetMethod('admission')}
+              onClick={() => { setResetMethod('admission'); setMatchedAccount(null); setAccountChoices([]); setSelectedAccountId(''); setError(''); }}
               className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
                 resetMethod === 'admission' 
                   ? 'bg-[#2563EB] text-white' 
@@ -352,7 +317,7 @@ export default function ForgotPassword() {
             </button>
             <button
               type="button"
-              onClick={() => setResetMethod('phone')}
+              onClick={() => { setResetMethod('phone'); setMatchedAccount(null); setAccountChoices([]); setSelectedAccountId(''); setError(''); }}
               className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
                 resetMethod === 'phone' 
                   ? 'bg-[#2563EB] text-white' 
@@ -401,10 +366,53 @@ export default function ForgotPassword() {
               className="w-full bg-[#2563EB] text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-[#1d4ed8] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
-                resetMethod === 'phone' ? 'Send OTP via SMS' : 'Send Reset Link'
+                resetMethod === 'phone'
+                  ? accountChoices.length > 0 ? 'Find Different Number' : 'Find Account'
+                  : 'Send Reset Link'
               )}
             </button>
           </form>
+
+          {resetMethod === 'phone' && accountChoices.length > 0 && (
+            <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+              <div className="mb-3">
+                <h2 className="text-sm font-semibold text-blue-950">Select an account</h2>
+                <p className="mt-1 text-xs text-blue-800">Choose the account whose password you want to reset. The OTP will be sent to the phone number above.</p>
+              </div>
+              <div className="space-y-2">
+                {accountChoices.map((account) => {
+                  const selected = selectedAccountId === account.id;
+                  return (
+                    <button
+                      key={account.id}
+                      type="button"
+                      onClick={() => { setSelectedAccountId(account.id); setError(''); }}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                        selected ? 'border-[#2563EB] bg-white ring-2 ring-[#2563EB]/20' : 'border-blue-100 bg-white/70 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-[#111111]">{account.display_name}</p>
+                          <p className="mt-0.5 text-xs capitalize text-gray-600">{account.role.replace(/_/g, ' ')}</p>
+                          {account.masked_email && <p className="mt-0.5 text-xs text-gray-500">{account.masked_email}</p>}
+                        </div>
+                        <span className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${selected ? 'border-[#2563EB] bg-[#2563EB] ring-2 ring-white ring-inset' : 'border-gray-300'}`} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={handleSendPhoneOtp}
+                disabled={loading || !selectedAccountId}
+                className="mt-4 w-full rounded-xl bg-[#2563EB] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : 'Send OTP via SMS'}
+              </button>
+            </div>
+          )}
 
           <div className="mt-6 text-center text-sm text-[#666666]">
             Remember your password?{' '}

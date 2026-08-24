@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { createScopedUser } from '@/lib/supabase/createUser';
+import { deleteScopedUser } from '@/lib/supabase/accountActions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTeachers } from '@/hooks/useSupabaseData';
 import { Search, Plus, Loader2, KeyRound, Pencil, Trash2, X } from 'lucide-react';
@@ -110,7 +111,7 @@ export default function SchoolAdminTeachers() {
           schoolData?.name
         );
         if (formData.phone) {
-          const smsResult = await sendSMS(formData.phone, welcomeMsg);
+          const smsResult = await sendSMS(formData.phone, welcomeMsg, undefined, user?.schoolId || undefined);
           if (smsResult.success) {
             toast.success(`Welcome SMS sent to ${formData.first_name}`);
           } else {
@@ -176,9 +177,12 @@ export default function SchoolAdminTeachers() {
     if (!deletingTeacher) return;
     setDeleting(true);
     try {
-      const { error } = await supabaseUntyped.from('teachers').delete().eq('id', deletingTeacher.id);
-      if (error) throw new Error(error.message);
-      toast.success(`Teacher "${deletingTeacher.first_name} ${deletingTeacher.last_name}" deleted.`);
+      await deleteScopedUser({
+        record_id: deletingTeacher.id,
+        target_type: 'teacher',
+        school_id: user?.schoolId,
+      });
+      toast.success(`Teacher "${deletingTeacher.first_name} ${deletingTeacher.last_name}" and login account deleted.`);
       setDeletingTeacher(null);
       refetch();
     } catch (err: any) {

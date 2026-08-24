@@ -40,6 +40,8 @@ import SuperAdminAnalytics from '@/pages/dashboard/super-admin/Analytics';
 import SuperAdminSettings from '@/pages/dashboard/super-admin/Settings';
 import SchoolAdminDashboard from '@/pages/dashboard/school-admin/Dashboard';
 import SchoolAdminStudents from '@/pages/dashboard/school-admin/Students';
+import SchoolAdminBulkStudentImport from '@/pages/dashboard/school-admin/BulkStudentImport';
+import SchoolAdminSMSWallet from '@/pages/dashboard/school-admin/SMSWallet';
 import SchoolAdminGraduatedStudents from '@/pages/dashboard/school-admin/GraduatedStudents';
 import SchoolAdminTeachers from '@/pages/dashboard/school-admin/Teachers';
 import SchoolAdminClasses from '@/pages/dashboard/school-admin/Classes';
@@ -204,6 +206,7 @@ function AppRoutes() {
       <Route path="/school-admin" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminDashboard /></ProtectedRoute>} />
       <Route path="/school-admin/stream-dashboard" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><StreamDashboard /></ProtectedRoute>} />
       <Route path="/school-admin/students" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminStudents /></ProtectedRoute>} />
+      <Route path="/school-admin/students/bulk-import" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminBulkStudentImport /></ProtectedRoute>} />
       <Route path="/school-admin/graduated-students" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminGraduatedStudents /></ProtectedRoute>} />
       <Route path="/school-admin/teachers" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminTeachers /></ProtectedRoute>} />
       <Route path="/school-admin/classes" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminClasses /></ProtectedRoute>} />
@@ -224,6 +227,7 @@ function AppRoutes() {
       <Route path="/school-admin/marks-overview" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminMarksOverview /></ProtectedRoute>} />
       <Route path="/school-admin/communicate" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminCommunicate /></ProtectedRoute>} />
       <Route path="/school-admin/sms-settings" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminSMSSettings /></ProtectedRoute>} />
+      <Route path="/school-admin/sms-wallet" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminSMSWallet /></ProtectedRoute>} />
       <Route path="/school-admin/settings" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminSchoolSettings /></ProtectedRoute>} />
       <Route path="/school-admin/promote-class" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminPromoteClass /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/view" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><TimetableView /></ProtectedRoute>} />

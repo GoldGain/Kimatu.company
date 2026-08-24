@@ -42,6 +42,7 @@ import {
   RefreshCw,
   FileSpreadsheet,
   Shield,
+  WalletCards,
 } from 'lucide-react';
 
 interface NavItem {
@@ -79,12 +80,14 @@ const navConfig: Record<string, NavItem[]> = {
   'school-admin': [
     { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin' },
     { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/school-admin/students' },
+    { label: 'Bulk Student Upload', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/school-admin/students/bulk-import' },
     { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/school-admin/attendance' },
     { label: 'Graduated Students', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/graduated-students' },
     { label: 'Teachers', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teachers' },
     { label: 'Grades', icon: <School className="w-5 h-5" />, path: '/school-admin/classes' },
     { label: 'Learning Areas', icon: <Library className="w-5 h-5" />, path: '/school-admin/subjects' },
     { label: 'Communicate', icon: <MessageSquare className="w-5 h-5" />, path: '/school-admin/communicate' },
+    { label: 'SMS Wallet', icon: <WalletCards className="w-5 h-5" />, path: '/school-admin/sms-wallet' },
     { label: 'SMS Settings', icon: <Settings className="w-5 h-5" />, path: '/school-admin/sms-settings' },
     { label: 'Teacher Assignments', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/teacher-assignments' },
     { label: 'Timetable Setup', icon: <Settings className="w-5 h-5" />, path: '/school-admin/timetable/setup' },

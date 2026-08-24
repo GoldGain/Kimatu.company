@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabaseUntyped } from '@/lib/supabase/client';
+import { sortByAdmissionNumber } from '@/lib/student-order';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Plus, Trash2, Download, Save, Loader2, BookOpen, Users, FileSpreadsheet, X, Check
@@ -111,7 +112,7 @@ export default function ClassList() {
         .eq('is_active', true)
         .order('first_name', { ascending: true });
       if (error) throw error;
-      setStudents(data || []);
+      setStudents(sortByAdmissionNumber((data || []) as Student[]));
     } catch (err: any) {
       toast.error('Failed to load students: ' + err.message);
     }

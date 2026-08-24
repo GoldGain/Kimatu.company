@@ -265,7 +265,7 @@ export default function BulkSMS() {
       if (uniqueBodies.size === 1) {
         const recipients = preview.map((p) => p.phone).filter((phone) => !!phone && phone.length > 0);
         const message = preview[0]?.message || '';
-        const result = await sendBulkSMS(recipients, message);
+        const result = await sendBulkSMS(recipients, message, undefined, user?.schoolId || undefined);
         const sentMatch = result.message?.match(/Sent:\s*(\d+)/);
         const failedMatch = result.message?.match(/Failed:\s*(\d+)/);
         sentCount = sentMatch ? parseInt(sentMatch[1]) : result.success ? recipients.length : 0;
@@ -275,7 +275,7 @@ export default function BulkSMS() {
         // Personalized messages — send one-by-one / small batches
         for (let i = 0; i < preview.length; i++) {
           const item = preview[i];
-          const result = await sendBulkSMS([item.phone], item.message);
+          const result = await sendBulkSMS([item.phone], item.message, undefined, user?.schoolId || undefined);
           if (result.success) sentCount += 1;
           else {
             failedCount += 1;

@@ -9,11 +9,11 @@
  * | Level            | Total | After lunch |
  * |------------------|-------|-------------|
  * | Pre-Primary      | 6     | 0           |
- * | Lower Primary    | 7     | 1           |
+ * | Lower Primary    | 6     | 0           |
  * | Upper Primary    | 7     | 1           |
  * | Junior School    | 8     | 2           |
  * | Senior School    | 9     | 3           |
- * | 8-4-4            | 8     | 2           |
+ * | 8-4-4            | 9     | 3           |
  */
 
 export interface TimetableSlot {
@@ -48,23 +48,23 @@ export interface LevelLessonConfig {
 }
 
 /** Built-in defaults — used only when DB does not supply counts.
- * Senior (Grade 10-12): 9 lessons/day, 2 after lunch.
- * Form 3 & 4 (8-4-4): 8 lessons/day, 3 after lunch.
+ * Senior (Grade 10-12): 9 lessons/day, 3 after lunch.
+ * Form 3 & 4 (8-4-4): 9 lessons/day, 3 after lunch.
  */
 export const LEVEL_CONFIG: Record<string, LevelLessonConfig> = {
   'pre-primary': { totalLessons: 6, afterLunch: 0 },
-  'lower-primary': { totalLessons: 7, afterLunch: 1 },
+  'lower-primary': { totalLessons: 6, afterLunch: 0 },
   'upper-primary': { totalLessons: 7, afterLunch: 1 },
   'combined-primary': { totalLessons: 7, afterLunch: 1 },
   junior: { totalLessons: 8, afterLunch: 2 },
-  senior: { totalLessons: 9, afterLunch: 2 },
-  'form-3-4': { totalLessons: 8, afterLunch: 3 },
+  senior: { totalLessons: 9, afterLunch: 3 },
+  'form-3-4': { totalLessons: 9, afterLunch: 3 },
   // legacy aliases
-  lower_primary: { totalLessons: 7, afterLunch: 1 },
+  lower_primary: { totalLessons: 6, afterLunch: 0 },
   upper_primary: { totalLessons: 7, afterLunch: 1 },
   junior_school: { totalLessons: 8, afterLunch: 2 },
-  senior_school: { totalLessons: 9, afterLunch: 2 },
-  '8-4-4': { totalLessons: 8, afterLunch: 3 },
+  senior_school: { totalLessons: 9, afterLunch: 3 },
+  '8-4-4': { totalLessons: 9, afterLunch: 3 },
 };
 
 /** @deprecated prefer LEVEL_CONFIG */
@@ -208,8 +208,8 @@ export function generateSlots(
   const firstBreakEnd = (config?.first_break_end || '').toString().slice(0, 5);
   const secondBreakStart = (config?.second_break_start || '').toString().slice(0, 5);
   const secondBreakEnd = (config?.second_break_end || '').toString().slice(0, 5);
-  const lunchStart = (config?.lunch_start || '').toString().slice(0, 5);
-  const lunchEnd = (config?.lunch_end || '').toString().slice(0, 5);
+  let lunchStart = (config?.lunch_start || '').toString().slice(0, 5);
+  let lunchEnd = (config?.lunch_end || '').toString().slice(0, 5);
   if (!schoolStart || !firstBreakStart || !firstBreakEnd || !secondBreakStart || !secondBreakEnd || !lunchStart || !lunchEnd) {
     throw new Error(
       'Missing timetable times for this school level. Save Timetable Setup (start, breaks, lunch) before generating.'
@@ -235,35 +235,50 @@ export function generateSlots(
   pushLesson(1);
   pushLesson(2);
 
-  // FIRST BREAK
+  // FIRST BREAK. If a saved anchor is earlier than the preceding lessons,
+  // move the break after those lessons instead of overlapping Lesson 2.
+  const firstBreakDuration = Math.max(1, timeToMinutes(firstBreakEnd) - timeToMinutes(firstBreakStart));
+  const normalizedFirstBreakStart = Math.max(currentMinutes, timeToMinutes(firstBreakStart));
+  const normalizedFirstBreakEnd = normalizedFirstBreakStart + firstBreakDuration;
   slots.push({
     slot_order: order++,
     label: 'FIRST BREAK',
     slot_type: 'break',
-    start_time: firstBreakStart,
-    end_time: firstBreakEnd,
+    start_time: minutesToTime(normalizedFirstBreakStart),
+    end_time: minutesToTime(normalizedFirstBreakEnd),
   });
-  currentMinutes = timeToMinutes(firstBreakEnd);
+  currentMinutes = normalizedFirstBreakEnd;
 
   // Lessons 3–4
   pushLesson(3);
   pushLesson(4);
 
-  // SECOND BREAK
+  // SECOND BREAK. Keep the anchor after Lessons 3–4 when the saved time is
+  // inconsistent with the selected level’s lesson duration.
+  const secondBreakDuration = Math.max(1, timeToMinutes(secondBreakEnd) - timeToMinutes(secondBreakStart));
+  const normalizedSecondBreakStart = Math.max(currentMinutes, timeToMinutes(secondBreakStart));
+  const normalizedSecondBreakEnd = normalizedSecondBreakStart + secondBreakDuration;
   slots.push({
     slot_order: order++,
     label: 'SECOND BREAK',
     slot_type: 'break',
-    start_time: secondBreakStart,
-    end_time: secondBreakEnd,
+    start_time: minutesToTime(normalizedSecondBreakStart),
+    end_time: minutesToTime(normalizedSecondBreakEnd),
   });
-  currentMinutes = timeToMinutes(secondBreakEnd);
+  currentMinutes = normalizedSecondBreakEnd;
 
   // Lessons 5–6
   pushLesson(5);
   pushLesson(6);
 
-  // LUNCH
+  // LUNCH. If saved times are inconsistent with the six pre-lunch lessons,
+  // move the lunch window forward rather than creating an overlap or a lesson
+  // that appears after lunch. This is especially important for Lower Primary.
+  const lunchDuration = Math.max(1, timeToMinutes(lunchEnd) - timeToMinutes(lunchStart));
+  const normalizedLunchStart = Math.max(currentMinutes, timeToMinutes(lunchStart));
+  const normalizedLunchEnd = normalizedLunchStart + lunchDuration;
+  lunchStart = minutesToTime(normalizedLunchStart);
+  lunchEnd = minutesToTime(normalizedLunchEnd);
   slots.push({
     slot_order: order++,
     label: 'LUNCH',
@@ -280,9 +295,11 @@ export function generateSlots(
     }
   }
 
-  // ACTIVITIES — skip for pre-primary style (0 after lunch) unless activities times are set
-  const hasActivityTimes = !!(config?.activities_start || config?.activities_end);
-  if (afterLunch > 0 || hasActivityTimes) {
+  // Generic activities belong after lessons. A level with zero after-lunch lessons
+  // (Pre-Primary / Lower Primary) must end at lunch unless an explicit, separately
+  // scheduled activity is supplied by the generator.
+  const hasActivityTimes = afterLunch > 0 && !!(config?.activities_start || config?.activities_end);
+  if (hasActivityTimes) {
     const activitiesStartTime = config?.activities_start
       ? String(config.activities_start).slice(0, 5)
       : minutesToTime(currentMinutes);

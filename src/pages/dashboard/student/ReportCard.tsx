@@ -19,7 +19,6 @@ import {
   drawNextTermStartDate,
   getPercentage,
   formatPosition,
-  addStudentPhotoToPDF,
   type SchoolInfo,
   type SignatureInfo,
 } from '@/lib/reportCardPdf';
@@ -31,6 +30,7 @@ export default function StudentReportCard() {
   const { user } = useAuth();
   const [student, setStudent] = useState<any>(null);
   const [zoomPhoto, setZoomPhoto] = useState<string | null>(null);
+  const [photoLoadError, setPhotoLoadError] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [terms, setTerms] = useState<any[]>([]);
   const [selectedTerm, setSelectedTerm] = useState('');
@@ -54,6 +54,7 @@ export default function StudentReportCard() {
         .eq('profile_id', user?.id)
         .single();
       setStudent(studentData);
+      setPhotoLoadError(false);
       if (studentData) {
         const { count } = await supabaseUntyped
           .from('students')
@@ -293,12 +294,10 @@ export default function StudentReportCard() {
         position, totalStudents || 0, isNew, classDataForGrading, subjectScores
       );
 
-      await drawReportHeader(doc, schoolInfo);
-
-      const photoUrl = student.photo_url || null;
-      if (photoUrl) {
-        try { await addStudentPhotoToPDF(doc, photoUrl, 172, 4, 24); } catch {}
-      }
+      await drawReportHeader(doc, schoolInfo, {
+        name: studentFullName,
+        photoUrl: student.photo_url || null,
+      });
 
       drawStudentInfo(
         doc,
@@ -367,10 +366,11 @@ export default function StudentReportCard() {
               )}
             </div>
             {zoomPhoto && <PhotoZoomModal photoUrl={zoomPhoto} altText={student.first_name} onClose={() => setZoomPhoto(null)} />}
-            {student.photo_url ? (
+            {student.photo_url && !photoLoadError ? (
               <img
                 src={student.photo_url}
                 alt={student.first_name}
+                onError={() => setPhotoLoadError(true)}
                 className="w-20 h-20 rounded-full object-cover border-2 border-blue-200 cursor-zoom-in hover:border-blue-400 hover:shadow-lg transition-all"
                 onClick={() => setZoomPhoto(student.photo_url)}
                 title="Click to zoom"

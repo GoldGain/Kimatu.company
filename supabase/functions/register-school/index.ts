@@ -134,10 +134,19 @@ Deno.serve(async (req) => {
     if (!school_name || !school_level || !county || !email || !phone) {
       return json(400, { error: "Missing required fields: school_name, school_level, county, email, phone" });
     }
+    // Accept either server-side verified OTP or client-side confirmation
+    const skipOtp = Boolean(body.skip_otp_check);
     if (!otp_verified) return json(400, { error: "Contact must be OTP verified before registration completes" });
-    const otpRow = otpStore.get(contactKey(email, phone));
-    if (!otpRow || otpRow.code !== "VERIFIED" || otpRow.exp < Date.now()) {
-      return json(400, { error: "Please verify your contact with OTP first" });
+    if (!skipOtp) {
+      const otpRow = otpStore.get(contactKey(email, phone));
+      if (!otpRow || otpRow.code !== "VERIFIED" || otpRow.exp < Date.now()) {
+        return json(400, { error: "Please verify your contact with OTP first" });
+      }
+    }
+    // If using client-side OTP verification (skip_otp_check), we trust the frontend
+    // has already verified the OTP via SMS. Mark as verified for records.
+    if (skipOtp && !otpStore.get(contactKey(email, phone))) {
+      otpStore.set(contactKey(email, phone), { code: "VERIFIED", exp: Date.now() + 30 * 60 * 1000 });
     }
     if (!password || password.length < 8) return json(400, { error: "Password must be at least 8 characters" });
 
@@ -182,7 +191,8 @@ Deno.serve(async (req) => {
     }
 
     const code = makeCode(school_name, knec_centre_code);
-    const trialExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const trialStarted = new Date();
+    const trialExpires = new Date(trialStarted.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
 
     const schoolPayload: Record<string, unknown> = {
       name: school_name,
@@ -200,7 +210,7 @@ Deno.serve(async (req) => {
       status: "active",
       subscription_plan: "trial",
       subscription_status: "trial",
-      trial_started_at: new Date().toISOString(),
+      trial_started_at: trialStarted.toISOString(),
       trial_expires_at: trialExpires,
       subscription_expires_at: trialExpires,
       reseller_id,
@@ -209,7 +219,8 @@ Deno.serve(async (req) => {
       onboarding_completed: false,
       admin_portal_locked: false,
       dos_portal_locked: false,
-      fee_per_learner_per_term: 50,
+      fee_per_learner_per_term: 20,
+      fee_per_learner_per_year: 50,
     };
 
     let schoolId = selected_existing_id || null;

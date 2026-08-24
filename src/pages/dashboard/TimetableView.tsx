@@ -10,6 +10,14 @@ import {
   type TimetableConfig,
   type TimetableSlot,
 } from '@/lib/timetable-generator';
+import {
+  activityBlocksLessons,
+  activityMatchesLevel,
+  isPostLessonActivity,
+  resolveActivityLessonSlot,
+  timeIntervalsOverlap,
+} from '@/lib/timetable-activity';
+import { getSubjectCode } from '@/lib/timetable-subject-code';
 
 interface SchoolClass {
   id: string;
@@ -26,8 +34,10 @@ interface TimetableEntry {
   time_slot_id: string;
   teacher_id: string | null;
   subject_id: string | null;
-  entry_type: 'lesson' | 'break' | 'lunch' | 'activities' | 'activity';
+  entry_type: 'lesson' | 'lesson_double' | 'break' | 'lunch' | 'activities' | 'activity';
   activity_name: string | null;
+  effective_start_time?: string | null;
+  effective_end_time?: string | null;
   teacher_number?: number;
   teacher_first_name?: string;
   teacher_last_name?: string;
@@ -43,6 +53,7 @@ interface TimeSlot {
   slot_type: 'lesson' | 'break' | 'lunch' | 'activities' | 'activity';
   label: string;
   level_group?: string | null;
+  sourceSlotIds?: string[];
 }
 
 interface TeacherKeyEntry {
@@ -51,67 +62,163 @@ interface TeacherKeyEntry {
   subjects: string[];
 }
 
-interface SchoolActivity {
+  interface SchoolActivity {
   id: string;
   school_id: string;
   day_of_week: number;
   activity_name: string;
   start_time: string;
   end_time: string;
+  target_classes?: string | null;
+  target_level_group?: string | null;
+  blocks_lessons?: boolean | null;
 }
+
+type TimelineSegment = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  slot_type: TimeSlot['slot_type'];
+  label: string;
+  slot_order?: number;
+  sourceSlotIds?: string[];
+  activity?: SchoolActivity;
+};
+
+const timeToMinutesView = (value: string | null | undefined): number => {
+  const [hours, minutes] = String(value || '').slice(0, 5).split(':').map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
+};
+
+const minutesToTimeView = (minutes: number): string => {
+  const safe = Math.max(0, Math.round(minutes));
+  return `${String(Math.floor(safe / 60) % 24).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+};
+
+const activityMatchesClass = (activity: SchoolActivity, cls: SchoolClass): boolean => {
+  if (!activityMatchesLevel(activity.target_level_group, resolveClassLevelGroup(cls))) return false;
+  const target = String(activity.target_classes || 'All').trim().toLowerCase();
+  if (!target || target === 'all') return true;
+  const className = String(cls.name || '').toLowerCase();
+  const grade = Number(cls.grade_level ?? cls.level);
+  const isPrimary = (grade >= 1 && grade <= 6) || /grade\s*[1-6]\b|pp\s*[12]|pre[\s-]?primary/.test(className);
+  const isJunior = (grade >= 7 && grade <= 9) || /grade\s*[789]\b|junior|jss/.test(className);
+  const isSenior = (grade >= 10 && grade <= 12) || /grade\s*(10|11|12)\b|senior/.test(className);
+  if (target.includes('primary') && isPrimary) return true;
+  if (target.includes('junior') && isJunior) return true;
+  if (target.includes('senior') && isSenior) return true;
+  return target.split(',').some((part) => {
+    const token = part.trim();
+    const gradeToken = token.match(/grade\s*\d+/)?.[0];
+    return Boolean(token && (className.includes(token) || token.includes(className) || (gradeToken && className.includes(gradeToken))));
+  });
+};
+
+const normalizeBaseSlotsAroundAnchors = (baseSlots: TimeSlot[]): TimeSlot[] => {
+  const slots = baseSlots.filter((slot) => slot.slot_type !== 'activity' && slot.slot_type !== 'activities');
+  const anchors = slots.filter((slot) => slot.slot_type === 'break' || slot.slot_type === 'lunch');
+  const lessons = slots
+    .filter((slot) => slot.slot_type === 'lesson')
+    .sort((a, b) => (a.slot_order ?? 0) - (b.slot_order ?? 0));
+  const lunchAnchor = anchors.find((slot) => slot.slot_type === 'lunch');
+  const zeroAfterLunch = Boolean(
+    lunchAnchor && lessons.every((lesson) => (lesson.slot_order ?? 0) < (lunchAnchor.slot_order ?? 0))
+  );
+  // For zero-after-lunch levels, an older saved lunch clock may overlap
+  // Lessons 5–6. Move lunch after the last pre-lunch lesson instead of
+  // incorrectly moving those lessons into the afternoon.
+  const lessonAnchors = zeroAfterLunch ? anchors.filter((slot) => slot.slot_type !== 'lunch') : anchors;
+  let cursor = -Infinity;
+  const normalizedLessons = lessons.map((slot) => {
+    const duration = Math.max(1, timeToMinutesView(slot.end_time) - timeToMinutesView(slot.start_time));
+    let start = Math.max(timeToMinutesView(slot.start_time), cursor);
+    let guard = 0;
+    while (guard++ < lessonAnchors.length + 2) {
+      const end = start + duration;
+      const overlap = lessonAnchors.find((anchor) =>
+        start < timeToMinutesView(anchor.end_time) && end > timeToMinutesView(anchor.start_time)
+      );
+      if (!overlap) break;
+      start = timeToMinutesView(overlap.end_time);
+    }
+    cursor = start + duration;
+    return {
+      ...slot,
+      start_time: minutesToTimeView(start),
+      end_time: minutesToTimeView(cursor),
+    };
+  });
+
+  const normalizedAnchors = zeroAfterLunch && lunchAnchor && normalizedLessons.length > 0
+    ? anchors.map((anchor) => {
+        if (anchor.id !== lunchAnchor.id) return anchor;
+        const originalDuration = Math.max(30, timeToMinutesView(anchor.end_time) - timeToMinutesView(anchor.start_time));
+        const lunchStart = Math.max(timeToMinutesView(anchor.start_time), cursor);
+        return {
+          ...anchor,
+          start_time: minutesToTimeView(lunchStart),
+          end_time: minutesToTimeView(lunchStart + originalDuration),
+        };
+      })
+    : anchors;
+
+  return [...normalizedAnchors, ...normalizedLessons].sort((a, b) =>
+    timeToMinutesView(a.start_time) - timeToMinutesView(b.start_time) ||
+    (a.slot_order ?? 0) - (b.slot_order ?? 0)
+  );
+};
+
+const shiftBaseSlotsForActivities = (baseSlots: TimeSlot[], dayActivities: SchoolActivity[]): TimeSlot[] =>
+  normalizeBaseSlotsAroundAnchors(baseSlots);
+
+const buildTimelineSegments = (
+  baseSlots: TimeSlot[],
+  dayActivities: SchoolActivity[],
+): TimelineSegment[] => {
+  const fixedSlots = shiftBaseSlotsForActivities(baseSlots, dayActivities).map((slot) => {
+    const owners = dayActivities
+      .filter(activityBlocksLessons)
+      .filter((activity) => resolveActivityLessonSlot(baseSlots, activity)?.id === slot.id);
+    if (owners.length === 0) {
+      return {
+        id: slot.id,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        slot_type: slot.slot_type,
+        label: slot.label,
+        slot_order: slot.slot_order,
+        sourceSlotIds: slot.sourceSlotIds,
+      };
+    }
+    return {
+      id: slot.id,
+      start_time: slot.start_time,
+      end_time: slot.end_time,
+      slot_type: 'activity' as const,
+      label: owners.map((activity) => activity.activity_name).join(' / '),
+      slot_order: slot.slot_order,
+      sourceSlotIds: slot.sourceSlotIds,
+    };
+  });
+  const activities = dayActivities
+    .filter((activity) => isPostLessonActivity(baseSlots, activity))
+    .map((activity) => ({
+      id: `activity-${activity.id}`,
+      start_time: String(activity.start_time).slice(0, 5),
+      end_time: String(activity.end_time).slice(0, 5),
+      slot_type: 'activity' as const,
+      label: activity.activity_name,
+      activity,
+    }));
+  return [...fixedSlots, ...activities].sort((a, b) =>
+    timeToMinutesView(a.start_time) - timeToMinutesView(b.start_time) ||
+    timeToMinutesView(a.end_time) - timeToMinutesView(b.end_time)
+  );
+};
 
 const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
 
-const SUBJECT_CODE_MAP: Record<string, string> = {
-  mathematics: 'MATH',
-  math: 'MATH',
-  english: 'ENG',
-  kiswahili: 'KISW',
-  'integrated science': 'INTSC',
-  science: 'SC',
-  'social studies': 'SST',
-  cre: 'CRE',
-  'christian religious education': 'CRE',
-  agriculture: 'AGN',
-  'pre-technical': 'PRET',
-  'pre technical': 'PRET',
-  'creative arts': 'CAS',
-  'creative and sports': 'CAS',
-  'home science': 'HSC',
-  'business studies': 'BST',
-  history: 'HIST',
-  geography: 'GEO',
-  physics: 'PHY',
-  chemistry: 'CHEM',
-  biology: 'BIO',
-};
 
-const getSubjectCode = (name: string, code: string): string => {
-  const normalizedName = (name || '').trim().toLowerCase();
-  const mappedByName = Object.entries(SUBJECT_CODE_MAP).find(([key]) =>
-    normalizedName.includes(key.toLowerCase())
-  );
-  if (mappedByName) return mappedByName[1];
-
-  const cleanCode = (code || '').trim().toUpperCase();
-  if (cleanCode) {
-    if (cleanCode.startsWith('MAT') || cleanCode === 'MA') return 'MATH';
-    if (cleanCode.startsWith('ENG') || cleanCode === 'ELA') return 'ENG';
-    if (cleanCode.startsWith('KIS') || cleanCode === 'KLA') return 'KISW';
-    if (cleanCode.startsWith('BIO')) return 'BIO';
-    if (cleanCode.startsWith('CHE')) return 'CHEM';
-    if (cleanCode.startsWith('PHY')) return 'PHY';
-    if (cleanCode.startsWith('INTSCI') || cleanCode.startsWith('ISC')) return 'INTSC';
-    if (cleanCode.startsWith('SS')) return 'SST';
-    if (cleanCode.startsWith('AGR')) return 'AGN';
-    if (cleanCode.startsWith('PRE') || cleanCode.startsWith('PTS')) return 'PRET';
-    if (cleanCode.startsWith('CAS') || cleanCode.startsWith('CA')) return 'CAS';
-    if (cleanCode.startsWith('CRE') || cleanCode.startsWith('CHR')) return 'CRE';
-    return cleanCode.replace(/\d+/g, '').substring(0, 5) || cleanCode.substring(0, 5);
-  }
-
-  return name.replace(/[^A-Za-z]/g, '').substring(0, 5).toUpperCase() || 'SUB';
-};
 
 const displayClassName = (cls: SchoolClass): string => {
   // Keep the full stored name (e.g. "Grade 7", "Class 3", "Form 1", "PP1")
@@ -152,24 +259,24 @@ function resolveClassLevelGroup(cls: SchoolClass): string {
 
 const LEVEL_LABELS: Record<string, string> = {
   'pre-primary': 'Pre-Primary (6 lessons, 0 after lunch)',
-  'lower-primary': 'Lower Primary (7 lessons, 1 after lunch)',
+  'lower-primary': 'Lower Primary (6 lessons, 0 after lunch)',
   'upper-primary': 'Upper Primary (7 lessons, 1 after lunch)',
   'combined-primary': 'Combined Primary (7 lessons, 1 after lunch)',
   'junior': 'Junior School (8 lessons, 2 after lunch)',
   'senior': 'Senior School (9 lessons, 3 after lunch)',
-  'form-3-4': '8-4-4 Form 3-4 (8 lessons, 2 after lunch)',
+  'form-3-4': '8-4-4 Form 3-4 (9 lessons, 3 after lunch)',
   'default': 'Legacy default',
 };
 
 /** Expected lesson structure per level (source of truth for columns) */
 const LEVEL_LESSON_TARGETS: Record<string, { total: number; afterLunch: number }> = {
   'pre-primary': { total: 6, afterLunch: 0 },
-  'lower-primary': { total: 7, afterLunch: 1 },
+  'lower-primary': { total: 6, afterLunch: 0 },
   'upper-primary': { total: 7, afterLunch: 1 },
   'combined-primary': { total: 7, afterLunch: 1 },
   'junior': { total: 8, afterLunch: 2 },
   'senior': { total: 9, afterLunch: 3 },
-  'form-3-4': { total: 8, afterLunch: 2 },
+  'form-3-4': { total: 9, afterLunch: 3 },
   'default': { total: 8, afterLunch: 2 },
 };
 
@@ -208,6 +315,16 @@ function buildDisplaySlotsForLevel(
   // Never treat unknown/default as a real level for column counts when we know the class level
   const key = levelKey === 'default' ? 'lower-primary' : levelKey;
   const targets = LEVEL_LESSON_TARGETS[key] || { total: 7, afterLunch: 1 };
+  const stripInLessonActivitySlots = (slots: TimeSlot[]): TimeSlot[] => {
+    const lessonEnds = slots
+      .filter((slot) => slot.slot_type === 'lesson')
+      .map((slot) => timeToMinutesView(slot.end_time));
+    const lastLessonEnd = lessonEnds.length ? Math.max(...lessonEnds) : Number.POSITIVE_INFINITY;
+    return slots.filter((slot) => {
+      if (slot.slot_type !== 'activity' && slot.slot_type !== 'activities') return true;
+      return timeToMinutesView(slot.start_time) >= lastLessonEnd;
+    });
+  };
   const byLevel = (lg: string) =>
     dedupeByOrder(all.filter((s) => (s.level_group || 'default') === lg));
 
@@ -222,18 +339,89 @@ function buildDisplaySlotsForLevel(
     candidates.length > 0 &&
     counts.total === targets.total &&
     counts.afterLunch === targets.afterLunch;
+  const normalizeLegacyActivitySlots = (candidateSlots: TimeSlot[]): TimeSlot[] => {
+    const lessonSlots = candidateSlots.filter((slot) => slot.slot_type === 'lesson');
+    const lastLessonEnd = lessonSlots.length
+      ? Math.max(...lessonSlots.map((slot) => timeToMinutesView(slot.end_time)))
+      : Number.POSITIVE_INFINITY;
+    const hasInLessonActivity = candidateSlots.some((slot) =>
+      (slot.slot_type === 'activity' || slot.slot_type === 'activities') &&
+      timeToMinutesView(slot.start_time) < lastLessonEnd,
+    );
+    const requiredTimes = [
+      levelConfig?.start_time,
+      levelConfig?.first_break_start,
+      levelConfig?.first_break_end,
+      levelConfig?.second_break_start,
+      levelConfig?.second_break_end,
+      levelConfig?.lunch_start,
+      levelConfig?.lunch_end,
+    ];
+    if (!hasInLessonActivity || !levelConfig || requiredTimes.some((value) => !value)) {
+      return stripInLessonActivitySlots(candidateSlots);
+    }
+    const cfg: TimetableConfig = {
+      lesson_duration: Number(levelConfig.period_duration) || 40,
+      school_start: String(levelConfig.start_time).slice(0, 5),
+      school_end: String(levelConfig.end_time || levelConfig.activities_end || levelConfig.lunch_end).slice(0, 5),
+      first_break_start: String(levelConfig.first_break_start).slice(0, 5),
+      first_break_end: String(levelConfig.first_break_end).slice(0, 5),
+      second_break_start: String(levelConfig.second_break_start).slice(0, 5),
+      second_break_end: String(levelConfig.second_break_end).slice(0, 5),
+      lunch_start: String(levelConfig.lunch_start).slice(0, 5),
+      lunch_end: String(levelConfig.lunch_end).slice(0, 5),
+      activities_start: undefined,
+      activities_end: undefined,
+      lessons_per_day: typeof levelConfig.lessons_per_day === 'number' ? levelConfig.lessons_per_day : targets.total,
+      after_lunch_lessons: typeof levelConfig.after_lunch_lessons === 'number' ? levelConfig.after_lunch_lessons : targets.afterLunch,
+    };
+    const oldByLabel = new Map(
+      candidateSlots
+        .filter((slot) => slot.slot_type !== 'activity' && slot.slot_type !== 'activities')
+        .map((slot) => [slot.label, slot]),
+    );
+    const generated = generateSlots(cfg, targets.total, key).map((slot, index) => {
+      const old = oldByLabel.get(slot.label);
+      return {
+        ...(old || {}),
+        id: old?.id || `synth-${key}-${slot.slot_order}-${index}`,
+        slot_order: slot.slot_order,
+        start_time: slot.start_time.length === 5 ? `${slot.start_time}:00` : slot.start_time,
+        end_time: slot.end_time.length === 5 ? `${slot.end_time}:00` : slot.end_time,
+        slot_type: slot.slot_type === 'activities' ? 'activity' : slot.slot_type,
+        label: slot.label,
+        level_group: key,
+      } as TimeSlot;
+    });
+    const postSchool = candidateSlots
+      .filter((slot) =>
+        (slot.slot_type === 'activity' || slot.slot_type === 'activities') &&
+        timeToMinutesView(slot.start_time) >= lastLessonEnd,
+      )
+      .sort((a, b) => timeToMinutesView(a.start_time) - timeToMinutesView(b.start_time))
+      .map((slot, index) => ({ ...slot, slot_order: generated.length + index + 1 }));
+    return [...generated, ...postSchool];
+  };
 
   // Prefer DB slots only when structure is exactly correct for this level
   if (countsMatch) {
-    let slots = candidates;
-    if (targets.afterLunch === 0) {
-      // Pre-primary: no post-lunch lesson columns and no activities column clutter
+    let slots = normalizeLegacyActivitySlots(candidates);
+      if (targets.afterLunch === 0) {
+      // Zero-after-lunch levels hide generic post-lunch activities, but retain
+      // explicitly scheduled activities that occur before lunch (for example Friday PPI).
+      const lunchStartMinutes = (() => {
+        const raw = String(levelConfig?.lunch_start || '').slice(0, 5);
+        const [hours, minutes] = raw.split(':').map(Number);
+        return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : Number.POSITIVE_INFINITY;
+      })();
       slots = slots.filter((s) => {
-        if (s.slot_type === 'lesson') {
-          // keep only first 6 lessons by order among lessons
-          return true;
+        if (s.slot_type === 'lesson') return true;
+        if (s.slot_type === 'activity') {
+          const [hours, minutes] = String(s.start_time || '').slice(0, 5).split(':').map(Number);
+          const startMinutes = Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : Number.POSITIVE_INFINITY;
+          return startMinutes < lunchStartMinutes;
         }
-        return s.slot_type !== 'activities' && s.slot_type !== 'activity';
+        return s.slot_type !== 'activities';
       });
       // Extra safety: drop any lesson after lunch if present
       const lunchOrder = slots.find((s) => s.slot_type === 'lunch')?.slot_order;
@@ -263,7 +451,12 @@ function buildDisplaySlotsForLevel(
     levelConfig?.lunch_end,
   ];
   if (!levelConfig || required.some((v) => !v)) {
-    if (candidates.length) return candidates;
+    if (candidates.length) {
+      const filtered = stripInLessonActivitySlots(candidates);
+      return targets.afterLunch === 0
+        ? filtered.filter((s) => s.slot_type !== 'activities' && s.slot_type !== 'activity')
+        : filtered;
+    }
     return [];
   }
 
@@ -284,7 +477,7 @@ function buildDisplaySlotsForLevel(
   };
 
   const generated = generateSlots(cfg, cfg.lessons_per_day || targets.total, key);
-  return generated.map((s: TimetableSlot, i: number) => ({
+  const mapped = generated.map((s: TimetableSlot, i: number) => ({
     id: `synth-${key}-${s.slot_order}-${i}`,
     slot_order: s.slot_order,
     start_time: s.start_time.length === 5 ? s.start_time + ':00' : s.start_time,
@@ -293,6 +486,10 @@ function buildDisplaySlotsForLevel(
     label: s.label,
     level_group: key,
   }));
+  const filteredMapped = stripInLessonActivitySlots(mapped);
+  return targets.afterLunch === 0
+    ? filteredMapped.filter((s) => s.slot_type !== 'activities' && s.slot_type !== 'activity')
+    : filteredMapped;
 }
 
 /** @deprecated name kept for call sites */
@@ -306,7 +503,6 @@ export default function TimetableView() {
   const [entries, setEntries] = useState<TimetableEntry[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [levelConfigs, setLevelConfigs] = useState<Record<string, any>>({});
-  const [activities, setActivities] = useState<SchoolActivity[]>([]);
   const [teacherKey, setTeacherKey] = useState<TeacherKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +527,6 @@ export default function TimetableView() {
         fetchLevelConfigs(),
         fetchEntries(),
         fetchTeacherKey(),
-        fetchActivities(),
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load timetable');
@@ -393,7 +588,7 @@ export default function TimetableView() {
     const { data, error: err } = await supabase
       .from('timetable_entries')
       .select(
-        `id, class_id, day_of_week, time_slot_id, teacher_id, subject_id, entry_type, activity_name, level_group,
+        `id, class_id, day_of_week, time_slot_id, teacher_id, subject_id, entry_type, activity_name, level_group, effective_start_time, effective_end_time,
         teachers(teacher_number, first_name, last_name), subjects(name, code)`
       )
       .eq('school_id', user?.schoolId);
@@ -407,6 +602,8 @@ export default function TimetableView() {
       subject_id: entry.subject_id,
       entry_type: entry.entry_type,
       activity_name: entry.activity_name,
+      effective_start_time: entry.effective_start_time,
+      effective_end_time: entry.effective_end_time,
       teacher_number: entry.teachers?.teacher_number,
       teacher_first_name: entry.teachers?.first_name,
       teacher_last_name: entry.teachers?.last_name,
@@ -414,20 +611,6 @@ export default function TimetableView() {
       subject_code: entry.subjects?.code,
     }));
     setEntries(mapped);
-  };
-
-  const fetchActivities = async () => {
-    const { data, error: err } = await supabase
-      .from('school_activities')
-      .select('*')
-      .eq('school_id', user?.schoolId)
-      .order('day_of_week');
-    if (err) {
-      console.warn('Could not fetch activities:', err);
-      setActivities([]);
-      return;
-    }
-    setActivities((data || []) as SchoolActivity[]);
   };
 
   const fetchTeacherKey = async () => {
@@ -539,52 +722,85 @@ export default function TimetableView() {
     return lookup;
   }, [entries]);
 
+  const isPlaceholderActivity = (entry: TimetableEntry): boolean => {
+    if (entry.entry_type !== 'activity' && entry.entry_type !== 'activities') return false;
+    const label = String(entry.activity_name || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    return label === 'REVISION' || label === 'SELF-STUDY' || label === 'SELF STUDY';
+  };
+
   const getEntries = (day: number, classId: string, slot: TimeSlot): TimetableEntry[] => {
-    // Prefer exact time_slot_id match (real DB slots)
-    const byId = entryLookup.get(`${day}-${classId}-${slot.id}`);
-    if (byId && byId.length) return byId;
-    // Synthetic display slots: match by slot_order
+    // A merged activity column can represent multiple legacy DB slot IDs.
+    const sourceIds = slot.sourceSlotIds?.length ? slot.sourceSlotIds : [slot.id];
+    const merged: TimetableEntry[] = [];
+    sourceIds.forEach((sourceId) => {
+      const byId = entryLookup.get(`${day}-${classId}-${sourceId}`) || [];
+      merged.push(...byId.filter((entry) => !isPlaceholderActivity(entry)));
+    });
+    // Migration fallback: older generations stored an in-lesson activity in
+    // its own activity slot. If that slot is now hidden, show the activity in
+    // the normal lesson cell whose effective interval it overlaps, replacing
+    // the old subject entry in that cell.
+    const legacyActivityEntries = slot.slot_type === 'lesson'
+      ? entries.filter((entry) =>
+          entry.day_of_week === day &&
+          entry.class_id === classId &&
+          (entry.entry_type === 'activity' || entry.entry_type === 'activities') &&
+          !isPlaceholderActivity(entry) &&
+          Boolean(entry.effective_start_time && entry.effective_end_time) &&
+          timeIntervalsOverlap(
+            String(entry.effective_start_time),
+            String(entry.effective_end_time),
+            slot.start_time,
+            slot.end_time,
+          ),
+        )
+      : [];
+    if (legacyActivityEntries.length) return legacyActivityEntries;
+    if (merged.length) return merged;
+    // Synthetic display slots: match by slot_order.
     return entriesByOrder.get(`${day}-${classId}-${slot.slot_order}`) || [];
   };
 
   const getCellDisplay = (entriesForCell: TimetableEntry[]): string => {
     if (!entriesForCell || entriesForCell.length === 0) return '';
     const parts: string[] = [];
+    const seenActivityLabels = new Set<string>();
     entriesForCell.forEach((entry) => {
+      if (isPlaceholderActivity(entry)) return;
       if (entry.entry_type === 'activity' || entry.entry_type === 'activities') {
-        if (entry.activity_name) parts.push(entry.activity_name.toUpperCase());
+        const label = String(entry.activity_name || '').trim().toUpperCase();
+        if (label && !seenActivityLabels.has(label)) {
+          seenActivityLabels.add(label);
+          parts.push(label);
+        }
         return;
       }
       if (!entry.subject_name && !entry.subject_code) return;
       const code = getSubjectCode(entry.subject_name || '', entry.subject_code || '');
       const teacherNum = entry.teacher_number ? String(entry.teacher_number) : '';
+      // Double lessons remain two consecutive timetable cells; no extra symbol is needed.
       parts.push(`${code}${teacherNum}`);
     });
     return parts.join(' ') || '';
   };
 
-  /** Get activities for a given day from school_activities table */
-  const getActivitiesForDay = (dayIdx: number): string => {
-    const dayNum = dayIdx + 1;
-    const dayActivities = activities.filter(a => a.day_of_week === dayNum);
-    if (dayActivities.length === 0) return '';
-    // Return all activity names for this day, joined
-    return dayActivities.map(a => a.activity_name.trim().toUpperCase()).join(' / ');
-  };
 
-  /** Classes to display (filtered if a specific class is selected) */
+  /** Active level groups represented by the school’s active classes. */
+  const allLevelGroupsInView = useMemo(
+    () => Array.from(new Set(classes.map(resolveClassLevelGroup))).sort(),
+    [classes]
+  );
+
+  /** Classes to display (filtered if a specific class or level is selected) */
   const displayClasses = useMemo(() => {
     let list = classes;
     if (selectedClass !== 'all') {
       list = classes.filter(c => c.id === selectedClass);
     } else if (selectedLevelGroup !== 'auto') {
       list = classes.filter(c => resolveClassLevelGroup(c) === selectedLevelGroup);
-    } else if (activeLevelGroup && activeLevelGroup !== 'default') {
-      // When showing "all" with auto level, only show classes that match active level
-      // so the column structure matches their lesson count.
-      const matched = classes.filter(c => resolveClassLevelGroup(c) === activeLevelGroup);
-      list = matched.length > 0 ? matched : classes;
     }
+    // Auto + All Classes is the explicit All Levels view. The renderer below
+    // splits it into one table per level so lesson counts and clock columns never mix.
     return list;
   }, [classes, selectedClass, selectedLevelGroup, activeLevelGroup]);
 
@@ -599,16 +815,22 @@ export default function TimetableView() {
       const filename = classId
         ? `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${(className || classId).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-timetable.pdf`
         : `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-full-timetable.pdf`;
-      await html2pdf()
-        .set({
-          margin: [0.2, 0.1, 0.2, 0.1],
-          filename,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#1a1a1a' },
-          jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-        })
-        .from(element)
-        .save();
+      if (classId) element.classList.add('pdf-class-export');
+      try {
+        await html2pdf()
+          .set({
+            margin: [0.05, 0.05, 0.05, 0.05],
+            filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            pagebreak: { mode: ['css', 'legacy'], avoid: ['.bb-wrap', 'tr'] },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: classId ? 1200 : 1600 },
+            jsPDF: { unit: 'in', format: classId ? 'a4' : 'a3', orientation: 'landscape', compress: true },
+          })
+          .from(element)
+          .save();
+      } finally {
+        if (classId) element.classList.remove('pdf-class-export');
+      }
     } finally {
       setDownloadingClass(null);
     }
@@ -630,18 +852,28 @@ export default function TimetableView() {
 
   
   // Structure summary only. Clock times come from this school's Setup / generated slots.
+  const isAllLevelsView = selectedClass === 'all' && selectedLevelGroup === 'auto';
+  const structureTitle = isAllLevelsView
+    ? 'All Active Levels (separate structures)'
+    : (LEVEL_LABELS[activeLevelGroup] || activeLevelGroup);
   const summaryBanner = (
     <div className="mx-4 mb-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="font-semibold">Structure ({LEVEL_LABELS[activeLevelGroup] || activeLevelGroup}):</span>
-        <span><strong>{slotSummary.totalLessons}</strong> lessons/day</span>
-        <span className="text-blue-300">|</span>
-        <span><strong>{slotSummary.beforeLunch}</strong> before lunch</span>
-        <span className="text-blue-300">|</span>
-        <span>
-          <strong>{slotSummary.afterLunch}</strong> after lunch
-          {slotSummary.afterLunch === 0 ? ' (ends at lunch)' : ''}
-        </span>
+        <span className="font-semibold">Structure ({structureTitle}):</span>
+        {isAllLevelsView ? (
+          <span>Each active level is shown in its own timetable below.</span>
+        ) : (
+          <>
+            <span><strong>{slotSummary.totalLessons}</strong> lessons/day</span>
+            <span className="text-blue-300">|</span>
+            <span><strong>{slotSummary.beforeLunch}</strong> before lunch</span>
+            <span className="text-blue-300">|</span>
+            <span>
+              <strong>{slotSummary.afterLunch}</strong> after lunch
+              {slotSummary.afterLunch === 0 ? ' (ends at lunch)' : ''}
+            </span>
+          </>
+        )}
       </div>
       <p className="mt-1 text-xs text-blue-700">
         Break, lunch, and activities times come from Timetable Setup for this school. Edit Setup, then regenerate to refresh the grid.
@@ -651,32 +883,38 @@ export default function TimetableView() {
 
   const timetableStyles = `
     .bb-wrap {
-      background-color: #1a1a1a;
-      color: #e0e0e0;
-      font-family: 'Courier New', Courier, monospace;
-      padding: 16px;
-      border: 8px solid #4a3728;
-      box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+      background-color: #ffffff;
+      color: #111827;
+      font-family: Arial, Helvetica, sans-serif;
+      padding: 18px;
+      border: 1px solid #cbd5e1;
+      box-sizing: border-box;
+      break-inside: avoid;
     }
     .tt-table {
       border-collapse: collapse;
-      width: 100%;
+      width: max-content;
+      min-width: 100%;
+      min-width: 1450px;
       table-layout: auto;
+      page-break-inside: avoid;
     }
-    .tt-table th, .tt-table td {
+      .tt-table th, .tt-table td {
       border: 1px solid #555;
-      padding: 3px 4px;
+      padding: 6px 5px;
       text-align: center;
       vertical-align: middle;
-      font-size: 0.68rem;
-      line-height: 1.2;
+      font-size: 0.78rem;
+      line-height: 1.15;
+      overflow-wrap: anywhere;
     }
     .tt-header {
       background-color: #222;
       color: #4da6ff;
       font-weight: bold;
-      font-size: 0.65rem;
-      white-space: nowrap;
+      font-size: 0.62rem;
+      white-space: normal;
+      line-height: 1.05;
     }
     .tt-day {
       writing-mode: vertical-lr;
@@ -697,48 +935,178 @@ export default function TimetableView() {
       min-width: 42px;
       font-size: 0.7rem;
     }
-    .tt-break {
-      writing-mode: vertical-lr;
-      text-orientation: mixed;
+    .tt-break, .tt-lunch {
+      writing-mode: horizontal-tb;
       font-weight: 900;
-      font-size: 0.85rem;
+      font-size: 0.58rem;
       background-color: #1a1a1a;
       color: #4da6ff;
-      width: 22px;
-      min-width: 22px;
-      letter-spacing: 0.05rem;
-      padding: 4px 2px;
+      width: 52px;
+      min-width: 52px;
+      padding: 4px 3px;
       text-align: center;
-    }
-    .tt-lunch {
-      writing-mode: vertical-lr;
-      text-orientation: mixed;
-      font-weight: 900;
-      font-size: 0.85rem;
-      background-color: #1a1a1a;
-      color: #4da6ff;
-      width: 22px;
-      min-width: 22px;
-      letter-spacing: 0.05rem;
-      padding: 4px 2px;
-      text-align: center;
+      white-space: nowrap;
+      line-height: 1.05;
     }
     .tt-cell {
-      min-width: 70px;
-      height: 28px;
-      color: #e0e0e0;
-      font-size: 0.68rem;
+      min-width: 92px;
+      height: 40px;
+      color: #111827;
+      font-size: 0.78rem;
+      white-space: nowrap;
     }
-    .tt-activity {
-      writing-mode: vertical-lr;
-      text-orientation: mixed;
-      font-weight: bold;
-      color: #33cc33;
-      width: 30px;
-      min-width: 30px;
-      font-size: 0.62rem;
-      padding: 4px 2px;
+    .tt-weekly-table {
+      width: 100%;
+      min-width: 760px;
+      table-layout: fixed;
+    }
+    .tt-weekly-table .tt-time-header {
+      min-width: 72px;
+      padding: 5px 3px;
+      font-size: 0.6rem;
+      white-space: nowrap;
+    }
+    .tt-day-week-header,
+    .tt-day-week {
+      width: 56px;
+      min-width: 56px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+    }
+    .tt-day-week {
+      background: #1f2937;
+      color: #bfdbfe;
       text-align: center;
+      font-size: 0.72rem;
+    }
+    .tt-empty {
+      min-width: 72px;
+      height: 40px;
+      color: #cbd5e1;
+      background: #f8fafc;
+      text-align: center;
+      font-size: 0.7rem;
+    }
+    .tt-subtime,
+    .tt-slot-label {
+      display: block;
+      margin-top: 2px;
+      font-size: 0.48rem;
+      line-height: 1.05;
+      color: #64748b;
+      font-weight: 600;
+    }
+    .tt-activity .tt-subtime { color: #166534; }
+    .tt-break .tt-subtime,
+    .tt-lunch .tt-subtime { color: #64748b; }
+    .tt-weekly-board {
+      --board-duration: 1;
+      width: 100%;
+      min-width: 720px;
+      background: #ffffff;
+      overflow-x: auto;
+    }
+    .tt-flex-ruler-row,
+    .tt-flex-row {
+      display: flex;
+      width: 100%;
+      min-width: 720px;
+    }
+    .tt-flex-ruler-row {
+      background: #eff6ff;
+      border-bottom: 1px solid #cbd5e1;
+    }
+    .tt-flex-ruler-day,
+    .tt-flex-day {
+      flex: 0 0 52px;
+      width: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1f2937;
+      color: #bfdbfe;
+      font-weight: 900;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+    }
+    .tt-flex-ruler {
+      position: relative;
+      flex: 1;
+      height: 26px;
+    }
+    .tt-flex-ruler-mark {
+      position: absolute;
+      top: 7px;
+      transform: translateX(-50%);
+      color: #475569;
+      font-size: 0.52rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .tt-flex-row {
+      min-height: 48px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .tt-flex-timeline {
+      display: flex;
+      flex: 1;
+      min-width: 0;
+      align-items: stretch;
+      background: #ffffff;
+    }
+    .tt-flex-segment,
+    .tt-flex-gap {
+      min-width: 0;
+      min-height: 48px;
+      border-right: 1px solid #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3px 2px;
+      text-align: center;
+      overflow: hidden;
+    }
+    .tt-flex-segment strong {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #111827;
+      font-size: 0.68rem;
+      line-height: 1.05;
+    }
+    .tt-flex-segment span,
+    .tt-flex-segment small {
+      display: block;
+      margin-top: 2px;
+      font-size: 0.47rem;
+      line-height: 1;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    .tt-flex-lesson { background: #ffffff; }
+    .tt-flex-break { background: #eff6ff; }
+    .tt-flex-break strong { color: #2563eb; }
+    .tt-flex-lunch { background: #fffbeb; }
+    .tt-flex-lunch strong { color: #b45309; }
+    .tt-flex-activity { background: #ecfdf5; }
+    .tt-flex-activity strong { color: #15803d; }
+    .tt-flex-activity span { color: #166534; }
+    .tt-flex-gap { background: #f8fafc; border-right-style: dashed; }
+    .tt-activity {
+      writing-mode: horizontal-tb;
+      font-weight: bold;
+      color: #15803d;
+      width: 88px;
+      min-width: 88px;
+      font-size: 0.62rem;
+      padding: 4px 3px;
+      text-align: center;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.05;
     }
     .tt-break-header {
       background-color: #222;
@@ -746,8 +1114,40 @@ export default function TimetableView() {
       font-weight: bold;
       font-size: 0.58rem;
       white-space: pre-line;
-      width: 22px;
-      min-width: 22px;
+      width: 52px;
+      min-width: 52px;
+      white-space: normal;
+      line-height: 1.05;
+    }
+    .pdf-class-export {
+      width: 1080px !important;
+      max-width: 1080px !important;
+      padding: 10px !important;
+    }
+    .pdf-class-export .tt-table {
+      width: 100% !important;
+      min-width: 0 !important;
+      table-layout: fixed !important;
+    }
+    .pdf-class-export .tt-table th,
+    .pdf-class-export .tt-table td {
+      padding: 3px 2px !important;
+      font-size: 0.56rem !important;
+      line-height: 1.05 !important;
+    }
+    .pdf-class-export .tt-cell {
+      min-width: 0 !important;
+      height: 34px !important;
+      font-size: 0.56rem !important;
+    }
+    .pdf-class-export .tt-break,
+    .pdf-class-export .tt-lunch {
+      width: auto !important;
+      min-width: 0 !important;
+      font-size: 0.48rem !important;
+    }
+    .pdf-class-export .tt-subtime {
+      font-size: 0.37rem !important;
     }
     @media print {
       .no-print { display: none !important; }
@@ -758,7 +1158,7 @@ export default function TimetableView() {
   `;
 
   const renderTimetableTable = (classesToRender: SchoolClass[], tableId: string, slotsOverride?: TimeSlot[]) => {
-    const slotsForTable =
+    const rawSlotsForTable =
       slotsOverride ||
       (classesToRender.length === 1
         ? buildDisplaySlotsForLevel(
@@ -767,6 +1167,37 @@ export default function TimetableView() {
             levelConfigs[resolveClassLevelGroup(classesToRender[0])]
           )
         : allSlots);
+    // Keep only genuine post-school activity periods as structural columns.
+    // Activities that overlap a normal lesson are rendered in that lesson cell,
+    // while activities after the final lesson retain a dedicated final column.
+    const mergedSlotsForTable = rawSlotsForTable.reduce<TimeSlot[]>((merged, slot) => {
+      if (slot.slot_type !== 'activity' && slot.slot_type !== 'activities') {
+        merged.push(slot);
+        return merged;
+      }
+      const existing = merged.find((candidate) =>
+        (candidate.slot_type === 'activity' || candidate.slot_type === 'activities') &&
+        candidate.start_time === slot.start_time && candidate.end_time === slot.end_time
+      );
+      if (!existing) {
+        merged.push({ ...slot, sourceSlotIds: [slot.id] });
+      } else {
+        existing.sourceSlotIds = [...(existing.sourceSlotIds || [existing.id]), slot.id];
+        if (!existing.label.includes(slot.label.replace(/^ACTIVITY:\s*/i, ''))) {
+          existing.label = `${existing.label} / ${slot.label.replace(/^ACTIVITY:\s*/i, '')}`;
+        }
+      }
+      return merged;
+    }, []);
+    const isActivitySlot = (slot: TimeSlot) =>
+      slot.slot_type === 'activity' || slot.slot_type === 'activities';
+    const postSchoolActivitySlots = mergedSlotsForTable.filter((slot) =>
+      isActivitySlot(slot) && isPostLessonActivity(mergedSlotsForTable, slot)
+    );
+    const slotsForTable = [
+      ...mergedSlotsForTable.filter((slot) => !isActivitySlot(slot)),
+      ...postSchoolActivitySlots,
+    ];
     if (!slotsForTable.length) {
       return (
         <div id={tableId} className="m-4 rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900 text-sm">
@@ -774,6 +1205,33 @@ export default function TimetableView() {
         </div>
       );
     }
+
+    const lessonSummary = countLessons(slotsForTable);
+
+    // Breaks, lunch, and lesson clocks are shared by every class in the level.
+    // Per-entry effective times are used only when persisted; no activity can
+    // shift the level structure or create an empty leading interval.
+    const effectiveSlotsByDayClass = new Map<string, TimeSlot>();
+    DAYS.forEach((_, dayIdx) => {
+      classesToRender.forEach((cls) => {
+        slotsForTable.forEach((slot) => {
+          effectiveSlotsByDayClass.set(`${dayIdx + 1}-${cls.id}-${slot.id}`, slot);
+        });
+      });
+    });
+
+    const getCellTime = (
+      entriesForCell: TimetableEntry[],
+      slot: TimeSlot,
+      day: number,
+      cls: SchoolClass,
+    ): string => {
+      const fallbackSlot = effectiveSlotsByDayClass.get(`${day}-${cls.id}-${slot.id}`) || slot;
+      // Every class in a level uses the same fixed clock. Activity entries
+      // inherit their owning lesson/post-school segment time and never shift
+      // breaks, lunch, or the first lesson.
+      return `${fmt(fallbackSlot.start_time)}–${fmt(fallbackSlot.end_time)}`;
+    };
 
     return (
 
@@ -792,6 +1250,12 @@ export default function TimetableView() {
                 <p className="text-blue-300 text-xs mt-1">
           {countLessons(slotsForTable).total} lessons/day · {countLessons(slotsForTable).afterLunch} after lunch
           {countLessons(slotsForTable).afterLunch === 0 ? ' · ends at lunch (no post-lunch lesson columns)' : ''}
+        </p>
+        <p className="text-slate-500 text-[0.65rem] mt-1">
+          Cell times use the saved level clock; activities occupy only their configured slot and never shift breaks or lunch.
+        </p>
+        <p className="text-emerald-700 text-[0.65rem] mt-1 font-semibold">
+          Optional activities appear only on their configured day, time, and selected level/class. An in-lesson activity fills its existing lesson slot; after-school activities retain a dedicated final column because no lesson is scheduled in that period.
         </p>
         <div className="h-0.5 w-24 bg-blue-400 mx-auto mt-2"></div>
       </div>
@@ -823,7 +1287,12 @@ export default function TimetableView() {
                   );
                 }
                 if (slot.slot_type === 'activities' || slot.slot_type === 'activity') {
-                  return null;
+                  return (
+                    <th key={slot.id} rowSpan={2} className="tt-header" style={{ color: '#33cc33' }}>
+                      <span style={{display:'block'}}>ACTIVITIES</span>
+                      <span style={{fontSize:'0.45rem', color:'#8f8'}}>{fmt(slot.start_time)}–{fmt(slot.end_time)}</span>
+                    </th>
+                  );
                 }
                 return (
                   <th key={slot.id} className="tt-header">
@@ -831,20 +1300,7 @@ export default function TimetableView() {
                   </th>
                 );
               })}
-              <th rowSpan={2} className="tt-header" style={{ width: '72px', minWidth: '72px', color: '#33cc33' }}>
-                <span style={{display:'block'}}>ACTIVITIES</span>
-                {(() => {
-                  const act = slotsForTable.find((s) => s.slot_type === 'activities' || s.slot_type === 'activity');
-                  if (!act) return <span style={{display:'block', fontSize:'0.55rem', color:'#8f8'}}>AFTER SCHOOL</span>;
-                  return (
-                    <>
-                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>{fmt(act.start_time)}</span>
-                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>—</span>
-                      <span style={{display:'block', fontSize:'0.5rem', color:'#8f8'}}>{fmt(act.end_time)}</span>
-                    </>
-                  );
-                })()}
-              </th>
+
             </tr>
             <tr>
               {slotsForTable.map(slot => {
@@ -874,10 +1330,8 @@ export default function TimetableView() {
                         if (clsIdx === 0) {
                           return (
                             <td key={slot.id} rowSpan={classesToRender.length} className="tt-break">
-                              B<br/>R<br/>E<br/>A<br/>K<br/>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block',marginTop:'2px'}}>{fmt(slot.start_time)}</span>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>—</span>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
+                              <strong>BREAK</strong>
+                              <span className="tt-subtime">{getCellTime(getEntries(dayIdx + 1, cls.id, slot), slot, dayIdx + 1, cls)}</span>
                             </td>
                           );
                         }
@@ -887,31 +1341,36 @@ export default function TimetableView() {
                         if (clsIdx === 0) {
                           return (
                             <td key={slot.id} rowSpan={classesToRender.length} className="tt-lunch">
-                              L<br/>U<br/>N<br/>C<br/>H<br/>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block',marginTop:'2px'}}>{fmt(slot.start_time)}</span>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>—</span>
-                              <span style={{fontSize:'0.45rem',color:'#aaa',display:'block'}}>{fmt(slot.end_time)}</span>
+                              <strong>LUNCH</strong>
+                              <span className="tt-subtime">{getCellTime(getEntries(dayIdx + 1, cls.id, slot), slot, dayIdx + 1, cls)}</span>
                             </td>
                           );
                         }
                         return null;
                       }
                       if (slot.slot_type === 'activities' || slot.slot_type === 'activity') {
-                        return null;
+                        const activityEntries = getEntries(dayIdx + 1, cls.id, slot);
+                        const activityDisplay = getCellDisplay(activityEntries);
+                        return (
+                          <td key={slot.id} className="tt-activity">
+                            {activityDisplay && <strong>{activityDisplay}</strong>}
+                            <span className="tt-subtime">{getCellTime(activityEntries, slot, dayIdx + 1, cls)}</span>
+                          </td>
+                        );
                       }
                       const cellEntries = getEntries(dayIdx + 1, cls.id, slot);
                       const display = getCellDisplay(cellEntries);
+                      const effectiveTime = getCellTime(cellEntries, slot, dayIdx + 1, cls);
                       return (
                         <td key={slot.id} className="tt-cell">
-                          {display}
+                          {display && <strong>{display}</strong>}
+                          {(display || slot.slot_type === 'lesson') && (
+                            <span className="tt-subtime">{effectiveTime}</span>
+                          )}
                         </td>
                       );
                     })}
-                    {clsIdx === 0 && (
-                      <td rowSpan={classesToRender.length} className="tt-activity">
-                        {getActivitiesForDay(dayIdx) || '—'}
-                      </td>
-                    )}
+
                   </tr>
                 ))}
               </React.Fragment>
@@ -919,10 +1378,11 @@ export default function TimetableView() {
           </tbody>
         </table>
       </div>
+
       {teacherKey.length > 0 && (
         <div className="mt-6 pt-4 border-t border-gray-700">
           <h3 className="text-blue-400 font-black text-xs uppercase mb-3 tracking-widest">Teacher Reference Key</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {teacherKey.map(t => (
               <div key={t.teacher_number} className="text-[0.65rem] flex flex-col">
                 <span className="text-blue-300 font-bold">T{t.teacher_number}: {t.teacher_name}</span>
@@ -993,10 +1453,10 @@ export default function TimetableView() {
           <span className="font-bold text-gray-700 text-sm">Level:</span>
           <button
             type="button"
-            onClick={() => setSelectedLevelGroup('auto')}
+            onClick={() => { setSelectedLevelGroup('auto'); setSelectedClass('all'); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedLevelGroup === 'auto' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
           >
-            Auto
+            All Levels
           </button>
           {availableLevelGroups.map((lg) => (
             <button
@@ -1011,8 +1471,8 @@ export default function TimetableView() {
           ))}
         </div>
         <p className="text-xs text-gray-500">
-          Active structure: <strong>{LEVEL_LABELS[activeLevelGroup] || activeLevelGroup}</strong>
-          {' '}· {slotSummary.totalLessons} lessons/day · {slotSummary.afterLunch} after lunch
+          Active structure: <strong>{structureTitle}</strong>
+          {!isAllLevelsView && <> {' '}· {slotSummary.totalLessons} lessons/day · {slotSummary.afterLunch} after lunch</>}
           {availableLevelGroups.includes('default') && availableLevelGroups.length > 1 ? (
             <span className="text-amber-600"> · Tip: re-generate each level to replace legacy &quot;default&quot; slots</span>
           ) : null}
@@ -1044,9 +1504,23 @@ export default function TimetableView() {
 
       {summaryBanner}
 
-      {/* Main Timetable (full or filtered) */}
+      {/* Main Timetable (all levels or a selected level/class) */}
       <div id="timetable-print-area">
-        {renderTimetableTable(displayClasses, 'timetable-main-view')}
+        {selectedClass === 'all' && selectedLevelGroup === 'auto'
+          ? allLevelGroupsInView.map((levelGroup) => {
+              const groupClasses = classes.filter((cls) => resolveClassLevelGroup(cls) === levelGroup);
+              const groupSlots = buildDisplaySlotsForLevel(
+                timeSlots,
+                levelGroup,
+                levelConfigs[levelGroup]
+              );
+              return (
+                <div key={levelGroup} className="mb-6">
+                  {renderTimetableTable(groupClasses, `timetable-main-${levelGroup}`, groupSlots)}
+                </div>
+              );
+            })
+          : renderTimetableTable(displayClasses, 'timetable-main-view')}
       </div>
 
       {/* Hidden per-class timetables for PDF generation */}

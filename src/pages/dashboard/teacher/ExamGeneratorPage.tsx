@@ -11,7 +11,7 @@ import {
   getStrandPacks,
 } from '@/lib/kicd-knowledge';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 interface Grade { id: string; grade_number: number; grade_name: string; }
 interface Subject { id: string; subject_name: string; subject_code: string; }
@@ -21,6 +21,10 @@ interface Topic { id: string; topic_name: string; topic_description: string; lea
 
 export default function ExamGeneratorPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const requestedGrade = searchParams.get('grade') || '';
+  const requestedSubject = searchParams.get('subject') || '';
+  const requestedTopic = searchParams.get('topic') || '';
   const [grades, setGrades] = useState<Grade[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedGrade, setSelectedGrade] = useState('');
@@ -46,15 +50,20 @@ export default function ExamGeneratorPage() {
       .from('curriculum_grades')
       .select('*')
       .order('grade_number');
-    const junior = (data || []).filter((g: Grade) => g.grade_number >= 7 && g.grade_number <= 9);
-    if (junior.length) {
-      setGrades(junior);
-    } else {
-      setGrades([
+    const availableGrades = (data || []).length
+      ? [...(data || [])].sort((a: Grade, b: Grade) => a.grade_number - b.grade_number)
+      : [
         { id: 'g7', grade_number: 7, grade_name: 'Grade 7' },
         { id: 'g8', grade_number: 8, grade_name: 'Grade 8' },
         { id: 'g9', grade_number: 9, grade_name: 'Grade 9' },
-      ]);
+      ];
+    setGrades(availableGrades);
+    const requested = requestedGrade.toLowerCase().replace(/\s+/g, '');
+    if (requested) {
+      const match = availableGrades.find((grade) =>
+        grade.id === requestedGrade || grade.grade_name.toLowerCase().replace(/\s+/g, '') === requested
+      );
+      if (match) setSelectedGrade(match.id);
     }
     setLoadingGrades(false);
   };
@@ -69,16 +78,20 @@ export default function ExamGeneratorPage() {
       .eq('grade_id', selectedGrade)
       .order('subject_name')
       .then(({ data }) => {
-        if (data && data.length) {
-          setSubjects(data);
-        } else {
-          setSubjects(
-            juniorExamSubjects().map((name, idx) => ({
-              id: `local-${selectedGrade}-${idx}`,
-              subject_name: name,
-              subject_code: name.slice(0, 4).toUpperCase(),
-            }))
+        const availableSubjects: Subject[] = data && data.length
+          ? data as Subject[]
+          : juniorExamSubjects().map((name, idx) => ({
+            id: `local-${selectedGrade}-${idx}`,
+            subject_name: name,
+            subject_code: name.slice(0, 4).toUpperCase(),
+          }));
+        setSubjects(availableSubjects);
+        const requested = requestedSubject.toLowerCase().replace(/\s+/g, '');
+        if (requested) {
+          const match = availableSubjects.find((subject: Subject) =>
+            subject.subject_name.toLowerCase().replace(/\s+/g, '') === requested
           );
+          if (match) setSelectedSubject(match.id);
         }
         setLoadingSubjects(false);
       });
@@ -94,11 +107,19 @@ export default function ExamGeneratorPage() {
 
     const { data: strandsData } = await supabaseUntyped
       .from('curriculum_strands')
-      .select('id, strand_name, strand_order')
+      .select('id, strand_name, strand_order, strand_description')
       .eq('subject_id', selectedSubject)
       .order('strand_order');
 
-    if (!strandsData || strandsData.length === 0) {
+    // Prefer rows explicitly marked as source-verified KICD when a subject also
+    // contains legacy generic curriculum rows. This keeps the selector truthful
+    // without deleting legacy records that may be referenced by school content.
+    const sourceVerifiedStrands = (strandsData || []).filter((strand: { strand_description?: string | null }) =>
+      /(?:official|source-verified)\s+kicd/i.test(strand.strand_description || '')
+    );
+    const effectiveStrandsData = sourceVerifiedStrands.length > 0 ? sourceVerifiedStrands : (strandsData || []);
+
+    if (effectiveStrandsData.length === 0) {
       // Fallback to embedded KICD knowledge — build full strand+sub-strand+topic tree
       const packs = getStrandPacks(subjectName);
       const localStrands: CurriculumStrandOption[] = packs.map((pack, si) => {
@@ -121,6 +142,8 @@ export default function ExamGeneratorPage() {
             localTopics.push({
               id: `local-topic-${topicIdx}`,
               topic_name: topicName,
+              strand_id: `local-strand-${packs.indexOf(pack)}`,
+              sub_strand_id: `local-ss-${packs.indexOf(pack)}-${pack.subStrands.indexOf(ss)}`,
             });
             topicIdx++;
           }
@@ -136,7 +159,7 @@ export default function ExamGeneratorPage() {
     const enriched: CurriculumStrandOption[] = [];
     const allTopics: CurriculumTopicOption[] = [];
 
-    for (const strand of strandsData) {
+    for (const strand of effectiveStrandsData) {
       const { data: ssData } = await supabaseUntyped
         .from('curriculum_sub_strands')
         .select('id, sub_strand_name, sub_strand_order')
@@ -165,37 +188,51 @@ export default function ExamGeneratorPage() {
           allTopics.push({
             id: topic.id,
             topic_name: topic.topic_name,
+            strand_id: strand.id,
+            sub_strand_id: ss.id,
           });
         }
       }
     }
 
-    // If DB strands have no sub-strands at all, supplement with KICD embedded knowledge
-    const hasSubStrands = enriched.some(s => s.sub_strands && s.sub_strands.length > 0);
-    if (!hasSubStrands) {
-      const packs = getStrandPacks(subjectName);
-      for (const strand of enriched) {
-        const matchingPack = packs.find(p =>
-          p.strand.toLowerCase().includes(strand.strand_name.toLowerCase()) ||
-          strand.strand_name.toLowerCase().includes(p.strand.toLowerCase())
-        );
-        if (matchingPack) {
-          strand.sub_strands = matchingPack.subStrands.map((ss, ssi) => ({
-            id: `kicd-ss-${strand.id}-${ssi}`,
-            sub_strand_name: ss.name,
-          }));
-          if (allTopics.length === 0) {
-            let topicIdx = 0;
-            for (const ss of matchingPack.subStrands) {
-              for (const topicName of ss.topics) {
-                allTopics.push({ id: `kicd-topic-${topicIdx}`, topic_name: topicName });
-                topicIdx++;
-              }
-            }
-          }
-        }
+    // Database imports are authoritative, but some schools have strand and
+    // sub-strand rows without topic rows. Supplement only missing children
+    // from the embedded curriculum pack so the dependency chain stays usable.
+    const packs = getStrandPacks(subjectName);
+    for (const strand of enriched) {
+      const matchingPack = packs.find((pack) => {
+        const databaseName = strand.strand_name.toLowerCase();
+        const packName = pack.strand.toLowerCase();
+        return databaseName.includes(packName) || packName.includes(databaseName);
+      });
+      if (!matchingPack) continue;
+
+      if (!strand.sub_strands?.length) {
+        strand.sub_strands = matchingPack.subStrands.map((subStrand, subStrandIndex) => ({
+          id: `kicd-ss-${strand.id}-${subStrandIndex}`,
+          sub_strand_name: subStrand.name,
+        }));
+      }
+
+      for (const [subStrandIndex, subStrand] of (strand.sub_strands || []).entries()) {
+        const matchingPackSubStrand = matchingPack.subStrands.find((packSubStrand) => {
+          const databaseName = subStrand.sub_strand_name.toLowerCase();
+          const packName = packSubStrand.name.toLowerCase();
+          return databaseName.includes(packName) || packName.includes(databaseName);
+        });
+        if (!matchingPackSubStrand || allTopics.some((topic) => topic.sub_strand_id === subStrand.id)) continue;
+
+        matchingPackSubStrand.topics.forEach((topicName, topicIndex) => {
+          allTopics.push({
+            id: `kicd-topic-${strand.id}-${subStrandIndex}-${topicIndex}`,
+            topic_name: topicName,
+            strand_id: strand.id,
+            sub_strand_id: subStrand.id,
+          });
+        });
       }
     }
+
 
     setStrands(enriched);
     setTopics(allTopics);
@@ -267,6 +304,7 @@ export default function ExamGeneratorPage() {
           schoolId={user?.schoolId || ''}
           strands={strands}
           topics={topics}
+          initialTopic={requestedTopic}
         />
       )}
 

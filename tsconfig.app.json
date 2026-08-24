@@ -39,5 +39,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/pages/dashboard/school-admin/BulkSms.tsx"]
 }

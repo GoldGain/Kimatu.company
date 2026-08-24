@@ -21,6 +21,11 @@ export interface SignatureInfo {
   teacher_signature_url?: string | null;
 }
 
+export interface ReportCardLearnerIdentity {
+  name: string;
+  photoUrl?: string | null;
+}
+
 export interface StudentResult {
   subjects?: { name?: string } | null;
   marks?: number;
@@ -38,9 +43,15 @@ const REPORT_CONTENT_BOTTOM_MARGIN = 8;
  * (header + student info + 13-subject table + summary + trend + comment +
  * signatures) fits on a single A4 page.
  */
+// Readable multi-section layout: allow safe pagination instead of squeezing text into overlapping rows.
 export const COMPACT_MODE = true;
 const ROW = COMPACT_MODE ? 3.2 : 5;   // vertical row step for student info (further reduced)
-const HDR_H = COMPACT_MODE ? 22 : 28; // header band height (further reduced)
+const HDR_H = COMPACT_MODE ? 26 : 28; // enough room for matching corner identity squares
+
+export const REPORT_CARD_CORNER_SIZE = 22;
+export const REPORT_CARD_CORNER_Y = 3;
+export const REPORT_CARD_LOGO_X = 14;
+export const REPORT_CARD_PHOTO_X = 174;
 
 /**
  * Starts a clean continuation page when a report-card block cannot fit in the
@@ -48,7 +59,13 @@ const HDR_H = COMPACT_MODE ? 22 : 28; // header band height (further reduced)
  */
 export function ensureReportCardSpace(doc: jsPDF, y: number, requiredHeight: number): number {
   const pageHeight = doc.internal.pageSize.getHeight();
+  const safeY = pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - requiredHeight;
   if (y + requiredHeight <= pageHeight - REPORT_CONTENT_BOTTOM_MARGIN) return y;
+  // Report cards are intentionally one-page documents. In compact mode, keep
+  // the drawing cursor on page one instead of silently creating a continuation
+  // page; callers use the compact dimensions and content caps below to remain
+  // readable within the safe area.
+  if (COMPACT_MODE) return Math.max(REPORT_CONTENT_TOP, safeY);
   doc.addPage();
   return REPORT_CONTENT_TOP;
 }
@@ -294,35 +311,75 @@ export function drawTrendGraph(
 // Helper to compress and convert image to JPEG data URL
 async function compressImage(src: string, maxWidth: number = 400, quality: number = 0.7): Promise<string> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Resource load timeout')), 10000);
+    const timeout = setTimeout(() => reject(new Error('Resource load timeout')), 12000);
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    // Setting crossOrigin on data URLs can make some mobile browsers reject an otherwise valid image.
+    if (!src.startsWith('data:') && !src.startsWith('blob:')) img.crossOrigin = 'anonymous';
     img.onload = () => {
       clearTimeout(timeout);
-      const canvas = document.createElement('canvas');
-      let width = img.width;
-      let height = img.height;
-
-      // Resize if too large
-      if (width > maxWidth) {
-        height = (maxWidth / width) * height;
-        width = maxWidth;
+      const sourceWidth = img.naturalWidth || img.width;
+      const sourceHeight = img.naturalHeight || img.height;
+      if (!sourceWidth || !sourceHeight) {
+        reject(new Error('Image has no readable dimensions'));
+        return;
       }
-
+      const scale = Math.min(1, maxWidth / sourceWidth);
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+      const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext('2d')!;
-      // Use white background for JPEG conversion
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas is unavailable'));
+        return;
+      }
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
-      
-      // Convert to JPEG with compression
       resolve(canvas.toDataURL('image/jpeg', quality));
     };
     img.onerror = () => {
       clearTimeout(timeout);
       reject(new Error('Resource load failed'));
+    };
+    img.src = src;
+  });
+}
+
+async function compressSquareImage(src: string, maxSize: number = 800, quality: number = 0.92): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Photo load timeout')), 12000);
+    const img = new Image();
+    if (!src.startsWith('data:') && !src.startsWith('blob:')) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      clearTimeout(timeout);
+      const sourceWidth = img.naturalWidth || img.width;
+      const sourceHeight = img.naturalHeight || img.height;
+      const side = Math.min(sourceWidth, sourceHeight);
+      if (!side) {
+        reject(new Error('Photo has no readable dimensions'));
+        return;
+      }
+      const outputSize = Math.max(1, Math.min(maxSize, side));
+      const canvas = document.createElement('canvas');
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas is unavailable'));
+        return;
+      }
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, outputSize, outputSize);
+      const sx = (sourceWidth - side) / 2;
+      const sy = (sourceHeight - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, outputSize, outputSize);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      clearTimeout(timeout);
+      reject(new Error('Photo resource failed to load'));
     };
     img.src = src;
   });
@@ -354,7 +411,50 @@ export async function addLogoToPDF(
   }
 }
 
-// ── Add Student Photo to PDF ──────────────────────────────────────────────────
+// ── Corner identity fallbacks ──────────────────────────────────────────────────
+export function drawLogoPlaceholder(
+  doc: jsPDF,
+  label: string,
+  x: number,
+  y: number,
+  size: number,
+) {
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(106, 27, 154);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(x, y, size, size, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(Math.max(8, size * 0.34));
+  doc.setTextColor(106, 27, 154);
+  doc.text(label, x + size / 2, y + size / 2 + size * 0.12, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+}
+
+export function drawStudentPhotoPlaceholder(
+  doc: jsPDF,
+  studentName: string,
+  x: number,
+  y: number,
+  size: number
+) {
+  const initials = studentName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0]?.toUpperCase() || '')
+    .join('') || 'ST';
+  doc.setFillColor(232, 234, 246);
+  doc.setDrawColor(106, 27, 154);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(x, y, size, size, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(Math.max(9, size * 0.42));
+  doc.setTextColor(106, 27, 154);
+  doc.text(initials, x + size / 2, y + size / 2 + size * 0.14, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+}
+
 export async function addStudentPhotoToPDF(
   doc: jsPDF,
   photoUrl: string | null | undefined,
@@ -366,22 +466,18 @@ export async function addStudentPhotoToPDF(
   try {
     let dataUrl = imageCache[photoUrl];
     if (!dataUrl) {
-      dataUrl = await compressImage(photoUrl, 200, 0.6);
+      // Crop to a square before placing it, preserving the learner’s face and avoiding distortion.
+      dataUrl = await compressSquareImage(photoUrl, 800, 0.92);
       imageCache[photoUrl] = dataUrl;
     }
-    
-    // Add a nice border around the student photo
+
     doc.setDrawColor(255, 255, 255);
     doc.setLineWidth(1);
     doc.rect(x - 0.5, y - 0.5, size + 1, size + 1, 'D');
-    
     doc.addImage(dataUrl, 'JPEG', x, y, size, size, undefined, 'FAST');
-    
-    // Add a subtle outer shadow/border
     doc.setDrawColor(200, 200, 200);
     doc.setLineWidth(0.1);
     doc.rect(x - 0.6, y - 0.6, size + 1.2, size + 1.2, 'D');
-    
     return true;
   } catch (err) {
     console.error('Photo add error:', err);
@@ -390,17 +486,45 @@ export async function addStudentPhotoToPDF(
 }
 
 // ── Draw Report Header ───────────────────────────────────────────────────────
-export async function drawReportHeader(doc: jsPDF, school: SchoolInfo) {
-  doc.setFillColor(245, 166, 35); doc.rect(0, 0, 210, HDR_H, 'F');
-  const logoAdded = school.logo_url ? await addLogoToPDF(doc, school.logo_url, 14, 3, 22, 22) : false;
-  doc.setTextColor(26, 35, 126); doc.setFontSize(COMPACT_MODE ? 14 : 16); doc.setFont('helvetica', 'bold');
-  doc.text(school.name || 'School Name', logoAdded ? 40 : 105, 10, { align: logoAdded ? 'left' : 'center' });
-  doc.setFontSize(COMPACT_MODE ? 8 : 9); doc.setFont('helvetica', 'normal');
-  doc.text(school.motto || '', logoAdded ? 40 : 105, 15.5, { align: logoAdded ? 'left' : 'center' });
+export async function drawReportHeader(
+  doc: jsPDF,
+  school: SchoolInfo,
+  learner?: ReportCardLearnerIdentity,
+) {
+  doc.setFillColor(245, 166, 35);
+  doc.rect(0, 0, 210, HDR_H, 'F');
+
+  // Keep both identity images in matching 22mm squares at the same height.
+  // The school logo is always on the left and the learner photo/initials on the right.
+  const logoAdded = await addLogoToPDF(
+    doc,
+    school.logo_url || '/logo.png',
+    REPORT_CARD_LOGO_X,
+    REPORT_CARD_CORNER_Y,
+    REPORT_CARD_CORNER_SIZE,
+    REPORT_CARD_CORNER_SIZE,
+  );
+  if (!logoAdded) drawLogoPlaceholder(doc, 'ZA', REPORT_CARD_LOGO_X, REPORT_CARD_CORNER_Y, REPORT_CARD_CORNER_SIZE);
+  const photoAdded = learner?.photoUrl
+    ? await addStudentPhotoToPDF(doc, learner.photoUrl, REPORT_CARD_PHOTO_X, REPORT_CARD_CORNER_Y, REPORT_CARD_CORNER_SIZE)
+    : false;
+  if (!photoAdded && learner?.name) {
+    drawStudentPhotoPlaceholder(doc, learner.name, REPORT_CARD_PHOTO_X, REPORT_CARD_CORNER_Y, REPORT_CARD_CORNER_SIZE);
+  }
+
+  // Center school identity between the two corner squares so long school contact
+  // text cannot collide with either the logo or the learner image.
+  const centerX = 105;
+  doc.setTextColor(26, 35, 126);
+  doc.setFontSize(COMPACT_MODE ? 13 : 16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(school.name || 'School Name', centerX, 10, { align: 'center', maxWidth: 132 });
+  doc.setFontSize(COMPACT_MODE ? 7.5 : 9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(school.motto || '', centerX, 15.5, { align: 'center', maxWidth: 132 });
   const contactLine = `${school.address || ''} | ${school.phone || ''} | ${school.email || ''}`;
-  const maxContactW = Math.min(160, 210 - (logoAdded ? 40 : 105) - 14);
-  const contactLines = doc.splitTextToSize(contactLine, maxContactW);
-  doc.text(contactLines, logoAdded ? 40 : 105, 21, { align: logoAdded ? 'left' : 'center' });
+  const contactLines = doc.splitTextToSize(contactLine, 132);
+  doc.text(contactLines, centerX, 21, { align: 'center' });
 }
 
 // ── Add Signatures to PDF ────────────────────────────────────────────────────
@@ -493,9 +617,9 @@ export async function addSignaturesToPDF(
     doc.setTextColor(0, 102, 102);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
-    doc.text(`Next term begins on: ${formattedDate}`, 14, y + sigBlockH + (COMPACT_MODE ? 2 : 4));
+    doc.text(`Next term begins on: ${formattedDate}`, 14, y + sigBlockH + (COMPACT_MODE ? 4 : 4));
     doc.setTextColor(0, 0, 0);
-    return y + sigBlockH + (COMPACT_MODE ? 6 : 10);
+    return y + sigBlockH + (COMPACT_MODE ? 8 : 10);
   }
 
   return y + sigBlockH;
@@ -562,6 +686,8 @@ export function drawResultsTable(
     startY,
     head: [tableHead],
     body: tableBody,
+    pageBreak: COMPACT_MODE ? 'avoid' : 'auto',
+    rowPageBreak: 'avoid',
     styles: { fontSize: COMPACT_MODE ? 6.8 : 8, cellPadding: COMPACT_MODE ? 0.6 : 1.5 },
     headStyles: { fillColor: [106, 27, 154], textColor: 255, fontSize: COMPACT_MODE ? 7.2 : 8, cellPadding: 0.8 },
     alternateRowStyles: { fillColor: [232, 234, 246] }, margin: { left: 14, right: 14 },
@@ -622,7 +748,8 @@ export function drawSummaryBox(
   doc.text(`Position: ${position}`, 20, startY + gap * 2);
   doc.text(`Grade: ${overallGrading.grade}`, 65, startY + gap * 2);
   if (!isPrimary && totalPoints !== null) doc.text(`Total Points: ${totalPoints}`, 130, startY + gap * 2);
-  return startY + boxH + (COMPACT_MODE ? 1 : 4);
+  // Leave a clear baseline gap so the deviation line cannot be painted into the summary border.
+  return startY + boxH + (COMPACT_MODE ? 3 : 4);
 }
 
 // ── Draw Next Term Start Date ──────────────────────────────────────────────────
@@ -681,13 +808,14 @@ export function drawAchievements(
   startY: number
 ): number {
   if (bestSubjects.length === 0) return startY;
+  const visibleBestSubjects = COMPACT_MODE ? bestSubjects.slice(0, 3) : bestSubjects;
   const rowH = COMPACT_MODE ? 4.5 : 5;
-  const boxHeight = 4 + bestSubjects.length * rowH;
+  const boxHeight = 4 + visibleBestSubjects.length * rowH;
   startY = ensureReportCardSpace(doc, startY, boxHeight + (COMPACT_MODE ? 4 : 6));
   doc.setFillColor(255, 248, 225); doc.rect(14, startY, 182, boxHeight, 'F');
   doc.setFontSize(COMPACT_MODE ? 6.5 : 7); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
   doc.text('ACHIEVEMENT:', 18, startY + 3.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0);
-  bestSubjects.forEach((b, bi) => {
+  visibleBestSubjects.forEach((b, bi) => {
     const pts = b.points !== null ? ` (${b.points} pts)` : '';
     doc.text(`Best in ${b.subjectName}: ${b.studentName} (${b.percentage}% — ${b.gradeLabel}${pts})`, 18, startY + 8 + bi * rowH);
   });
@@ -739,53 +867,68 @@ export function drawAIComment(
   comment: string,
   startY: number
 ): number {
-  // Set the drawing font FIRST so all width measurements match the draw font.
   const fontSize = COMPACT_MODE ? 7 : 7.5;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(fontSize);
-
   const commentLines = wrapCommentText(doc, (comment || 'No class teacher comment provided.').trim());
-  // Measured line step: font size + small gap for readability.
   const lineHeight = COMPACT_MODE ? fontSize * 0.55 + 0.6 : fontSize * 0.62 + 0.8;
   const pageHeight = doc.internal.pageSize.getHeight();
-  let remainingLines = [...commentLines];
-  let y = startY;
-  let isContinuation = false;
 
-  while (remainingLines.length > 0) {
-    const minBlockH = COMPACT_MODE ? 26 : 35;
-    y = ensureReportCardSpace(doc, y, minBlockH);
-    const availableHeight = pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - y;
-    const maxLines = Math.max(3, Math.floor((availableHeight - (COMPACT_MODE ? 12 : 15)) / lineHeight));
-    const chunk = remainingLines.splice(0, maxLines);
-    // Box height derives from the actual wrapped line count plus the header.
-    const boxHeight = Math.max(COMPACT_MODE ? 14 : 30, (COMPACT_MODE ? 7 : 14) + chunk.length * lineHeight + 2);
+  if (COMPACT_MODE) {
+    const availableHeight = Math.max(18, pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - startY);
+    const headerHeight = 7;
+    const maxLines = Math.max(2, Math.floor((availableHeight - headerHeight - 3) / lineHeight));
+    const visibleLines = commentLines.slice(0, maxLines);
+    if (commentLines.length > visibleLines.length && visibleLines.length > 0) {
+      const last = visibleLines.length - 1;
+      visibleLines[last] = visibleLines[last].replace(/[.,;:!?]?$/, '') + '…';
+    }
+    const boxHeight = Math.min(availableHeight, headerHeight + visibleLines.length * lineHeight + 3);
+    const y = Math.max(REPORT_CONTENT_TOP, Math.min(startY, pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - boxHeight));
 
     doc.setDrawColor(100, 120, 180);
     doc.setLineWidth(0.5);
     doc.setFillColor(232, 234, 246);
     doc.rect(14, y, 182, boxHeight, 'FD');
-    doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
+    doc.setFontSize(7.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 35, 126);
-    doc.text(isContinuation ? "Class Teacher's Comment (continued):" : "Class Teacher's Comment:", 18, y + (COMPACT_MODE ? 4 : 7));
+    doc.text("Class Teacher's Comment:", 18, y + 4);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(fontSize);
     doc.setTextColor(0, 0, 0);
+    visibleLines.forEach((line, index) => doc.text(line, 18, y + 7 + index * lineHeight));
+    return y + boxHeight + 1;
+  }
 
-    // Draw each wrapped line explicitly at a measured vertical step so the
-    // last line can never be clipped by the box bottom.
-    for (let i = 0; i < chunk.length; i++) {
-      doc.text(chunk[i], 18, y + (COMPACT_MODE ? 7 : 14) + i * lineHeight);
-    }
-    y += boxHeight + (COMPACT_MODE ? 1 : 5);
-
+  let remainingLines = [...commentLines];
+  let y = startY;
+  let isContinuation = false;
+  while (remainingLines.length > 0) {
+    const minBlockH = 35;
+    y = ensureReportCardSpace(doc, y, minBlockH);
+    const availableHeight = pageHeight - REPORT_CONTENT_BOTTOM_MARGIN - y;
+    const maxLines = Math.max(3, Math.floor((availableHeight - 15) / lineHeight));
+    const chunk = remainingLines.splice(0, maxLines);
+    const boxHeight = Math.max(30, 14 + chunk.length * lineHeight + 2);
+    doc.setDrawColor(100, 120, 180);
+    doc.setLineWidth(0.5);
+    doc.setFillColor(232, 234, 246);
+    doc.rect(14, y, 182, boxHeight, 'FD');
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 35, 126);
+    doc.text(isContinuation ? "Class Teacher's Comment (continued):" : "Class Teacher's Comment:", 18, y + 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(fontSize);
+    doc.setTextColor(0, 0, 0);
+    chunk.forEach((line, index) => doc.text(line, 18, y + 14 + index * lineHeight));
+    y += boxHeight + 5;
     if (remainingLines.length > 0) {
       doc.addPage();
       y = REPORT_CONTENT_TOP;
       isContinuation = true;
     }
   }
-
   return y;
 }
