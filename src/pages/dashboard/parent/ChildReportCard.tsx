@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { Download, FileText, Loader2, Users, Share2, Lock, CreditCard, CheckCircle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import PdfFontSizeDialog from '@/components/PdfFontSizeDialog';
 import { toast } from 'sonner';
 import {
   generateUniqueAIComment,
@@ -17,10 +18,17 @@ import {
   drawAIComment,
   getPercentage,
   formatPosition,
+  buildPerformanceTrend,
   drawPathwayPerformance,
   type SchoolInfo,
   type SignatureInfo,
+  type PerformanceTrendRecord,
 } from '@/lib/reportCardPdf';
+import {
+  configurePdfFontSize,
+  DEFAULT_PDF_FONT_SIZE,
+  type PdfFontSize,
+} from '@/lib/pdfFontSize';
 import { getSchoolLevelBand } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
@@ -70,6 +78,7 @@ export default function ParentChildReportCard() {
   const [trendData, setTrendData] = useState<{ term: string; avg: number }[]>([]);
   const [totalStudents, setTotalStudents] = useState(0);
   const [childPhotoLoadError, setChildPhotoLoadError] = useState(false);
+  const [showFontSizeDialog, setShowFontSizeDialog] = useState(false);
 
   useEffect(() => { fetchChildren(); }, [user?.id]);
 
@@ -113,7 +122,7 @@ export default function ParentChildReportCard() {
     try {
       const { data } = await supabaseUntyped
         .from('schools')
-        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email')
+        .select('name, motto, logo_url, principal_name, principal_signature_url, address, phone, email, next_term_start_date, school_closes_on, school_opens_on')
         .eq('id', schoolId)
         .maybeSingle();
       if (data) {
@@ -125,6 +134,9 @@ export default function ParentChildReportCard() {
           address: data.address || '',
           phone: data.phone || '',
           email: data.email || '',
+          next_term_start_date: data.next_term_start_date || null,
+          school_closes_on: data.school_closes_on || null,
+          school_opens_on: data.school_opens_on || data.next_term_start_date || null,
         });
         setSignatures(prev => ({
           ...prev,
@@ -137,7 +149,7 @@ export default function ParentChildReportCard() {
       try {
         const { data } = await supabaseUntyped
           .from('schools')
-          .select('name, logo_url, principal_name, address, phone, email')
+          .select('name, logo_url, principal_name, address, phone, email, next_term_start_date, school_closes_on, school_opens_on')
           .eq('id', schoolId)
           .maybeSingle();
         if (data) {
@@ -149,6 +161,9 @@ export default function ParentChildReportCard() {
             address: data.address || '',
             phone: data.phone || '',
             email: data.email || '',
+          next_term_start_date: data.next_term_start_date || null,
+          school_closes_on: data.school_closes_on || null,
+          school_opens_on: data.school_opens_on || data.next_term_start_date || null,
           });
         } else {
           setSchoolInfo({ name: 'School' });
@@ -272,22 +287,15 @@ export default function ParentChildReportCard() {
     if (!selectedChild) return;
     const { data: allResults } = await supabaseUntyped
       .from('results')
-      .select('percentage, marks, out_of, term_id, terms(name, academic_year)')
+      .select('percentage, marks, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
       .eq('student_id', selectedChild.id)
       .order('terms(academic_year)', { ascending: true })
       .order('terms(name)', { ascending: true });
-    if (!allResults) return;
-    const termMap: Record<string, { term: string; total: number; count: number }> = {};
-    allResults.forEach((r: any) => {
-      const tname = r.terms?.name || '';
-      const year = r.terms?.academic_year || '';
-      const key = `${year}-${tname}`;
-      const pct = r.percentage !== undefined && r.percentage !== null ? Number(r.percentage) : (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0);
-      if (!termMap[key]) termMap[key] = { term: `${tname} ${year}`, total: 0, count: 0 };
-      termMap[key].total += pct;
-      termMap[key].count++;
-    });
-    setTrendData(Object.values(termMap).map(t => ({ term: t.term, avg: t.count > 0 ? t.total / t.count : 0 })));
+    if (!allResults) {
+      setTrendData([]);
+      return;
+    }
+    setTrendData(buildPerformanceTrend(allResults as PerformanceTrendRecord[]));
   };
 
   const fetchPreviousAvg = async () => {
@@ -313,12 +321,13 @@ export default function ParentChildReportCard() {
   const classDataForGrading = selectedChild?.classes || {};
   const isPrimary = getSchoolLevelBand(classDataForGrading) === 'primary';
 
-  const doGeneratePDF = async () => {
+  const doGeneratePDF = async (fontSize: PdfFontSize = DEFAULT_PDF_FONT_SIZE) => {
     if (!results.length) { toast.error('No results found for this term'); return; }
     setGenerating(true);
     try {
       const { jsPDF } = await import('jspdf');
       const doc = new jsPDF();
+      configurePdfFontSize(doc, fontSize);
       const term = terms.find(t => t.id === selectedTerm);
       const avgPercentage = results.length
         ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
@@ -353,7 +362,7 @@ export default function ParentChildReportCard() {
         name: studentFullName,
         photoUrl: selectedChild.photo_url || null,
       });
-      drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', classDataForGrading.name || 'N/A', term?.name || '', term?.academic_year || '', positionStr, 34, results[0]?.school_exams?.name || undefined);
+      drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', classDataForGrading.name || 'N/A', term?.name || '', term?.academic_year || '', positionStr, 48, results[0]?.school_exams?.name || undefined, selectedChild.assessment_number || undefined);
       let currentY = drawResultsTable(doc, results, classDataForGrading, 62) + 6;
       
       // RESTRICTED Pathway Performance: Only for Junior (Grade 6-9)
@@ -365,8 +374,7 @@ export default function ParentChildReportCard() {
       currentY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, currentY);
       currentY = drawDeviation(doc, deviation, previousAvg, position, currentY + 6);
       if (trendData.length >= 2) {
-        drawTrendGraph(doc, trendData, 14, currentY, 182, 40, getSchoolLevelBand(classDataForGrading));
-        currentY += 42;
+        currentY = drawTrendGraph(doc, trendData, 14, currentY, 182, 34, getSchoolLevelBand(classDataForGrading)) + 2;
       }
       const studentBests = classBestList.filter(b => b.studentId === selectedChild.id);
       if (studentBests.length > 0) {
@@ -392,7 +400,7 @@ export default function ParentChildReportCard() {
         return;
       }
     }
-    doGeneratePDF();
+    setShowFontSizeDialog(true);
   };
 
   const handlePayment = async (type: 'pdf_report' | 'view_results') => {
@@ -607,6 +615,19 @@ export default function ParentChildReportCard() {
           )}
         </div>
       </div>
+
+      {showFontSizeDialog && (
+        <PdfFontSizeDialog
+          open
+          title="Download Child Report Card"
+          description="Choose the font size for the downloaded report card. The default and recommended size is 14."
+          onCancel={() => setShowFontSizeDialog(false)}
+          onConfirm={async (fontSize) => {
+            await doGeneratePDF(fontSize);
+            setShowFontSizeDialog(false);
+          }}
+        />
+      )}
     </div>
   );
 }

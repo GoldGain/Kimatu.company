@@ -288,7 +288,51 @@ export function generateUniqueAIComment(
     .replace('{avgPct}', avgPct.toFixed(1));
 }
 
-// ── Performance Trend Graph Drawing ──────────────────────────────────────────
+// ── Performance Trend Data and Graph Drawing ──────────────────────────────────
+export interface PerformanceTrendRecord {
+  percentage?: number | null;
+  marks?: number | null;
+  out_of?: number | null;
+  term_id?: string | null;
+  exam_id?: string | null;
+  terms?: { name?: string | null; academic_year?: string | number | null } | null;
+  school_exams?: { name?: string | null; type?: string | null } | null;
+  exam_name?: string | null;
+}
+
+const termOrder = (name: string): number => {
+  const normalized = name.toLowerCase();
+  if (/\b(term|trimester|semester)?\s*1\b/.test(normalized)) return 1;
+  if (/\b(term|trimester|semester)?\s*2\b/.test(normalized)) return 2;
+  if (/\b(term|trimester|semester)?\s*3\b/.test(normalized)) return 3;
+  return 99;
+};
+
+export function buildPerformanceTrend(records: PerformanceTrendRecord[]): { term: string; avg: number }[] {
+  const groups = new Map<string, { label: string; year: number; term: number; firstIndex: number; total: number; count: number }>();
+  records.forEach((record, index) => {
+    const termName = String(record.terms?.name || '').trim();
+    const yearText = String(record.terms?.academic_year || '').trim();
+    const year = Number(yearText) || 0;
+    const examName = String(record.school_exams?.name || record.exam_name || '').trim();
+    const termKey = String(record.term_id || `${yearText}-${termName}`);
+    const assessmentKey = String(record.exam_id || examName || 'term');
+    const key = `${termKey}-${assessmentKey}`;
+    const labelBase = [termName, yearText].filter(Boolean).join(' ');
+    const label = examName ? `${examName}${labelBase ? ` · ${labelBase}` : ''}` : labelBase || 'Assessment';
+    const percentage = record.percentage !== undefined && record.percentage !== null
+      ? Number(record.percentage)
+      : Number(record.out_of) > 0 ? (Number(record.marks) || 0) / Number(record.out_of) * 100 : 0;
+    const safePercentage = Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : 0;
+    const existing = groups.get(key);
+    if (existing) { existing.total += safePercentage; existing.count += 1; return; }
+    groups.set(key, { label, year, term: termOrder(termName), firstIndex: index, total: safePercentage, count: 1 });
+  });
+  return Array.from(groups.values())
+    .sort((a, b) => a.year - b.year || a.term - b.term || a.firstIndex - b.firstIndex)
+    .map(group => ({ term: group.label, avg: group.count > 0 ? group.total / group.count : 0 }));
+}
+
 export function drawTrendGraph(
   doc: jsPDF,
   trendData: { term: string; avg: number }[],

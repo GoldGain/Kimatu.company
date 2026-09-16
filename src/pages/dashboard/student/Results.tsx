@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
+import { getRequiredLearningAreas } from '@/lib/grading';
 import { Award, Download, Filter, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 export default function StudentResults() {
@@ -65,7 +66,8 @@ export default function StudentResults() {
 
       if (currentResults.length > 0) {
         const totalPct = currentResults.reduce((s: number, r: any) => s + (r.percentage || r.marks || 0), 0);
-        const avg = totalPct / currentResults.length;
+        const req = getRequiredLearningAreas(student.classes || student) || currentResults.length;
+        const avg = totalPct / req;
         setCurrentAvg(avg);
 
         const storedPosition = currentResults.find((r: any) => r.class_position)?.class_position;
@@ -74,20 +76,22 @@ export default function StudentResults() {
         } else if (student.class_id) {
           const { data: classResults } = await supabaseUntyped
             .from('results')
-            .select('student_id, marks, out_of')
+            .select('student_id, marks, out_of, cbc_points')
             .eq('class_id', student.class_id)
             .eq('term_id', selectedTerm);
           if (classResults && classResults.length > 0) {
-            const studentTotals: Record<string, { totalPct: number; count: number }> = {};
+            const studentTotals: Record<string, { totalPct: number; totalPoints: number; count: number }> = {};
             (classResults as any[]).forEach((r: any) => {
               const pct = r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0;
-              if (!studentTotals[r.student_id]) studentTotals[r.student_id] = { totalPct: 0, count: 0 };
+              if (!studentTotals[r.student_id]) studentTotals[r.student_id] = { totalPct: 0, totalPoints: 0, count: 0 };
               studentTotals[r.student_id].totalPct += pct;
+              studentTotals[r.student_id].totalPoints += Number(r.cbc_points) || 0;
               studentTotals[r.student_id].count += 1;
             });
+            const req = getRequiredLearningAreas(student.classes || student) || 0;
             const ranked = Object.entries(studentTotals)
-              .map(([sid, v]) => ({ studentId: sid, avg: v.totalPct / v.count }))
-              .sort((a, b) => b.avg - a.avg);
+              .map(([sid, v]) => ({ studentId: sid, avg: req > 0 ? v.totalPct / req : v.totalPct / v.count, totalPoints: v.totalPoints, totalPct: v.totalPct }))
+              .sort((a, b) => (b.totalPoints - a.totalPoints) || (b.totalPct - a.totalPct));
             const position = ranked.findIndex(r => r.studentId === student.id) + 1;
             setClassPosition(position || null);
           }
@@ -143,6 +147,14 @@ export default function StudentResults() {
 
   const overallAvg = results.length ? Math.round(results.reduce((s, r) => s + (r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : r.marks || 0)), 0) / results.length) : 0;
   const totalPoints = results.reduce((s, r) => s + (r.cbc_points || r.points_ || 0), 0);
+  const subjectPerformance = Object.values(results.reduce<Record<string, { name: string; total: number; count: number }>>((acc, result: any) => {
+    const name = result.subjects?.name || 'Learning Area';
+    const percentage = Number(result.percentage ?? (result.out_of > 0 ? (result.marks / result.out_of) * 100 : result.marks || 0));
+    acc[name] ||= { name, total: 0, count: 0 };
+    acc[name].total += percentage;
+    acc[name].count += 1;
+    return acc;
+  }, {})).map((item) => ({ name: item.name, percentage: Math.round(item.total / item.count) })).sort((a, b) => b.percentage - a.percentage);
 
   const getOverallGrade = () => {
     if (results.length === 0) return 'N/A';
@@ -256,19 +268,25 @@ export default function StudentResults() {
         ))}
       </div>
 
+      {/* Sub-learning-area comparison */}
+      {subjectPerformance.length > 0 && <div className="bg-white/95 rounded-2xl border border-white/80 p-5 shadow-sm">
+        <h3 className="text-base font-black text-[#1A237E]">Learning Area Comparison</h3>
+        <div className="mt-4 space-y-3">{subjectPerformance.map((item) => <div key={item.name} className="grid grid-cols-[minmax(0,1fr)_3rem] items-center gap-3"><div><div className="mb-1 text-xs font-bold text-gray-700">{item.name}</div><div className="h-3 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-gradient-to-r from-[#6A1B9A] to-[#2563EB]" style={{ width: `${Math.max(0, Math.min(100, item.percentage))}%` }} /></div></div><span className="text-sm font-black text-[#6A1B9A]">{item.percentage}%</span></div>)}</div>
+      </div>}
+
       {/* Results Table */}
       <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.06)] overflow-hidden border border-white/80">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/50">
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Learning Area</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Assessment</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Marks</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">%</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Grade</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Points</th>
-                <th className="text-left text-[10px] font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Term</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Learning Area</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Assessment</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Marks</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">%</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Grade</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Points</th>
+                <th className="text-left text-xs font-black text-[#1A237E] uppercase tracking-wider px-6 py-4">Term</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -282,7 +300,7 @@ export default function StudentResults() {
                     <div className="text-sm font-bold text-[#111111]">{r.subjects?.name}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-xs text-[#666666]">{r.school_exams?.name || r.exams?.name || 'End Term'}</div>
+                    <div className="text-sm text-[#666666]">{r.school_exams?.name || r.exams?.name || 'End Term'}</div>
                   </td>
                   <td className="px-6 py-4 text-sm font-medium">{r.marks}/{r.out_of}</td>
                   <td className="px-6 py-4 text-sm font-bold text-[#6A1B9A]">{r.percentage}%</td>
@@ -292,7 +310,7 @@ export default function StudentResults() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm font-medium">{r.cbc_points || r.points_ || '-'}</td>
-                  <td className="px-6 py-4 text-xs text-[#666666]">{r.terms?.name} {r.terms?.academic_year}</td>
+                  <td className="px-6 py-4 text-sm text-[#666666]">{r.terms?.name} {r.terms?.academic_year}</td>
                 </tr>
               ))}
             </tbody>

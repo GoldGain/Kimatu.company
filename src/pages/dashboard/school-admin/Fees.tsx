@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { supabaseUntyped } from "@/lib/supabase/client";
+import { sendSMS } from '@/lib/sms';
 import { useAuth } from '@/contexts/AuthContext';
-import { CreditCard, Plus, Loader2, CheckCircle, Clock, AlertTriangle, Download, FileText } from 'lucide-react';
+import { CreditCard, Plus, Loader2, CheckCircle, Clock, AlertTriangle, Download, FileText, Trash2, Pencil, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { sortByAdmissionNumber } from '@/lib/student-order';
 
 export default function SchoolAdminFees() {
   const { user, schoolData } = useAuth();
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
   const [terms, setTerms] = useState<any[]>([]);
@@ -17,8 +20,19 @@ export default function SchoolAdminFees() {
   const [showRecord, setShowRecord] = useState(false);
   const [showStructure, setShowStructure] = useState(false);
   const [showInvoice, setShowInvoice] = useState(false);
+  const [editingStructureId, setEditingStructureId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
-  const [activeTab, setActiveTab] = useState<'invoices' | 'structures'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'structures' | 'class-balances'>('invoices');
+  const [selectedFeeClass, setSelectedFeeClass] = useState('');
+  const [selectedFeeBalanceStudents, setSelectedFeeBalanceStudents] = useState<string[]>([]);
+  const [feeSearch, setFeeSearch] = useState('');
+  const [selectedInvoiceClass, setSelectedInvoiceClass] = useState('');
+  const [invoiceClassFilter, setInvoiceClassFilter] = useState('');
+  const [invoiceStudentSearch, setInvoiceStudentSearch] = useState('');
+  const [editingPayment, setEditingPayment] = useState<any | null>(null);
+  const [editPaymentData, setEditPaymentData] = useState({ amount: '', payment_method: 'cash' as 'cash' | 'mpesa' | 'bank' | 'cheque' | 'other', mpesa_reference: '', notes: '' });
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
 
   // Fee structure form: multiple fee types per class/term
   const [structureData, setStructureData] = useState({
@@ -46,13 +60,17 @@ export default function SchoolAdminFees() {
     const schoolId = user?.schoolId;
     if (!schoolId) { setLoading(false); return; }
 
-    const [{ data: inv }, { data: stds }, { data: cls }, { data: trms }, { data: fs }] = await Promise.all([
+    const [{ data: inv }, { data: paymentRows }, { data: stds }, { data: cls }, { data: trms }, { data: fs }] = await Promise.all([
       supabaseUntyped.from('fee_invoices')
-        .select('*, students(first_name, last_name, admission_number), terms(name, academic_year)')
+        .select('*, students(first_name, last_name, admission_number, assessment_number, class_id), terms(name, academic_year)')
         .eq('school_id', schoolId)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false }),
+      supabaseUntyped.from('fee_payments')
+        .select('id, invoice_id, student_id, amount, payment_method, mpesa_reference, receipt_number, payment_date, notes')
+        .eq('school_id', schoolId),
       supabaseUntyped.from('students')
-        .select('id, first_name, last_name, admission_number, class_id')
+        .select('id, first_name, last_name, admission_number, assessment_number, class_id, parent_name, parent_phone, parent2_name, parent2_phone')
         .eq('school_id', schoolId).eq('is_active', true),
       supabaseUntyped.from('classes')
         .select('id, name, level').eq('school_id', schoolId).order('level'),
@@ -63,12 +81,182 @@ export default function SchoolAdminFees() {
         .eq('school_id', schoolId).order('created_at', { ascending: false }),
     ]);
 
-    setInvoices(inv || []);
+    const paymentsByInvoice = new Map<string, number>();
+    (paymentRows || []).forEach((payment: any) => {
+      const invoiceId = String(payment.invoice_id || '');
+      if (!invoiceId) return;
+      paymentsByInvoice.set(invoiceId, (paymentsByInvoice.get(invoiceId) || 0) + Number(payment.amount || 0));
+    });
+    const reconciledInvoices = (inv || []).map((invoice: any) => {
+      const invoiceId = String(invoice.id || '');
+      return paymentsByInvoice.has(invoiceId)
+        ? { ...invoice, amount_paid: paymentsByInvoice.get(invoiceId) || 0 }
+        : invoice;
+    });
+
+    setInvoices(reconciledInvoices);
+    setPayments(paymentRows || []);
     setStudents(stds || []);
     setClasses(cls || []);
     setTerms(trms || []);
     setFeeStructures(fs || []);
     setLoading(false);
+  };
+
+  const invoiceBalance = (invoice: any) => Number(invoice.balance ?? Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.amount_paid || 0)));
+
+  const learnerSortValue = (student: any) => String(student?.admission_number || student?.assessment_number || '').trim();
+
+  const compareLearners = (a: any, b: any) => {
+    const primary = learnerSortValue(a).localeCompare(learnerSortValue(b), undefined, { numeric: true, sensitivity: 'base' });
+    if (primary !== 0) return primary;
+    const secondary = String(a?.assessment_number || '').localeCompare(String(b?.assessment_number || ''), undefined, { numeric: true, sensitivity: 'base' });
+    if (secondary !== 0) return secondary;
+    return `${a?.first_name || ''} ${a?.last_name || ''}`.localeCompare(`${b?.first_name || ''} ${b?.last_name || ''}`);
+  };
+
+  const matchesFeeSearch = (student: any) => {
+    const query = feeSearch.trim().toLowerCase();
+    if (!query) return true;
+    return [student?.admission_number, student?.assessment_number, student?.first_name, student?.last_name]
+      .some((value) => String(value || '').toLowerCase().includes(query));
+  };
+
+  const filteredInvoiceRows = invoices
+    .filter((invoice: any) => !selectedInvoiceClass || invoice.students?.class_id === selectedInvoiceClass)
+    .filter((invoice: any) => matchesFeeSearch(invoice.students))
+    .sort((a: any, b: any) => compareLearners(a.students, b.students));
+
+  const studentById = new Map(students.map((student: any) => [student.id, student]));
+  const invoiceById = new Map(invoices.map((invoice: any) => [invoice.id, invoice]));
+  const filteredPaymentRows = payments
+    .map((payment: any) => ({
+      ...payment,
+      student: studentById.get(payment.student_id) || invoiceById.get(payment.invoice_id)?.students,
+      invoice: invoiceById.get(payment.invoice_id),
+    }))
+    .filter((payment: any) => !selectedInvoiceClass || payment.student?.class_id === selectedInvoiceClass)
+    .filter((payment: any) => matchesFeeSearch(payment.student))
+    .sort((a: any, b: any) => compareLearners(a.student, b.student) || String(b.payment_date || '').localeCompare(String(a.payment_date || '')));
+
+  const invoiceStudents = students
+    .filter((student: any) => !invoiceClassFilter || student.class_id === invoiceClassFilter)
+    .filter((student: any) => {
+      const query = invoiceStudentSearch.trim().toLowerCase();
+      if (!query) return true;
+      return [student.admission_number, student.assessment_number, student.first_name, student.last_name]
+        .some((value) => String(value || '').toLowerCase().includes(query));
+    })
+    .sort(compareLearners);
+
+  const paymentStudents = sortByAdmissionNumber(students);
+
+  const openEditPayment = (payment: any) => {
+    setEditingPayment(payment);
+    setEditPaymentData({
+      amount: String(payment.amount ?? ''),
+      payment_method: payment.payment_method || 'cash',
+      mpesa_reference: payment.mpesa_reference || '',
+      notes: payment.notes || '',
+    });
+  };
+
+  const handleSavePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPayment?.id || !user?.schoolId) return;
+    const amount = Number(editPaymentData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a valid positive payment amount.');
+      return;
+    }
+    setSavingPayment(true);
+    try {
+      const { error: paymentError } = await supabaseUntyped
+        .from('fee_payments')
+        .update({
+          amount,
+          payment_method: editPaymentData.payment_method,
+          mpesa_reference: editPaymentData.mpesa_reference || null,
+          notes: editPaymentData.notes || null,
+        })
+        .eq('id', editingPayment.id)
+        .eq('school_id', user.schoolId);
+      if (paymentError) throw paymentError;
+
+      if (editingPayment.invoice_id) {
+        const [{ data: invoice }, { data: invoicePayments }] = await Promise.all([
+          supabaseUntyped.from('fee_invoices').select('total_amount').eq('id', editingPayment.invoice_id).eq('school_id', user.schoolId).maybeSingle(),
+          supabaseUntyped.from('fee_payments').select('amount').eq('invoice_id', editingPayment.invoice_id).eq('school_id', user.schoolId),
+        ]);
+        const paid = (invoicePayments || []).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0);
+        const total = Number(invoice?.total_amount || 0);
+        const balance = Math.max(0, total - paid);
+        const { error: invoiceError } = await supabaseUntyped
+          .from('fee_invoices')
+          .update({ amount_paid: paid, status: balance <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid' })
+          .eq('id', editingPayment.invoice_id)
+          .eq('school_id', user.schoolId);
+        if (invoiceError) throw invoiceError;
+      }
+      toast.success('Payment updated and invoice balance recalculated.');
+      setEditingPayment(null);
+      await fetchData();
+    } catch (error: any) {
+      toast.error('Failed to update payment: ' + error.message);
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const classBalanceRows = (classId: string) => {
+    const classStudents = students.filter((student: any) => student.class_id === classId).sort(compareLearners);
+    return classStudents.map((student: any) => {
+      const studentInvoices = invoices.filter((invoice: any) => invoice.student_id === student.id);
+      return {
+        student,
+        total: studentInvoices.reduce((sum: number, invoice: any) => sum + Number(invoice.total_amount || 0), 0),
+        paid: studentInvoices.reduce((sum: number, invoice: any) => sum + Number(invoice.amount_paid || 0), 0),
+        balance: studentInvoices.reduce((sum: number, invoice: any) => sum + invoiceBalance(invoice), 0),
+      };
+    });
+  };
+
+  const downloadClassFeeBalances = (classId: string) => {
+    const className = classes.find((item: any) => item.id === classId)?.name || 'Class';
+    const rows = classBalanceRows(classId);
+    if (rows.length === 0) { toast.info('No learners found in this class.'); return; }
+    const doc = new jsPDF();
+    doc.setFontSize(16); doc.text(`${schoolData?.name || 'School'} - Fee Balances`, 14, 16);
+    doc.setFontSize(11); doc.text(`${className} | Generated ${new Date().toLocaleDateString()}`, 14, 24);
+    autoTable(doc, {
+      startY: 32,
+      head: [['#', 'Admission No.', 'Learner', 'Total Due', 'Paid', 'Outstanding']],
+      body: rows.map((row: any, index: number) => [index + 1, row.student.admission_number || '-', `${row.student.first_name} ${row.student.last_name}`, `Ksh ${row.total.toLocaleString()}`, `Ksh ${row.paid.toLocaleString()}`, `Ksh ${row.balance.toLocaleString()}`]),
+      styles: { fontSize: 9 }, headStyles: { fillColor: [37, 99, 235] },
+    });
+    doc.save(`fee_balances_${className.replace(/[^a-z0-9]+/gi, '_')}.pdf`);
+    toast.success(`Downloaded fee balances for ${className}.`);
+  };
+
+  const sendClassFeeBalances = async () => {
+    if (!selectedFeeClass || !user?.schoolId) { toast.error('Select a class first.'); return; }
+    const className = classes.find((item: any) => item.id === selectedFeeClass)?.name || 'your child’s class';
+    const recipients = classBalanceRows(selectedFeeClass)
+      .filter((row: any) => selectedFeeBalanceStudents.length === 0 || selectedFeeBalanceStudents.includes(row.student.id))
+      .flatMap((row: any) => {
+      const message = `Dear ${row.student.parent_name || 'Parent'}, ${row.student.first_name} ${row.student.last_name}'s outstanding fee balance at ${schoolData?.name || 'school'} is Ksh ${row.balance.toLocaleString()} (${className}). Please contact the school office for assistance.`;
+      return [row.student.parent_phone, row.student.parent2_phone].filter(Boolean).map((phone) => ({ phone, message }));
+    });
+    if (recipients.length === 0) { toast.info(selectedFeeBalanceStudents.length ? 'No parent phone numbers found for the selected learners.' : 'No parent phone numbers found for this class.'); return; }
+    setBulkSending(true);
+    let sent = 0;
+    try {
+      for (const recipient of recipients) {
+        const result = await sendSMS(recipient.phone, recipient.message, undefined, user.schoolId);
+        if (result.success) sent += 1;
+      }
+      toast.success(`Fee balance messages sent: ${sent} of ${recipients.length}.`);
+    } finally { setBulkSending(false); }
   };
 
   // Add fee structure: insert multiple rows (one per fee type)
@@ -91,30 +279,80 @@ export default function SchoolAdminFees() {
       return;
     }
 
-    const rows = feeTypes.map(f => ({
-      school_id: user?.schoolId,
-      class_id: structureData.class_id,
-      term_id: structureData.term_id,
-      academic_year: new Date().getFullYear().toString(),
-      fee_type: f.type,
-      amount: f.amount,
-      is_mandatory: true,
-      description: structureData.description || null,
-    }));
-
-    const { error } = await supabaseUntyped.from('fee_structures').insert(rows);
-    if (error) { toast.error('Failed to add fee structure: ' + error.message); return; }
-
-    toast.success(`Fee structure added! ${feeTypes.length} fee type(s) saved.`);
+    if (editingStructureId) {
+      if (feeTypes.length !== 1) {
+        toast.error('Edit one fee type at a time. Enter only the amount you want to change.');
+        return;
+      }
+      const { error } = await supabaseUntyped
+        .from('fee_structures')
+        .update({
+          class_id: structureData.class_id,
+          term_id: structureData.term_id,
+          fee_type: feeTypes[0].type,
+          amount: feeTypes[0].amount,
+          description: structureData.description || null,
+        })
+        .eq('id', editingStructureId)
+        .eq('school_id', user?.schoolId);
+      if (error) { toast.error('Failed to update fee structure: ' + error.message); return; }
+      toast.success('Fee structure updated successfully.');
+    } else {
+      const rows = feeTypes.map(f => ({
+        school_id: user?.schoolId,
+        class_id: structureData.class_id,
+        term_id: structureData.term_id,
+        academic_year: new Date().getFullYear().toString(),
+        fee_type: f.type,
+        amount: f.amount,
+        is_mandatory: true,
+        description: structureData.description || null,
+      }));
+      const { error } = await supabaseUntyped.from('fee_structures').insert(rows);
+      if (error) { toast.error('Failed to add fee structure: ' + error.message); return; }
+      toast.success(`Fee structure added! ${feeTypes.length} fee type(s) saved.`);
+    }
+    setEditingStructureId(null);
     setShowStructure(false);
     setStructureData({ class_id: '', term_id: '', tuition_fee: '', activity_fee: '', exam_fee: '', other_fee: '', description: '' });
     fetchData();
   };
 
+  const handleEditStructure = (fee: any, group: any) => {
+    const fieldByType: Record<string, 'tuition_fee' | 'activity_fee' | 'exam_fee' | 'other_fee'> = {
+      Tuition: 'tuition_fee', Activity: 'activity_fee', Exam: 'exam_fee', Other: 'other_fee',
+    };
+    const field = fieldByType[fee.type];
+    setEditingStructureId(fee.id);
+    setStructureData({
+      class_id: group.class_id,
+      term_id: group.term_id,
+      tuition_fee: field === 'tuition_fee' ? String(fee.amount) : '',
+      activity_fee: field === 'activity_fee' ? String(fee.amount) : '',
+      exam_fee: field === 'exam_fee' ? String(fee.amount) : '',
+      other_fee: field === 'other_fee' ? String(fee.amount) : '',
+      description: fee.description || '',
+    });
+    setShowStructure(true);
+  };
+
+  const handleDeleteStructure = async (fee: any) => {
+    if (!fee?.id || !user?.schoolId) return;
+    if (!window.confirm(`Delete the ${fee.type} fee structure? This does not delete invoices or payment history.`)) return;
+    const { error } = await supabaseUntyped
+      .from('fee_structures')
+      .delete()
+      .eq('id', fee.id)
+      .eq('school_id', user.schoolId);
+    if (error) { toast.error('Could not delete fee structure: ' + error.message); return; }
+    toast.success('Fee structure deleted.');
+    await fetchData();
+  };
+
   // Generate invoice for a student
   const handleGenerateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceData.student_id || !invoiceData.term_id) {
+    if (!invoiceData.student_id || !invoiceData.term_id || !user?.schoolId) {
       toast.error('Please select student and term');
       return;
     }
@@ -125,22 +363,87 @@ export default function SchoolAdminFees() {
       return;
     }
 
-    const { error } = await supabaseUntyped.from('fee_invoices').insert([{
+    const selectedTerm = terms.find((term: any) => term.id === invoiceData.term_id);
+    const academicYear = String(selectedTerm?.academic_year || new Date().getFullYear());
+    const dueDate = invoiceData.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const invoicePayload = {
       student_id: invoiceData.student_id,
-      school_id: user?.schoolId,
+      school_id: user.schoolId,
       term_id: invoiceData.term_id,
-      academic_year: new Date().getFullYear().toString(),
+      academic_year: academicYear,
       total_amount: totalAmount,
-      amount_paid: 0,
-      status: 'unpaid',
-      due_date: invoiceData.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    }]);
+      due_date: dueDate,
+    };
 
-    if (error) { toast.error('Failed to generate invoice: ' + error.message); return; }
-    toast.success('Invoice generated successfully!');
+    // The database key is one invoice per learner, term and academic year.
+    // Update an existing active invoice rather than issuing a duplicate INSERT.
+    const { data: existingInvoice, error: lookupError } = await supabaseUntyped
+      .from('fee_invoices')
+      .select('id, amount_paid')
+      .eq('student_id', invoicePayload.student_id)
+      .eq('school_id', invoicePayload.school_id)
+      .eq('term_id', invoicePayload.term_id)
+      .eq('academic_year', invoicePayload.academic_year)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (lookupError) { toast.error('Could not check existing invoice: ' + lookupError.message); return; }
+
+    const { error } = existingInvoice
+      ? await supabaseUntyped.from('fee_invoices').update({
+          total_amount: totalAmount,
+          due_date: dueDate,
+          status: Number(existingInvoice.amount_paid || 0) >= totalAmount ? 'paid' : Number(existingInvoice.amount_paid || 0) > 0 ? 'partial' : 'unpaid',
+        }).eq('id', existingInvoice.id).eq('school_id', user.schoolId)
+      : await supabaseUntyped.from('fee_invoices').insert([{ ...invoicePayload, amount_paid: 0, status: 'unpaid' }]);
+
+    if (error) { toast.error('Failed to save invoice: ' + error.message); return; }
+    toast.success(existingInvoice ? 'Existing invoice updated successfully!' : 'Invoice generated successfully!');
     setShowInvoice(false);
     setInvoiceData({ student_id: '', term_id: '', total_amount: '', due_date: '' });
     fetchData();
+  };
+
+  const handleDeleteInvoice = async (invoice: any) => {
+    if (!user?.schoolId || !invoice?.id) return;
+    const studentName = `${invoice.students?.first_name || ''} ${invoice.students?.last_name || ''}`.trim() || 'this learner';
+    const confirmed = window.confirm(`Delete the invoice for ${studentName}? This permanently deletes the invoice and all payments attached to it.`);
+    if (!confirmed) return;
+    try {
+      // Delete child payments first so the invoice cannot leave orphaned history.
+      const { data: deletedPayments, error: paymentsError } = await supabaseUntyped
+        .from('fee_payments')
+        .delete()
+        .eq('invoice_id', invoice.id)
+        .eq('school_id', user.schoolId)
+        .select('id');
+      if (paymentsError) throw paymentsError;
+
+      const { data: remainingPayments, error: remainingPaymentsError } = await supabaseUntyped
+        .from('fee_payments')
+        .select('id')
+        .eq('invoice_id', invoice.id)
+        .eq('school_id', user.schoolId)
+        .limit(10);
+      if (remainingPaymentsError) throw remainingPaymentsError;
+      if ((remainingPayments || []).length > 0) {
+        throw new Error('The database did not remove all payment records attached to this invoice. The invoice was not deleted.');
+      }
+
+      const { data: deletedInvoices, error: invoiceError } = await supabaseUntyped
+        .from('fee_invoices')
+        .delete()
+        .eq('id', invoice.id)
+        .eq('school_id', user.schoolId)
+        .select('id');
+      if (invoiceError) throw invoiceError;
+      if ((deletedInvoices || []).length !== 1) {
+        throw new Error('The database did not remove the invoice. No financial record was reported as deleted.');
+      }
+      toast.success(`Invoice and ${deletedPayments?.length || 0} attached payment record(s) were permanently deleted.`);
+      await fetchData();
+    } catch (error: any) {
+      toast.error(`Could not delete invoice: ${error.message}`);
+    }
   };
 
   // Record payment
@@ -148,6 +451,16 @@ export default function SchoolAdminFees() {
     e.preventDefault();
     if (!paymentData.student_id || !paymentData.amount) {
       toast.error('Please select a student and enter amount');
+      return;
+    }
+    const amount = parseFloat(paymentData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Please enter a valid positive payment amount');
+      return;
+    }
+    const schoolId = user?.schoolId;
+    if (!schoolId) {
+      toast.error('Your school account is not fully loaded. Please sign in again.');
       return;
     }
     setRecording(true);
@@ -162,7 +475,8 @@ export default function SchoolAdminFees() {
           .from('fee_invoices')
           .select('*')
           .eq('student_id', paymentData.student_id)
-          .eq('school_id', user?.schoolId)
+          .eq('school_id', schoolId)
+          .is('deleted_at', null)
           .neq('status', 'paid')
           .order('created_at', { ascending: false })
           .limit(1)
@@ -173,11 +487,13 @@ export default function SchoolAdminFees() {
           invoice = existingInv;
         } else {
           // Create a quick invoice
-          const amount = parseFloat(paymentData.amount);
           const term = terms[0]; // Use latest term
+          if (!term?.id) {
+            throw new Error('No active term is configured for this school. Create a term before recording a payment.');
+          }
           const { data: newInv, error: invErr } = await supabaseUntyped.from('fee_invoices').insert([{
             student_id: paymentData.student_id,
-            school_id: user?.schoolId,
+            school_id: schoolId,
             term_id: term?.id,
             academic_year: new Date().getFullYear().toString(),
             total_amount: amount,
@@ -191,14 +507,13 @@ export default function SchoolAdminFees() {
         }
       }
 
-      const amount = parseFloat(paymentData.amount);
       const receiptNumber = `RCP-${Date.now()}`;
 
       // Insert payment
       const { error: payErr } = await supabaseUntyped.from('fee_payments').insert([{
         student_id: paymentData.student_id,
         invoice_id: invoiceId,
-        school_id: user?.schoolId,
+        school_id: schoolId,
         amount,
         payment_method: paymentData.payment_method,
         mpesa_reference: paymentData.mpesa_reference || null,
@@ -209,16 +524,16 @@ export default function SchoolAdminFees() {
       }]);
       if (payErr) throw payErr;
 
-      // Update invoice balance
+            // `balance` is a generated column (total_amount - amount_paid); update only its inputs.
       const currentPaid = (invoice?.amount_paid || 0) + amount;
       const currentTotal = invoice?.total_amount || amount;
       const newBalance = Math.max(0, currentTotal - currentPaid);
       const newStatus = newBalance <= 0 ? 'paid' : currentPaid > 0 ? 'partial' : 'unpaid';
-
-      await supabaseUntyped.from('fee_invoices').update({
+      const { error: invoiceUpdateError } = await supabaseUntyped.from('fee_invoices').update({
         amount_paid: currentPaid,
         status: newStatus,
-      }).eq('id', invoiceId);
+      }).eq('id', invoiceId).eq('school_id', schoolId).is('deleted_at', null);
+      if (invoiceUpdateError) throw invoiceUpdateError;
 
       toast.success(`✅ Payment of Ksh ${amount.toLocaleString()} recorded! Receipt: ${receiptNumber}`);
       generateReceipt(paymentData.student_id, amount, paymentData.payment_method, paymentData.mpesa_reference, receiptNumber);
@@ -281,9 +596,9 @@ export default function SchoolAdminFees() {
   const groupedStructures = feeStructures.reduce((acc: any, fs: any) => {
     const key = `${fs.class_id}_${fs.term_id}`;
     if (!acc[key]) {
-      acc[key] = { class: fs.classes?.name, term: `${fs.terms?.name} ${fs.terms?.academic_year}`, fees: [], total: 0 };
+      acc[key] = { class_id: fs.class_id, term_id: fs.term_id, class: fs.classes?.name, term: `${fs.terms?.name} ${fs.terms?.academic_year}`, fees: [], total: 0 };
     }
-    acc[key].fees.push({ type: fs.fee_type, amount: fs.amount });
+    acc[key].fees.push({ id: fs.id, type: fs.fee_type, amount: fs.amount, description: fs.description });
     acc[key].total += parseFloat(fs.amount) || 0;
     return acc;
   }, {});
@@ -311,7 +626,7 @@ export default function SchoolAdminFees() {
       {/* Add Fee Structure Form */}
       {showStructure && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
-          <h3 className="text-lg font-semibold mb-4">Add Fee Structure</h3>
+          <h3 className="text-lg font-semibold mb-4">{editingStructureId ? 'Edit Fee Structure' : 'Add Fee Structure'}</h3>
           <form onSubmit={handleAddStructure} className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <select value={structureData.class_id} onChange={e => setStructureData({...structureData, class_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white" required>
               <option value="">Select Class *</option>
@@ -327,8 +642,8 @@ export default function SchoolAdminFees() {
             <input type="number" placeholder="Other Fee (Ksh)" value={structureData.other_fee} onChange={e => setStructureData({...structureData, other_fee: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" min="0" />
             <input placeholder="Description (optional)" value={structureData.description} onChange={e => setStructureData({...structureData, description: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm md:col-span-2" />
             <div className="flex gap-3 md:col-span-3">
-              <button type="submit" className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8]">Save Structure</button>
-              <button type="button" onClick={() => setShowStructure(false)} className="border px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button type="submit" className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8]">{editingStructureId ? 'Update Structure' : 'Save Structure'}</button>
+              <button type="button" onClick={() => { setShowStructure(false); setEditingStructureId(null); }} className="border px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
             </div>
           </form>
         </div>
@@ -339,9 +654,21 @@ export default function SchoolAdminFees() {
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
           <h3 className="text-lg font-semibold mb-4">Generate Invoice for Student</h3>
           <form onSubmit={handleGenerateInvoice} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={invoiceData.student_id} onChange={e => setInvoiceData({...invoiceData, student_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white" required>
+            <select value={invoiceClassFilter} onChange={e => { setInvoiceClassFilter(e.target.value); setInvoiceData({ ...invoiceData, student_id: '' }); }} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
+              <option value="">All classes</option>
+              {classes.map((classItem: any) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
+            </select>
+            <div className="relative">
+              <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+              <input value={invoiceStudentSearch} onChange={e => { setInvoiceStudentSearch(e.target.value); setInvoiceData({ ...invoiceData, student_id: '' }); }} placeholder="Search by admission no. or student name" className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm" />
+            </div>
+            <div className="md:col-span-2 flex items-center justify-between text-xs text-gray-500 -mt-2">
+              <span>{invoiceStudents.length} student(s) shown{invoiceClassFilter ? ` in ${classes.find((item: any) => item.id === invoiceClassFilter)?.name || 'selected class'}` : ''}</span>
+              <span>Sorted by admission number ascending</span>
+            </div>
+            <select value={invoiceData.student_id} onChange={e => setInvoiceData({...invoiceData, student_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white md:col-span-2" required>
               <option value="">Select Student *</option>
-              {students.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.admission_number})</option>)}
+              {invoiceStudents.map(s => <option key={s.id} value={s.id}>{s.admission_number || 'No admission no.'} — {s.first_name} {s.last_name}</option>)}
             </select>
             <select value={invoiceData.term_id} onChange={e => setInvoiceData({...invoiceData, term_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white" required>
               <option value="">Select Term *</option>
@@ -351,7 +678,7 @@ export default function SchoolAdminFees() {
             <input type="date" placeholder="Due Date" value={invoiceData.due_date} onChange={e => setInvoiceData({...invoiceData, due_date: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
             <div className="flex gap-3 md:col-span-2">
               <button type="submit" className="bg-green-600 text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-green-700">Generate Invoice</button>
-              <button type="button" onClick={() => setShowInvoice(false)} className="border px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={() => { setShowInvoice(false); setInvoiceClassFilter(''); setInvoiceStudentSearch(''); setInvoiceData({ ...invoiceData, student_id: '' }); }} className="border px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
             </div>
           </form>
         </div>
@@ -366,7 +693,7 @@ export default function SchoolAdminFees() {
               setPaymentData({...paymentData, student_id: e.target.value, invoice_id: ''});
             }} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white" required>
               <option value="">Select Student *</option>
-              {students.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.admission_number})</option>)}
+              {paymentStudents.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} ({s.admission_number || 'No admission no.'})</option>)}
             </select>
             <select value={paymentData.invoice_id} onChange={e => setPaymentData({...paymentData, invoice_id: e.target.value})} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
               <option value="">Latest Unpaid Invoice (auto)</option>
@@ -399,18 +726,58 @@ export default function SchoolAdminFees() {
         </div>
       )}
 
+      {editingPayment && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-blue-100">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">Edit Payment</h3>
+              <p className="text-xs text-gray-500 mt-1">Update the payment record; the linked invoice balance will be recalculated.</p>
+            </div>
+            <button type="button" onClick={() => setEditingPayment(null)} className="text-gray-500 hover:text-gray-800">Cancel</button>
+          </div>
+          <form onSubmit={handleSavePayment} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <input type="number" min="1" step="0.01" placeholder="Amount (Ksh) *" value={editPaymentData.amount} onChange={e => setEditPaymentData({ ...editPaymentData, amount: e.target.value })} className="w-full px-4 py-2.5 border rounded-xl text-sm" required />
+            <select value={editPaymentData.payment_method} onChange={e => setEditPaymentData({ ...editPaymentData, payment_method: e.target.value as any })} className="w-full px-4 py-2.5 border rounded-xl text-sm bg-white">
+              <option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="bank">Bank Transfer</option><option value="cheque">Cheque</option><option value="other">Other</option>
+            </select>
+            <input placeholder="M-Pesa Reference" value={editPaymentData.mpesa_reference} onChange={e => setEditPaymentData({ ...editPaymentData, mpesa_reference: e.target.value })} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+            <input placeholder="Notes (optional)" value={editPaymentData.notes} onChange={e => setEditPaymentData({ ...editPaymentData, notes: e.target.value })} className="w-full px-4 py-2.5 border rounded-xl text-sm" />
+            <div className="md:col-span-4 flex gap-3">
+              <button type="submit" disabled={savingPayment} className="bg-[#2563EB] text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-[#1d4ed8] disabled:opacity-50">{savingPayment ? 'Saving...' : 'Save Payment'}</button>
+              <button type="button" onClick={() => setEditingPayment(null)} className="border px-6 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-2 border-b">
-        <button onClick={() => setActiveTab('invoices')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${activeTab === 'invoices' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-          Invoices ({invoices.length})
+      <div className="flex gap-2 border-b overflow-x-auto">
+        <button onClick={() => setActiveTab('invoices')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${activeTab === 'invoices' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Invoices ({filteredInvoiceRows.length})
+        </button>
+        <button onClick={() => setActiveTab('payments')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${activeTab === 'payments' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Payments ({filteredPaymentRows.length})
         </button>
         <button onClick={() => setActiveTab('structures')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${activeTab === 'structures' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           Fee Structures ({Object.keys(groupedStructures).length})
+        </button>
+        <button onClick={() => setActiveTab('class-balances')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${activeTab === 'class-balances' ? 'border-[#2563EB] text-[#2563EB]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Class Fee Balances
         </button>
       </div>
 
       {activeTab === 'invoices' && (
         <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+          <div className="p-4 border-b bg-gray-50 flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input value={feeSearch} onChange={e => setFeeSearch(e.target.value)} placeholder="Search Admission No., Assessment No., or learner name" className="w-full pl-9 pr-4 py-2.5 border rounded-xl text-sm bg-white" />
+            </div>
+            <select value={selectedInvoiceClass} onChange={e => setSelectedInvoiceClass(e.target.value)} className="md:w-56 px-4 py-2.5 border rounded-xl text-sm bg-white">
+              <option value="">All classes</option>
+              {classes.map((classItem: any) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
+            </select>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
@@ -421,19 +788,20 @@ export default function SchoolAdminFees() {
                   <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Paid</th>
                   <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Balance</th>
                   <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
-                ) : invoices.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-500">No invoices found. Generate one above.</td></tr>
+                  <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">Loading...</td></tr>
+                ) : filteredInvoiceRows.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">No invoices match the current search or class filter.</td></tr>
                 ) : (
-                  invoices.map((inv: any) => (
+                  filteredInvoiceRows.map((inv: any) => (
                     <tr key={inv.id} className="border-b hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium">{inv.students?.first_name} {inv.students?.last_name}</div>
-                        <div className="text-xs text-gray-500">{inv.students?.admission_number}</div>
+                        <div className="text-xs text-gray-500">Adm: {inv.students?.admission_number || '-'} · Ass: {inv.students?.assessment_number || '-'}</div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">{inv.terms?.name} {inv.terms?.academic_year}</td>
                       <td className="px-6 py-4 text-sm">Ksh {(inv.total_amount || 0).toLocaleString()}</td>
@@ -446,6 +814,7 @@ export default function SchoolAdminFees() {
                           {statusIcon(inv.status)} {inv.status}
                         </span>
                       </td>
+                      <td className="px-6 py-4"><div className="flex flex-wrap gap-1.5"><button onClick={() => { setPaymentData({ student_id: inv.student_id, invoice_id: inv.id, amount: '', payment_method: 'cash', mpesa_reference: '', notes: '' }); setShowRecord(true); }} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100" title="Record payment"><CreditCard className="w-3.5 h-3.5" /> Record</button><button onClick={() => handleDeleteInvoice(inv)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100" title="Delete invoice"><Trash2 className="w-3.5 h-3.5" /> Delete</button></div></td>
                     </tr>
                   ))
                 )}
@@ -455,6 +824,62 @@ export default function SchoolAdminFees() {
         </div>
       )}
 
+      {activeTab === 'payments' && (
+        <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+          <div className="p-4 border-b bg-gray-50 flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input value={feeSearch} onChange={e => setFeeSearch(e.target.value)} placeholder="Search Admission No., Assessment No., or learner name" className="w-full pl-9 pr-4 py-2.5 border rounded-xl text-sm bg-white" />
+            </div>
+            <select value={selectedInvoiceClass} onChange={e => setSelectedInvoiceClass(e.target.value)} className="md:w-56 px-4 py-2.5 border rounded-xl text-sm bg-white">
+              <option value="">All classes</option>
+              {classes.map((classItem: any) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
+            </select>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead><tr className="border-b bg-gray-50"><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Learner</th><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Invoice / Receipt</th><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Amount</th><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Method</th><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Date</th><th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Actions</th></tr></thead>
+              <tbody>
+                {filteredPaymentRows.length === 0 ? (
+                  <tr><td colSpan={6} className="text-center py-8 text-sm text-gray-500">No payments match the current search or class filter.</td></tr>
+                ) : filteredPaymentRows.map((payment: any) => (
+                  <tr key={payment.id} className="border-b hover:bg-gray-50">
+                    <td className="px-6 py-4"><div className="text-sm font-medium">{payment.student?.first_name} {payment.student?.last_name}</div><div className="text-xs text-gray-500">Adm: {payment.student?.admission_number || '-'} · Ass: {payment.student?.assessment_number || '-'}</div></td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{payment.receipt_number || '-'}<div className="text-xs text-gray-400">{payment.invoice?.terms?.name || ''} {payment.invoice?.terms?.academic_year || ''}</div></td>
+                    <td className="px-6 py-4 text-sm font-semibold text-green-600">Ksh {Number(payment.amount || 0).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm capitalize">{payment.payment_method || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : '-'}</td>
+                    <td className="px-6 py-4"><button type="button" onClick={() => openEditPayment(payment)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100"><Pencil className="w-3.5 h-3.5" /> Edit</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'class-balances' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl p-5 shadow-sm border flex flex-col md:flex-row md:items-center gap-3">
+            <select value={selectedFeeClass} onChange={e => { setSelectedFeeClass(e.target.value); setSelectedFeeBalanceStudents([]); }} className="flex-1 px-4 py-2.5 border rounded-xl text-sm bg-white">
+              <option value="">Select a class</option>
+              {classes.map((classItem: any) => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
+            </select>
+            <button type="button" onClick={() => selectedFeeClass && downloadClassFeeBalances(selectedFeeClass)} disabled={!selectedFeeClass} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#2563EB] text-white text-sm font-medium disabled:opacity-50">
+              <Download className="w-4 h-4" /> Download PDF
+            </button>
+            <button type="button" onClick={sendClassFeeBalances} disabled={!selectedFeeClass || bulkSending} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50">
+              {bulkSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />} Send Balance Messages
+            </button>
+          </div>
+              {selectedFeeClass ? (
+            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+              <div className="p-5 border-b"><h3 className="font-semibold">{classes.find((item: any) => item.id === selectedFeeClass)?.name} Fee Balances</h3><p className="text-xs text-gray-500 mt-1">Select specific learners for SMS, or leave all unchecked to message every parent in this class. Learners are sorted by admission number.</p></div>
+              <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="border-b bg-gray-50"><th className="px-5 py-3 text-xs uppercase text-gray-500">SMS</th><th className="px-5 py-3 text-xs uppercase text-gray-500">Learner</th><th className="px-5 py-3 text-xs uppercase text-gray-500">Parent</th><th className="px-5 py-3 text-xs uppercase text-gray-500">Total</th><th className="px-5 py-3 text-xs uppercase text-gray-500">Paid</th><th className="px-5 py-3 text-xs uppercase text-gray-500">Outstanding</th></tr></thead><tbody>{classBalanceRows(selectedFeeClass).map((row: any) => <tr key={row.student.id} className="border-b"><td className="px-5 py-3"><input type="checkbox" aria-label={`Select ${row.student.first_name} ${row.student.last_name} for fee SMS`} checked={selectedFeeBalanceStudents.length === 0 || selectedFeeBalanceStudents.includes(row.student.id)} onChange={() => { const ids = classBalanceRows(selectedFeeClass).map((item: any) => item.student.id); setSelectedFeeBalanceStudents((current) => current.length === 0 ? ids.filter((id: string) => id !== row.student.id) : current.includes(row.student.id) ? current.filter((id) => id !== row.student.id) : [...current, row.student.id]); }} className="h-4 w-4 accent-blue-600" /></td><td className="px-5 py-3 text-sm">{row.student.first_name} {row.student.last_name}<div className="text-xs text-gray-500">{row.student.admission_number || '-'}</div></td><td className="px-5 py-3 text-sm">{row.student.parent_name || '-'}<div className="text-xs text-gray-500">{row.student.parent_phone || '-'}</div></td><td className="px-5 py-3 text-sm">Ksh {row.total.toLocaleString()}</td><td className="px-5 py-3 text-sm text-green-600">Ksh {row.paid.toLocaleString()}</td><td className="px-5 py-3 text-sm font-semibold text-red-600">Ksh {row.balance.toLocaleString()}</td></tr>)}</tbody></table></div>
+            </div>
+          ) : <div className="bg-white rounded-2xl p-8 text-center text-sm text-gray-500 border">Select a class to view and communicate fee balances.</div>}
+        </div>
+      )}
       {activeTab === 'structures' && (
         <div className="space-y-4">
           {Object.keys(groupedStructures).length === 0 ? (
@@ -475,9 +900,13 @@ export default function SchoolAdminFees() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {group.fees.map((f: any, j: number) => (
-                    <div key={j} className="bg-gray-50 rounded-lg p-3 text-center">
+                    <div key={f.id || j} className="bg-gray-50 rounded-lg p-3 text-center">
                       <p className="text-xs text-gray-500">{f.type}</p>
                       <p className="text-sm font-semibold">Ksh {parseFloat(f.amount).toLocaleString()}</p>
+                      <div className="mt-2 flex justify-center gap-1.5">
+                        <button type="button" onClick={() => handleEditStructure(f, group)} className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100" title="Edit fee structure"><Pencil className="h-3 w-3" /> Edit</button>
+                        <button type="button" onClick={() => handleDeleteStructure(f)} className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100" title="Delete fee structure"><Trash2 className="h-3 w-3" /> Delete</button>
+                      </div>
                     </div>
                   ))}
                 </div>

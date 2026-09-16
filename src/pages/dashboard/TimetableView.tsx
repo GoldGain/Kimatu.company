@@ -17,7 +17,8 @@ import {
   resolveActivityLessonSlot,
   timeIntervalsOverlap,
 } from '@/lib/timetable-activity';
-import { getSubjectCode } from '@/lib/timetable-subject-code';
+import { getReligiousCode, getSubjectCode } from '@/lib/timetable-subject-code';
+import { buildWeeklyLessonSummary, type TimetableSummaryRequirement } from '@/lib/timetable-summary';
 
 interface SchoolClass {
   id: string;
@@ -34,7 +35,7 @@ interface TimetableEntry {
   time_slot_id: string;
   teacher_id: string | null;
   subject_id: string | null;
-  entry_type: 'lesson' | 'lesson_double' | 'break' | 'lunch' | 'activities' | 'activity';
+  entry_type: 'lesson' | 'lesson_double' | 'study' | 'break' | 'lunch' | 'activities' | 'activity';
   activity_name: string | null;
   effective_start_time?: string | null;
   effective_end_time?: string | null;
@@ -101,7 +102,7 @@ const activityMatchesClass = (activity: SchoolActivity, cls: SchoolClass): boole
   if (!target || target === 'all') return true;
   const className = String(cls.name || '').toLowerCase();
   const grade = Number(cls.grade_level ?? cls.level);
-  const isPrimary = (grade >= 1 && grade <= 6) || /grade\s*[1-6]\b|pp\s*[12]|pre[\s-]?primary/.test(className);
+  const isPrimary = (grade >= -3 && grade <= 6) || /grade\s*[1-6]\b|playgroup|pp\s*[12]|pre[\s-]?primary/.test(className);
   const isJunior = (grade >= 7 && grade <= 9) || /grade\s*[789]\b|junior|jss/.test(className);
   const isSenior = (grade >= 10 && grade <= 12) || /grade\s*(10|11|12)\b|senior/.test(className);
   if (target.includes('primary') && isPrimary) return true;
@@ -239,7 +240,7 @@ const fmt = (t: string): string => {
 function resolveClassLevelGroup(cls: SchoolClass): string {
   const grade = Number(cls.grade_level ?? cls.level);
   const name = String(cls.name || '').toLowerCase();
-  if (grade === -2 || grade === -1 || grade === 0 || /(pp\s*[12]|pre[\s-]?primary|playgroup|baby)/.test(name)) return 'pre-primary';
+  if (grade === -3 || grade === -2 || grade === -1 || grade === 0 || /(pp\s*[12]|pre[\s-]?primary|playgroup|baby)/.test(name)) return 'pre-primary';
   if ((grade >= 1 && grade <= 3) || /grade\s*[123]\b/.test(name)) return 'lower-primary';
   if ((grade >= 4 && grade <= 6) || /grade\s*[456]\b/.test(name)) return 'upper-primary';
   if ((grade >= 7 && grade <= 9) || /grade\s*[789]\b/.test(name)) return 'junior';
@@ -335,10 +336,25 @@ function buildDisplaySlotsForLevel(
   // Do NOT fall back to legacy "default" slots — they have wrong after-lunch counts
 
   const counts = countLessons(candidates);
+  const upperPrimaryConfigComplete = key !== 'upper-primary' || Boolean(
+    levelConfig &&
+    [
+      levelConfig.start_time,
+      levelConfig.first_break_start,
+      levelConfig.first_break_end,
+      levelConfig.second_break_start,
+      levelConfig.second_break_end,
+      levelConfig.lunch_start,
+      levelConfig.lunch_end,
+    ].every(Boolean) &&
+    Number(levelConfig.lessons_per_day ?? targets.total) === targets.total &&
+    Number(levelConfig.after_lunch_lessons ?? targets.afterLunch) === targets.afterLunch
+  );
   const countsMatch =
     candidates.length > 0 &&
     counts.total === targets.total &&
-    counts.afterLunch === targets.afterLunch;
+    counts.afterLunch === targets.afterLunch &&
+    upperPrimaryConfigComplete;
   const normalizeLegacyActivitySlots = (candidateSlots: TimeSlot[]): TimeSlot[] => {
     const lessonSlots = candidateSlots.filter((slot) => slot.slot_type === 'lesson');
     const lastLessonEnd = lessonSlots.length
@@ -451,6 +467,10 @@ function buildDisplaySlotsForLevel(
     levelConfig?.lunch_end,
   ];
   if (!levelConfig || required.some((v) => !v)) {
+    // Upper Primary must never render old candidate slots without its own saved
+    // seven-lesson/one-after-lunch clock; those candidates are commonly stale
+    // rows from an earlier generation and can show the wrong afternoon time.
+    if (key === 'upper-primary') return [];
     if (candidates.length) {
       const filtered = stripInLessonActivitySlots(candidates);
       return targets.afterLunch === 0
@@ -503,6 +523,7 @@ export default function TimetableView() {
   const [entries, setEntries] = useState<TimetableEntry[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [levelConfigs, setLevelConfigs] = useState<Record<string, any>>({});
+  const [lessonRequirements, setLessonRequirements] = useState<TimetableSummaryRequirement[]>([]);
   const [teacherKey, setTeacherKey] = useState<TeacherKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -526,6 +547,7 @@ export default function TimetableView() {
         fetchTimeSlots(),
         fetchLevelConfigs(),
         fetchEntries(),
+        fetchLessonRequirements(),
         fetchTeacherKey(),
       ]);
     } catch (err) {
@@ -611,6 +633,26 @@ export default function TimetableView() {
       subject_code: entry.subjects?.code,
     }));
     setEntries(mapped);
+  };
+
+  const fetchLessonRequirements = async () => {
+    const { data, error: requirementsError } = await supabase
+      .from('teacher_subject_assignments')
+      .select('class_id, subject_id, lessons_per_week, subjects(name, code)')
+      .eq('school_id', user?.schoolId)
+      .eq('is_active', true);
+    if (requirementsError) {
+      console.warn('lesson requirements', requirementsError);
+      setLessonRequirements([]);
+      return;
+    }
+    setLessonRequirements((data || []).map((assignment: any) => ({
+      class_id: assignment.class_id,
+      subject_id: assignment.subject_id,
+      subject_name: assignment.subjects?.name || null,
+      subject_code: assignment.subjects?.code || null,
+      lessons_per_week: Number(assignment.lessons_per_week) || 0,
+    })));
   };
 
   const fetchTeacherKey = async () => {
@@ -761,12 +803,35 @@ export default function TimetableView() {
     return entriesByOrder.get(`${day}-${classId}-${slot.slot_order}`) || [];
   };
 
+  // Map class_id -> set of religious subject codes (CRE / IRE / HRE) the class
+  // actually teaches. Used to render the combined "CRE/IRE" label when a class
+  // teaches more than one religious option.
+  const religiousCodesByClass = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    entries.forEach((entry) => {
+      const rel = getReligiousCode(entry.subject_name || '', entry.subject_code || '');
+      if (!rel) return;
+      let set = m.get(entry.class_id);
+      if (!set) { set = new Set<string>(); m.set(entry.class_id, set); }
+      set.add(rel);
+    });
+    return m;
+  }, [entries]);
+
   const getCellDisplay = (entriesForCell: TimetableEntry[]): string => {
     if (!entriesForCell || entriesForCell.length === 0) return '';
     const parts: string[] = [];
     const seenActivityLabels = new Set<string>();
     entriesForCell.forEach((entry) => {
       if (isPlaceholderActivity(entry)) return;
+      if (entry.entry_type === 'study') {
+        const label = String(entry.activity_name || 'Study').trim().toUpperCase();
+        if (label && !seenActivityLabels.has(label)) {
+          seenActivityLabels.add(label);
+          parts.push(label);
+        }
+        return;
+      }
       if (entry.entry_type === 'activity' || entry.entry_type === 'activities') {
         const label = String(entry.activity_name || '').trim().toUpperCase();
         if (label && !seenActivityLabels.has(label)) {
@@ -776,10 +841,16 @@ export default function TimetableView() {
         return;
       }
       if (!entry.subject_name && !entry.subject_code) return;
-      const code = getSubjectCode(entry.subject_name || '', entry.subject_code || '');
       const teacherNum = entry.teacher_number ? String(entry.teacher_number) : '';
+      const rel = getReligiousCode(entry.subject_name || '', entry.subject_code || '');
+      const classReligions = rel ? religiousCodesByClass.get(entry.class_id) : undefined;
+      // Rule 4: a class taking multiple religious options (CRE + IRE/HRE) shows
+      // the combined label ("CRE/IRE"). One option shows that subject alone.
+      const label = rel && classReligions && classReligions.size > 1
+        ? [...classReligions].sort().join('/')
+        : getSubjectCode(entry.subject_name || '', entry.subject_code || '');
       // Double lessons remain two consecutive timetable cells; no extra symbol is needed.
-      parts.push(`${code}${teacherNum}`);
+      parts.push(`${label}${teacherNum}`);
     });
     return parts.join(' ') || '';
   };
@@ -816,20 +887,21 @@ export default function TimetableView() {
         ? `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${(className || classId).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-timetable.pdf`
         : `${(schoolName || 'school').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-full-timetable.pdf`;
       if (classId) element.classList.add('pdf-class-export');
+      else element.classList.add('pdf-full-export');
       try {
         await html2pdf()
           .set({
             margin: [0.05, 0.05, 0.05, 0.05],
             filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            pagebreak: { mode: ['css', 'legacy'], avoid: ['.bb-wrap', 'tr'] },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: classId ? 1200 : 1600 },
+            image: { type: 'png', quality: 1 },
+            pagebreak: { mode: ['css', 'legacy'], avoid: ['.bb-wrap', 'tr', '.tt-summary-panel'] },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: Math.max(element.scrollWidth, element.offsetWidth || 0), width: Math.max(element.scrollWidth, element.offsetWidth || 0), height: Math.max(element.scrollHeight, element.offsetHeight || 0) },
             jsPDF: { unit: 'in', format: classId ? 'a4' : 'a3', orientation: 'landscape', compress: true },
           })
           .from(element)
           .save();
       } finally {
-        if (classId) element.classList.remove('pdf-class-export');
+        element.classList.remove(classId ? 'pdf-class-export' : 'pdf-full-export');
       }
     } finally {
       setDownloadingClass(null);
@@ -960,6 +1032,111 @@ export default function TimetableView() {
       min-width: 760px;
       table-layout: fixed;
     }
+    .tt-summary-panel {
+      margin: 14px 0 18px;
+      padding: 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
+      break-inside: avoid;
+    }
+    .tt-summary-title {
+      color: #1e3a8a;
+      font-size: 0.9rem;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .tt-summary-note {
+      margin-top: 3px;
+      color: #64748b;
+      font-size: 0.68rem;
+      line-height: 1.35;
+    }
+    .tt-summary-empty {
+      margin: 0;
+      border: 1px dashed #93c5fd;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #64748b;
+      padding: 10px 12px;
+      font-size: 0.72rem;
+    }
+    .tt-summary-badge {
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 5px 9px;
+      font-size: 0.65rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .tt-summary-table {
+      width: 100%;
+      min-width: 620px;
+      border-collapse: collapse;
+      table-layout: auto;
+      background: #ffffff;
+    }
+    .tt-summary-table th,
+    .tt-summary-table td {
+      border: 1px solid #dbe3ee;
+      padding: 6px 8px;
+      color: #334155;
+      font-size: 0.7rem;
+      line-height: 1.2;
+      text-align: center;
+    }
+    .tt-summary-table thead th {
+      background: #1e3a8a;
+      color: #ffffff;
+      font-size: 0.64rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .tt-summary-table thead th:first-child,
+    .tt-summary-table tbody th {
+      text-align: left;
+    }
+    .tt-summary-subhead {
+      display: block;
+      margin-top: 2px;
+      font-size: 0.5rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      text-transform: none;
+      opacity: 0.8;
+    }
+    .tt-summary-table tbody tr:nth-child(even) {
+      background: #f8fafc;
+    }
+    .tt-summary-table tbody th {
+      color: #1e293b;
+      font-weight: 700;
+    }
+    .tt-summary-required {
+      color: #475569 !important;
+      font-weight: 900;
+    }
+    .tt-summary-total {
+      color: #1d4ed8 !important;
+      font-weight: 900;
+    }
+    .tt-summary-status {
+      display: inline-flex;
+      min-width: 42px;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 3px 7px;
+      font-size: 0.62rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .tt-summary-status-ok { background: #dcfce7; color: #166534; }
+    .tt-summary-status-under { background: #fef3c7; color: #92400e; }
+    .tt-summary-status-over { background: #fee2e2; color: #991b1b; }
     .tt-weekly-table .tt-time-header {
       min-width: 72px;
       padding: 5px 3px;
@@ -1149,11 +1326,118 @@ export default function TimetableView() {
     .pdf-class-export .tt-subtime {
       font-size: 0.37rem !important;
     }
+    .pdf-class-export .tt-summary-panel,
+    .pdf-full-export .tt-summary-panel {
+      display: none !important;
+    }
+    .pdf-class-export .tt-table th,
+    .pdf-class-export .tt-table td,
+    .pdf-full-export .tt-table th,
+    .pdf-full-export .tt-table td {
+      color: #111827 !important;
+      font-weight: 800 !important;
+    }
+    .pdf-class-export .tt-subtime,
+    .pdf-full-export .tt-subtime {
+      color: #374151 !important;
+      font-weight: 700 !important;
+    }
+    .pdf-class-export .tt-day,
+    .pdf-class-export .tt-class,
+    .pdf-class-export .tt-break,
+    .pdf-class-export .tt-lunch,
+    .pdf-class-export .tt-break-header,
+    .pdf-class-export .tt-header,
+    .pdf-full-export .tt-day,
+    .pdf-full-export .tt-class,
+    .pdf-full-export .tt-break,
+    .pdf-full-export .tt-lunch,
+    .pdf-full-export .tt-break-header,
+    .pdf-full-export .tt-header {
+      background: #000 !important;
+      color: #fff !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      font-weight: 900 !important;
+    }
+    .pdf-class-export .tt-day *,
+    .pdf-class-export .tt-class *,
+    .pdf-class-export .tt-break *,
+    .pdf-class-export .tt-lunch *,
+    .pdf-class-export .tt-break-header *,
+    .pdf-class-export .tt-header *,
+    .pdf-full-export .tt-day *,
+    .pdf-full-export .tt-class *,
+    .pdf-full-export .tt-break *,
+    .pdf-full-export .tt-lunch *,
+    .pdf-full-export .tt-break-header *,
+    .pdf-full-export .tt-header * {
+      color: #fff !important;
+      font-weight: 900 !important;
+    }
+    /* Full-school exports must fit the complete timetable horizontally. The
+       on-screen view intentionally scrolls wide tables, but html2pdf places
+       that scroll width directly on a fixed A3 page unless we constrain it. */
+    .pdf-full-export {
+      width: 1120px !important;
+      max-width: 1120px !important;
+      min-width: 0 !important;
+      overflow: visible !important;
+      padding: 12px !important;
+    }
+    .pdf-full-export .overflow-x-auto,
+    .pdf-full-export .tt-weekly-board {
+      overflow: visible !important;
+      width: 100% !important;
+    }
+    .pdf-full-export .tt-table,
+    .pdf-full-export .tt-summary-table {
+      width: 100% !important;
+      min-width: 0 !important;
+      table-layout: fixed !important;
+    }
+    .pdf-full-export .tt-table th,
+    .pdf-full-export .tt-table td,
+    .pdf-full-export .tt-summary-table th,
+    .pdf-full-export .tt-summary-table td {
+      padding: 3px 2px !important;
+      font-size: 0.52rem !important;
+      line-height: 1.05 !important;
+      overflow-wrap: anywhere !important;
+    }
+    .pdf-full-export .tt-cell {
+      min-width: 0 !important;
+      height: 32px !important;
+      font-size: 0.52rem !important;
+    }
+    .pdf-full-export .tt-break,
+    .pdf-full-export .tt-lunch,
+    .pdf-full-export .tt-activity {
+      width: auto !important;
+      min-width: 0 !important;
+      font-size: 0.45rem !important;
+    }
+    .pdf-full-export .tt-subtime {
+      font-size: 0.34rem !important;
+    }
     @media print {
       .no-print { display: none !important; }
       .bb-wrap { border: none; box-shadow: none; background: white; color: black; }
-      .tt-table th, .tt-table td { border: 1px solid black; color: black !important; }
-      .tt-day, .tt-class, .tt-break, .tt-lunch, .tt-activity, .tt-cell, .tt-header, .tt-break-header { color: black !important; background: white !important; }
+      .tt-table th, .tt-table td { border: 1px solid black !important; }
+      .tt-day, .tt-class, .tt-break, .tt-lunch, .tt-activity, .tt-header, .tt-break-header {
+        background: #000 !important;
+        color: #fff !important;
+        font-weight: 900 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .tt-day *, .tt-class *, .tt-break *, .tt-lunch *, .tt-activity *, .tt-header *, .tt-break-header * {
+        color: #fff !important;
+        font-weight: 900 !important;
+      }
+      .tt-cell { background: #fff !important; color: #111 !important; }
+      .tt-cell strong { color: #111 !important; font-weight: 900 !important; }
+      .tt-cell .tt-subtime { color: #374151 !important; font-weight: 800 !important; }
     }
   `;
 
@@ -1207,6 +1491,12 @@ export default function TimetableView() {
     }
 
     const lessonSummary = countLessons(slotsForTable);
+    const weeklyLessonSummary = buildWeeklyLessonSummary(
+      classesToRender,
+      slotsForTable,
+      (day, classId, slot) => getEntries(day, classId, slot),
+      lessonRequirements,
+    );
 
     // Breaks, lunch, and lesson clocks are shared by every class in the level.
     // Per-entry effective times are used only when persisted; no activity can
@@ -1259,6 +1549,54 @@ export default function TimetableView() {
         </p>
         <div className="h-0.5 w-24 bg-blue-400 mx-auto mt-2"></div>
       </div>
+      <section className="tt-summary-panel" aria-label="Weekly learning-area lesson summary">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+          <div>
+            <h3 className="tt-summary-title">Weekly learning-area summary</h3>
+            <p className="tt-summary-note">Compare configured Required / week with scheduled Total / week. Activities, breaks, and lunch are not counted as learning areas.</p>
+          </div>
+          <span className="tt-summary-badge">
+            {weeklyLessonSummary.reduce((sum, row) => sum + row.totalLessons, 0)} scheduled / {weeklyLessonSummary.reduce((sum, row) => sum + row.requiredLessons, 0)} required
+          </span>
+        </div>
+        {weeklyLessonSummary.length === 0 ? (
+          <p className="tt-summary-empty">No scheduled learning-area lessons yet. Add or generate subject entries to see the weekly totals here.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="tt-summary-table">
+              <thead>
+                <tr>
+                  <th>Learning area</th>
+                  <th>Required / week</th>
+                  <th>Total / week</th>
+                  <th>Status</th>
+                  {classesToRender.length > 1 && classesToRender.map((cls) => (
+                    <th key={cls.id}>{displayClassName(cls)}<span className="tt-summary-subhead">total / required</span></th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {weeklyLessonSummary.map((row) => (
+                  <tr key={row.key}>
+                    <th scope="row">{row.label}</th>
+                    <td className="tt-summary-required">{row.requiredLessons}</td>
+                    <td className="tt-summary-total">{row.totalLessons}</td>
+                    <td>
+                      <span className={`tt-summary-status tt-summary-status-${row.status}`}>
+                        {row.status === 'ok' ? 'OK' : row.status === 'under' ? 'Under' : 'Over'}
+                      </span>
+                    </td>
+                    {classesToRender.length > 1 && classesToRender.map((cls) => (
+                      <td key={cls.id}>{row.perClass[cls.id] || 0} / {row.requiredPerClass[cls.id] || 0}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <div className="overflow-x-auto">
         <table className="tt-table">
           <thead>
@@ -1524,7 +1862,7 @@ export default function TimetableView() {
       </div>
 
       {/* Hidden per-class timetables for PDF generation */}
-      <div style={{ position: 'absolute', left: '-9999px', top: 0, width: '1200px' }}>
+      <div style={{ position: 'absolute', left: '-9999px', top: 0, width: 'max-content', minWidth: '100%' }}>
         {classes.map(cls => (
           <div key={cls.id} id={`timetable-class-${cls.id}`} style={{ marginBottom: '40px' }}>
             {renderTimetableTable([cls], `timetable-class-inner-${cls.id}`)}

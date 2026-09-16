@@ -58,12 +58,45 @@ export async function syncParentAccounts(input: ParentSyncInput) {
   }>('sync-parent-account', input as unknown as Record<string, unknown>, 'Parent account synchronization failed.');
 }
 
+export async function syncTeacherAccount(input: {
+  teacher_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  gender?: string | null;
+  qualification?: string | null;
+  specialization?: string | null;
+  tsc_number?: string | null;
+}) {
+  return invokeWithSession<{
+    success: boolean;
+    teacher_id: string;
+    auth_user_id: string;
+    created_auth_account: boolean;
+    email: string;
+    message: string;
+  }>('sync-teacher-account', input as unknown as Record<string, unknown>, 'Teacher/Auth synchronization failed.');
+}
+
 export async function deleteScopedUser(input: {
   record_id?: string;
   target_user_id?: string;
   target_type: 'student' | 'learner' | 'teacher' | 'parent' | 'school_admin';
   school_id?: string;
 }) {
+  if ((input.target_type === 'student' || input.target_type === 'learner') && input.record_id && input.school_id) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) throw new Error('Your session has expired. Please sign in again.');
+    const { data, error } = await (supabase as any).rpc('permanently_delete_school_user', {
+      p_record_id: input.record_id,
+      p_target_type: input.target_type,
+      p_school_id: input.school_id,
+    });
+    if (!error) return data;
+    console.warn('[account] scoped learner deletion RPC failed; trying legacy edge function:', error.message);
+  }
+
   return invokeWithSession<{
     success: boolean;
     target_type: string;

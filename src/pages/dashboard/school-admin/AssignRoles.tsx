@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { UserCheck, Users, GraduationCap, Loader2, CheckCircle, AlertCircle, Save } from 'lucide-react';
+import { UserCheck, Users, GraduationCap, Loader2, CheckCircle, AlertCircle, Save, ShieldCheck, Plus, Trash2 } from 'lucide-react';
+import { createScopedUser } from '@/lib/supabase/createUser';
+import { deleteScopedUser } from '@/lib/supabase/accountActions';
 import { toast } from 'sonner';
 
 interface Teacher {
@@ -10,6 +12,7 @@ interface Teacher {
   first_name: string;
   last_name: string;
   employee_number: string;
+  is_dean_of_studies?: boolean;
 }
 
 interface ClassInfo {
@@ -34,7 +37,11 @@ export default function AssignRoles() {
   const [savingClass, setSavingClass] = useState<string | null>(null);
   const [savingDoS, setSavingDoS] = useState(false);
   const [selectedDoS, setSelectedDoS] = useState('');
+  const [dosSet, setDosSet] = useState<Set<string>>(new Set());
   const [classTeacherMap, setClassTeacherMap] = useState<Record<string, string>>({});
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [adminForm, setAdminForm] = useState({ first_name: '', last_name: '', email: '' });
+  const [savingAdmin, setSavingAdmin] = useState(false);
 
   useEffect(() => {
     if (user?.schoolId) fetchData();
@@ -46,7 +53,7 @@ export default function AssignRoles() {
       const [{ data: teachersData }, { data: classesData }, { data: schoolData }] = await Promise.all([
         (supabase as any)
           .from('teachers')
-          .select('id, profile_id, first_name, last_name, employee_number')
+          .select('id, profile_id, first_name, last_name, employee_number, is_dean_of_studies')
           .eq('school_id', user?.schoolId)
           .eq('is_active', true)
           .order('first_name'),
@@ -65,6 +72,14 @@ export default function AssignRoles() {
 
       const teacherList: Teacher[] = teachersData || [];
       setTeachers(teacherList);
+      setDosSet(new Set((teacherList as any[]).filter((t) => t.is_dean_of_studies).map((t) => String(t.id))));
+      const { data: adminsData } = await (supabase as any)
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .eq('school_id', user?.schoolId)
+        .eq('role', 'school_admin')
+        .order('first_name');
+      setAdmins(adminsData || []);
 
       // Build teacher lookup maps:
       // - by teachers.id (for the dropdown value)
@@ -109,6 +124,43 @@ export default function AssignRoles() {
       toast.error('Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminForm.email || !adminForm.first_name || !adminForm.last_name) {
+      toast.error('Name and email are required');
+      return;
+    }
+    setSavingAdmin(true);
+    try {
+      await createScopedUser({
+        email: adminForm.email.trim().toLowerCase(),
+        password: 'SchoolAdmin@2025',
+        first_name: adminForm.first_name.trim(),
+        last_name: adminForm.last_name.trim(),
+        role: 'school_admin',
+        school_id: user?.schoolId,
+      });
+      toast.success(`School administrator added: ${adminForm.email}`);
+      setAdminForm({ first_name: '', last_name: '', email: '' });
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add school administrator');
+    } finally {
+      setSavingAdmin(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (id: string, email: string) => {
+    if (!confirm(`Remove school administrator ${email}?`)) return;
+    try {
+      await deleteScopedUser({ target_user_id: id, target_type: 'school_admin' });
+      toast.success('School administrator removed');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove school administrator');
     }
   };
 
@@ -168,12 +220,13 @@ export default function AssignRoles() {
   const handleAssignDoS = async () => {
     setSavingDoS(true);
     try {
-      const { error } = await (supabase as any)
-        .from('schools')
-        .update({ dean_of_studies_id: selectedDoS || null })
-        .eq('id', user?.schoolId);
+      const dosIds = Array.from(dosSet).filter((id) => teachers.some((t) => t.id === id));
+      const { data: assignedCount, error } = await (supabase as any).rpc('assign_school_dos', {
+        p_school_id: user?.schoolId,
+        p_teacher_ids: dosIds,
+      });
       if (error) throw error;
-      toast.success(`Dean of Studies ${selectedDoS ? 'assigned' : 'removed'} successfully`);
+      toast.success(`Dean(s) of Studies saved (${assignedCount ?? dosIds.length} assigned)`);
       fetchData();
     } catch (err: any) {
       toast.error(err.message || 'Failed to assign Dean of Studies');
@@ -211,7 +264,7 @@ export default function AssignRoles() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-gray-900">Dean of Studies (DoS)</h2>
-            <p className="text-sm text-gray-500">The DoS can view all classes, monitor marks, and create assessments</p>
+            <p className="text-sm text-gray-500">Select one or more teachers. Each Dean of Studies can view all classes, monitor marks, and create assessments.</p>
           </div>
         </div>
 
@@ -219,32 +272,45 @@ export default function AssignRoles() {
           <div className="mb-4 flex items-center gap-2 p-3 bg-purple-50 border border-purple-200 rounded-xl">
             <CheckCircle className="w-4 h-4 text-purple-600" />
             <span className="text-sm text-purple-800">
-              Current DoS: <strong>{getTeacherName(school.dean_of_studies_id)}</strong>
+              Primary DoS: <strong>{getTeacherName(school.dean_of_studies_id)}</strong>
             </span>
           </div>
         )}
 
-        <div className="flex gap-3">
-          <select
-            value={selectedDoS}
-            onChange={(e) => setSelectedDoS(e.target.value)}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-          >
-            <option value="">-- No Dean of Studies --</option>
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.first_name} {t.last_name}
-                {t.employee_number ? ` (${t.employee_number})` : ''}
-              </option>
-            ))}
-          </select>
+        <div className="grid gap-2">
+          {teachers.length === 0 ? (
+            <p className="text-sm text-gray-500">No teachers found. Add teachers first.</p>
+          ) : (
+            teachers.map((t) => {
+              const checked = dosSet.has(String(t.id));
+              return (
+                <label key={t.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 cursor-pointer hover:bg-purple-50/40 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setDosSet((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(String(t.id))) next.delete(String(t.id));
+                        else next.add(String(t.id));
+                        return next;
+                      });
+                    }}
+                    className="w-4 h-4 rounded border-purple-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <span className="text-sm font-medium text-gray-800">{t.first_name} {t.last_name}</span>
+                  {t.employee_number && <span className="text-xs text-gray-400">({t.employee_number})</span>}
+                </label>
+              );
+            })
+          )}
           <button
             onClick={handleAssignDoS}
             disabled={savingDoS}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
           >
             {savingDoS ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save
+            Save Deans of Studies
           </button>
         </div>
       </div>
@@ -317,6 +383,72 @@ export default function AssignRoles() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* School Administrators Section */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">School Administrators</h2>
+            <p className="text-sm text-gray-500">Add multiple school administrators for this school.</p>
+          </div>
+        </div>
+
+        {admins.length > 0 && (
+          <div className="mb-4 divide-y divide-gray-100 rounded-xl border border-gray-100">
+            {admins.map((a) => (
+              <div key={a.id} className="flex items-center justify-between p-3">
+                <div className="text-sm">
+                  <span className="font-medium text-gray-900">{a.first_name} {a.last_name}</span>
+                  <span className="text-xs text-gray-500 ml-2">{a.email}</span>
+                </div>
+                <button
+                  onClick={() => handleDeleteAdmin(a.id, a.email)}
+                  className="text-red-500 hover:text-red-700 p-1.5 rounded-lg transition-colors"
+                  title="Remove administrator"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleAddAdmin} className="grid gap-3 sm:grid-cols-3">
+          <input
+            placeholder="First name *"
+            value={adminForm.first_name}
+            onChange={(e) => setAdminForm({ ...adminForm, first_name: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            required
+          />
+          <input
+            placeholder="Last name *"
+            value={adminForm.last_name}
+            onChange={(e) => setAdminForm({ ...adminForm, last_name: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            required
+          />
+          <input
+            placeholder="Email *"
+            type="email"
+            value={adminForm.email}
+            onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
+            className="px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            required
+          />
+          <button
+            type="submit"
+            disabled={savingAdmin}
+            className="sm:col-span-3 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          >
+            {savingAdmin ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            Add School Administrator
+          </button>
+        </form>
       </div>
     </div>
   );

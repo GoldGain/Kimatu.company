@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { sortByAdmissionNumber } from '@/lib/student-order';
 
 interface Student {
   id: string;
@@ -56,6 +57,8 @@ export default function Marklist() {
   const [editingCell, setEditingCell] = useState<{ studentId: string; columnId: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [selectedAggregateColumns, setSelectedAggregateColumns] = useState<string[]>([]);
+  const [aggregating, setAggregating] = useState(false);
 
   // Fetch teacher record and classes on mount
   useEffect(() => {
@@ -278,12 +281,16 @@ export default function Marklist() {
     setDownloading(true);
 
     try {
-      const doc = new jsPDF({ orientation: 'landscape' });
-      const className = classes.find(c => c.id === selectedClass)?.name || 'Unknown Class';
+      const selectedClassData = classes.find(c => c.id === selectedClass);
+      const classLabel = selectedClassData?.stream?.trim()
+        ? `${selectedClassData.name} (${selectedClassData.stream.trim()})`
+        : selectedClassData?.name || 'Unknown Class';
+      const fileLabel = classLabel.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
       // Title
       doc.setFontSize(16);
-      doc.text(`Marklist - ${className}`, 14, 20);
+      doc.text(`Marklist - ${classLabel}`, 14, 20);
       doc.setFontSize(10);
       doc.text(`Generated on ${new Date().toLocaleDateString('en-KE')}`, 14, 28);
       doc.text(`Teacher: ${user?.firstName} ${user?.lastName}`, 14, 34);
@@ -292,7 +299,7 @@ export default function Marklist() {
       const headers = ['#', 'Student Name', 'Admission No.', ...columns.map(c => c.column_name)];
 
       // Table rows
-      const body = students.map((student, index) => [
+      const body = sortByAdmissionNumber(students).map((student, index) => [
         String(index + 1),
         `${student.first_name} ${student.last_name}`,
         student.admission_number || '-',
@@ -308,7 +315,7 @@ export default function Marklist() {
         alternateRowStyles: { fillColor: [245, 243, 239] },
       });
 
-      doc.save(`marklist-${className.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`);
+      doc.save(`marklist-${fileLabel}-${new Date().toISOString().split('T')[0]}.pdf`);
       toast.success('PDF downloaded');
     } catch (err: any) {
       toast.error('Failed to generate PDF: ' + err.message);
@@ -323,8 +330,12 @@ export default function Marklist() {
     }
     setDownloading(true);
     try {
-      const className = classes.find(c => c.id === selectedClass)?.name || 'Unknown Class';
-      const rows = students.map((student, index) => {
+      const selectedClassData = classes.find(c => c.id === selectedClass);
+      const classLabel = selectedClassData?.stream?.trim()
+        ? `${selectedClassData.name} (${selectedClassData.stream.trim()})`
+        : selectedClassData?.name || 'Unknown Class';
+      const fileLabel = classLabel.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+      const rows = sortByAdmissionNumber(students).map((student, index) => {
         const row: Record<string, string | number> = {
           '#': index + 1,
           'Student Name': `${student.first_name} ${student.last_name}`,
@@ -335,10 +346,15 @@ export default function Marklist() {
         });
         return row;
       });
-      const ws = XLSX.utils.json_to_sheet(rows);
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['Class', classLabel],
+        ['Generated', new Date().toLocaleDateString('en-KE')],
+        [],
+      ]);
+      XLSX.utils.sheet_add_json(ws, rows, { origin: 'A4' });
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Marklist');
-      XLSX.writeFile(wb, `marklist-${className.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.writeFile(wb, `marklist-${fileLabel}-${new Date().toISOString().split('T')[0]}.xlsx`);
       toast.success('Excel downloaded');
     } catch (err: any) {
       toast.error('Failed to generate Excel: ' + err.message);
@@ -348,6 +364,43 @@ export default function Marklist() {
 
   const getCellValue = (studentId: string, columnId: string): string => {
     return cellData[studentId]?.[columnId] || '';
+  };
+
+  const combineSelectedColumns = async () => {
+    if (!teacherId || !selectedClass || selectedAggregateColumns.length < 2) {
+      toast.error('Select at least two CAT columns to combine.');
+      return;
+    }
+    const sourceColumns = columns.filter((column) => selectedAggregateColumns.includes(column.id));
+    const aggregateName = `Combined ${sourceColumns.map((column) => column.column_name).join(' + ')} Average`;
+    setAggregating(true);
+    try {
+      const { data: aggregateColumn, error: columnError } = await supabaseUntyped
+        .from('marklist_columns')
+        .insert({ teacher_id: teacherId, class_id: selectedClass, column_name: aggregateName.slice(0, 120), column_type: 'number', column_order: columns.length })
+        .select()
+        .single();
+      if (columnError) throw columnError;
+      const rows = students.map((student) => {
+        const values = sourceColumns.map((column) => Number(getCellValue(student.id, column.id))).filter((value) => Number.isFinite(value));
+        return { marklist_column_id: aggregateColumn.id, student_id: student.id, value: values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : '' };
+      }).filter((row) => row.value !== '');
+      if (rows.length) {
+        const { error: dataError } = await supabaseUntyped.from('marklist_data').upsert(rows, { onConflict: 'marklist_column_id,student_id' });
+        if (dataError) throw dataError;
+      }
+      setColumns((previous) => [...previous, aggregateColumn]);
+      setCellData((previous) => ({
+        ...previous,
+        ...rows.reduce((acc: Record<string, Record<string, string>>, row) => ({ ...acc, [row.student_id]: { ...(previous[row.student_id] || {}), [aggregateColumn.id]: row.value } }), {}),
+      }));
+      setSelectedAggregateColumns([]);
+      toast.success(`Combined exam created: ${aggregateName}`);
+    } catch (error: any) {
+      toast.error(`Failed to combine exams: ${error.message}`);
+    } finally {
+      setAggregating(false);
+    }
   };
 
   return (
@@ -441,6 +494,16 @@ export default function Marklist() {
             <Plus className="w-4 h-4" />
             Add Column
           </button>
+          {columns.filter((column) => /cat|exam/i.test(column.column_name) && !/combined/i.test(column.column_name)).length >= 2 && (
+            <button
+              onClick={combineSelectedColumns}
+              disabled={aggregating || selectedAggregateColumns.length < 2}
+              className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-colors text-sm font-medium disabled:opacity-50"
+            >
+              {aggregating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Combine Selected CATs
+            </button>
+          )}
         </div>
       )}
 
@@ -507,7 +570,12 @@ export default function Marklist() {
                     {columns.map((col) => (
                       <th key={col.id} className="px-4 py-3 text-xs font-semibold uppercase whitespace-nowrap min-w-[120px]">
                         <div className="flex items-center justify-between gap-2">
-                          <span>{col.column_name}</span>
+                          <span className="flex items-center gap-2">
+                            {/cat|exam/i.test(col.column_name) && !/combined/i.test(col.column_name) && (
+                              <input type="checkbox" checked={selectedAggregateColumns.includes(col.id)} onChange={(event) => setSelectedAggregateColumns((previous) => event.target.checked ? [...previous, col.id] : previous.filter((id) => id !== col.id))} aria-label={`Select ${col.column_name} for combination`} />
+                            )}
+                            {col.column_name}
+                          </span>
                           <button
                             onClick={() => handleDeleteColumn(col.id)}
                             className="text-white/70 hover:text-white transition-colors"

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase, supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Loader2, Pencil, Save, X, Eye, BookOpen, Filter, Send, Users, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { Search, Loader2, Pencil, Save, X, Eye, BookOpen, Filter, Send, Users, ChevronDown, ChevronUp, CheckCircle, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import { AddMarksModal, type AddMarksTarget } from '@/components/AddMarksModal';
 
 interface MarkEntry {
   id: string;
@@ -25,6 +26,12 @@ interface MarkEntry {
   terms: { name: string; academic_year: string } | null;
 }
 
+interface MissingStudent {
+  student_id: string;
+  name: string;
+  admission_number: string;
+}
+
 interface GroupedMarks {
   className: string;
   classId: string;
@@ -32,6 +39,7 @@ interface GroupedMarks {
     subjectName: string;
     subjectId: string;
     marks: MarkEntry[];
+    missing: MissingStudent[];
   }[];
 }
 
@@ -52,6 +60,11 @@ export default function ViewMarks() {
   const [expandedSubject, setExpandedSubject] = useState<string | null>(null);
   const [filterExam, setFilterExam] = useState<string>('');
   const [exams, setExams] = useState<any[]>([]);
+  const [teacherAssignments, setTeacherAssignments] = useState<any[]>([]);
+  const [classRoster, setClassRoster] = useState<Record<string, any[]>>({});
+  const [terms, setTerms] = useState<any[]>([]);
+  const [filterTerm, setFilterTerm] = useState('');
+  const [addingMarks, setAddingMarks] = useState<AddMarksTarget | null>(null);
 
   useEffect(() => {
     fetchMarks();
@@ -69,6 +82,15 @@ export default function ViewMarks() {
       setExams(data || []);
     } catch (err) {
       console.warn('Could not load exams', err);
+    }
+    try {
+      const { data: termsData } = await supabaseUntyped.from('terms').select('id, name, academic_year, is_current').eq('school_id', user?.schoolId).order('academic_year', { ascending: false });
+      setTerms(termsData || []);
+      const current = (termsData || []).find((t: any) => t.is_current);
+      if (current) setFilterTerm(current.id);
+      else if ((termsData || []).length > 0) setFilterTerm((termsData as any[])[0].id);
+    } catch (err) {
+      console.warn('Could not load terms', err);
     }
   };
 
@@ -114,6 +136,32 @@ export default function ViewMarks() {
       }));
       
       setMarks(loadedMarks);
+
+      // Load the teacher's class/subject assignments so subjects with no marks
+      // still render, and load the full class roster so unmarked learners show
+      // a "Missing" status instead of being omitted entirely.
+      const { data: assignmentsData } = await supabaseUntyped
+        .from('teacher_subject_assignments')
+        .select('class_id, subject_id, subjects(name), classes(name)')
+        .eq('teacher_id', teacherId)
+        .eq('is_active', true);
+      setTeacherAssignments(assignmentsData || []);
+
+      const classIds = Array.from(new Set((assignmentsData || []).map((a: any) => a.class_id).filter(Boolean)));
+      if (classIds.length > 0) {
+        const { data: studentsData } = await supabaseUntyped
+          .from('students')
+          .select('id, class_id, first_name, last_name, admission_number')
+          .in('class_id', classIds)
+          .eq('is_active', true)
+          .order('admission_number');
+        const roster: Record<string, any[]> = {};
+        (studentsData || []).forEach((stu: any) => {
+          if (!roster[stu.class_id]) roster[stu.class_id] = [];
+          roster[stu.class_id].push(stu);
+        });
+        setClassRoster(roster);
+      }
     } catch (err: any) {
       toast.error('Failed to load marks: ' + err.message);
     }
@@ -206,6 +254,31 @@ export default function ViewMarks() {
     setEditOutOf(String(mark.out_of));
   };
 
+  const handleDeleteMark = async (markId: string) => {
+    if (!confirm('Delete this mark? This cannot be undone.')) return;
+    try {
+      const { error } = await supabaseUntyped.from('results').delete().eq('id', markId);
+      if (error) throw error;
+      toast.success('Mark deleted');
+      fetchMarks();
+    } catch (err: any) { toast.error('Failed to delete mark: ' + err.message); }
+  };
+
+  const openAddMarks = (missing: MissingStudent, group: GroupedMarks, subject: GroupedMarks['subjects'][number]) => {
+    if (!filterTerm) { toast.error('Select a term to add marks'); return; }
+    setAddingMarks({
+      schoolId: user?.schoolId || '',
+      classId: group.classId,
+      subjectId: subject.subjectId,
+      subjectName: subject.subjectName,
+      termId: filterTerm,
+      examId: filterExam || null,
+      studentId: missing.student_id,
+      studentName: missing.name,
+      admissionNumber: missing.admission_number,
+    });
+  };
+
   // Filter marks
   const filteredMarks = marks.filter((m) => {
     const studentName = `${m.students?.first_name || ''} ${m.students?.last_name || ''}`.toLowerCase();
@@ -220,38 +293,71 @@ export default function ViewMarks() {
     return matchesSearch && matchesClass && matchesSubject && matchesStatus && matchesExam;
   });
 
+  // Scope missing-learner detection to the selected term (if any)
+  const marksForTerm = filterTerm ? marks.filter((m) => m.term_id === filterTerm) : marks;
+
   // Group marks by class and subject
   const groupedMarks: GroupedMarks[] = [];
-  const classMap = new Map<string, { className: string; subjects: Map<string, { subjectName: string; marks: MarkEntry[] }> }>();
+  const classMap = new Map<string, { className: string; subjects: Map<string, { subjectName: string; marks: MarkEntry[]; missing: MissingStudent[] }> }>();
   
-  filteredMarks.forEach(m => {
-    const classId = m.class_id;
-    const subjectId = m.subject_id;
-    
-    if (!classMap.has(classId)) {
-      classMap.set(classId, {
-        className: m.classes?.name || 'Unknown Class',
-        subjects: new Map(),
-      });
+  // Seed groups from the teacher's assignments so subjects with zero marks
+  // still appear, then attach entered marks and compute missing learners.
+  const seeds: Array<{ class_id: string; subject_id: string; className: string; subjectName: string }> =
+    teacherAssignments.length > 0
+      ? teacherAssignments.map((a: any) => ({
+          class_id: a.class_id,
+          subject_id: a.subject_id,
+          className: a.classes?.name || 'Unknown Class',
+          subjectName: a.subjects?.name || 'Unknown Subject',
+        }))
+      : marks.map((m) => ({
+          class_id: m.class_id,
+          subject_id: m.subject_id,
+          className: m.classes?.name || 'Unknown Class',
+          subjectName: m.subjects?.name || 'Unknown Subject',
+        }));
+
+  seeds.forEach((seed) => {
+    if (!classMap.has(seed.class_id)) {
+      classMap.set(seed.class_id, { className: seed.className, subjects: new Map() });
     }
-    
-    const classData = classMap.get(classId)!;
-    if (!classData.subjects.has(subjectId)) {
-      classData.subjects.set(subjectId, {
-        subjectName: m.subjects?.name || 'Unknown Subject',
-        marks: [],
-      });
+    const classData = classMap.get(seed.class_id)!;
+    if (!classData.subjects.has(seed.subject_id)) {
+      classData.subjects.set(seed.subject_id, { subjectName: seed.subjectName, marks: [], missing: [] });
     }
-    
-    classData.subjects.get(subjectId)!.marks.push(m);
   });
 
-  classMap.forEach((value, classId) => {
-    const subjects: GroupedMarks['subjects'] = [];
-    value.subjects.forEach((subVal, subId) => {
-      subjects.push({ subjectName: subVal.subjectName, subjectId: subId, marks: subVal.marks });
+  filteredMarks.forEach((m) => {
+    const classData = classMap.get(m.class_id);
+    const subject = classData?.subjects.get(m.subject_id);
+    if (subject) subject.marks.push(m);
+  });
+
+  classMap.forEach((classData, classId) => {
+    const roster = classRoster[classId] || [];
+    const enteredBySubject = new Map<string, Set<string>>();
+    marksForTerm.forEach((m) => {
+      if (m.class_id !== classId || !m.student_id) return;
+      if (!enteredBySubject.has(m.subject_id)) enteredBySubject.set(m.subject_id, new Set());
+      enteredBySubject.get(m.subject_id)!.add(String(m.student_id));
     });
-    groupedMarks.push({ className: value.className, classId, subjects });
+
+    classData.subjects.forEach((subject, subjectId) => {
+      const entered = enteredBySubject.get(subjectId) || new Set<string>();
+      subject.missing = roster
+        .filter((stu) => !entered.has(String(stu.id)))
+        .map((stu) => ({
+          student_id: stu.id,
+          name: `${stu.first_name || ''} ${stu.last_name || ''}`.trim() || 'Unknown',
+          admission_number: stu.admission_number || '-',
+        }));
+    });
+
+    const subjects: GroupedMarks['subjects'] = [];
+    classData.subjects.forEach((subVal, subId) => {
+      subjects.push({ subjectName: subVal.subjectName, subjectId: subId, marks: subVal.marks, missing: subVal.missing });
+    });
+    groupedMarks.push({ className: classData.className, classId, subjects });
   });
 
   // Get unique classes and subjects for filters
@@ -334,6 +440,18 @@ export default function ViewMarks() {
           <option value="draft">Draft</option>
           <option value="submitted">Submitted</option>
         </select>
+        {terms.length > 0 && (
+          <select
+            value={filterTerm}
+            onChange={(e) => setFilterTerm(e.target.value)}
+            className="px-4 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+          >
+            <option value="">All Terms</option>
+            {terms.map((t: any) => (
+              <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>
+            ))}
+          </select>
+        )}
         {exams.length > 0 && (
           <select
             value={filterExam}
@@ -410,6 +528,9 @@ export default function ViewMarks() {
                               <BookOpen className="w-4 h-4 text-blue-500" />
                               <span className="font-medium text-sm text-gray-900">{subject.subjectName}</span>
                               <span className="text-xs text-gray-400">({subject.marks.length} entries)</span>
+                              {subject.missing.length > 0 && (
+                                <span className="text-xs font-semibold text-red-500">· {subject.missing.length} missing</span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               {subjectDrafts.length > 0 && (
@@ -520,9 +641,37 @@ export default function ViewMarks() {
                                               >
                                                 <Pencil className="w-3 h-3" /> Edit
                                               </button>
+                                              <button
+                                                onClick={() => handleDeleteMark(m.id)}
+                                                className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100"
+                                              >
+                                                <Trash2 className="w-3 h-3" /> Delete
+                                              </button>
                                             </>
                                           )}
                                         </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {subject.missing.map((missing) => (
+                                    <tr key={`missing-${missing.student_id}`} className="border-b bg-red-50/40">
+                                      <td className="px-3 py-2 font-medium text-gray-700">{missing.name}</td>
+                                      <td className="px-3 py-2 text-gray-500 text-xs">{missing.admission_number}</td>
+                                      <td className="px-3 py-2">
+                                        <span className="text-xs font-semibold text-red-500">Not entered</span>
+                                      </td>
+                                      <td className="px-3 py-2">-</td>
+                                      <td className="px-3 py-2">-</td>
+                                      <td className="px-3 py-2">
+                                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">Missing</span>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <button
+                                          onClick={() => openAddMarks(missing, group, subject)}
+                                          className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100"
+                                        >
+                                          <Plus className="w-3 h-3" /> Add Marks
+                                        </button>
                                       </td>
                                     </tr>
                                   ))}
@@ -539,6 +688,9 @@ export default function ViewMarks() {
             );
           })}
         </div>
+      )}
+      {addingMarks && (
+        <AddMarksModal target={addingMarks} onClose={() => setAddingMarks(null)} onSaved={() => fetchMarks()} />
       )}
     </div>
   );

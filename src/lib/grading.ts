@@ -33,12 +33,12 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
   const rawLevel = classData?.grade_level ?? classData?.level;
   const parsedLevel = typeof rawLevel === 'number' ? rawLevel : parseInt(String(rawLevel || '').replace(/[^0-9]/g, ''), 10);
 
-  // PP1 and PP2 are also primary
+  // Playgroup (-3), PP1 (-2), PP2 (-1), and legacy pre-primary (0) use the Primary/Pre-Primary band.
   const name = String(classData?.name || '').toLowerCase();
-  if (/pp1|pp2|pre.?primary/i.test(name)) return 'primary';
+  if (/playgroup|pp1|pp2|pre.?primary/i.test(name)) return 'primary';
 
   // Primary School: PP1, PP2, Grades 1-6 — marks only, no points
-  if (Number.isFinite(parsedLevel) && parsedLevel >= 0 && parsedLevel <= 6) return 'primary';
+  if (Number.isFinite(parsedLevel) && parsedLevel >= -3 && parsedLevel <= 6) return 'primary';
 
   // Junior School: Grades 7-9 — 8-level scale with points
   if (Number.isFinite(parsedLevel) && parsedLevel >= 7 && parsedLevel <= 9) return 'junior';
@@ -49,7 +49,7 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
   // Fallback: parse from class name
   if (/senior|grade\s*1[012]|\b1[012]\b/.test(name)) return 'senior';
   if (/junior|jss|grade\s*[789]|\b[789]\b/.test(name)) return 'junior';
-  if (/pp1|pp2|pre.?primary|grade\s*[1-6]/i.test(name)) return 'primary';
+  if (/playgroup|pp1|pp2|pre.?primary|grade\s*[1-6]/i.test(name)) return 'primary';
   // 8-4-4 form names (fallback if curriculum not set)
   if (/form\s*[34]/i.test(name)) return 'senior';
   if (/form\s*[12]/i.test(name)) return 'junior';
@@ -332,4 +332,87 @@ export function generateSubjectSpecificComment(
   }
 
   return comment;
+}
+
+// ── Required Learning Areas (fixed ranking denominator) ────────────────────
+// Ranking must divide a learner's total score by the FIXED number of learning
+// areas required for their level — NOT by how many subjects they happen to
+// have marks in. This stops learners with only a couple of uploaded subjects
+// from ranking #1 on an inflated mean.
+export function getRequiredLearningAreas(classData?: {
+  curriculum?: Curriculum | string | null;
+  grade_level?: number | string | null;
+  level?: number | string | null;
+  name?: string | null;
+}): number | null {
+  const rawLevel = classData?.grade_level ?? classData?.level;
+  const grade = typeof rawLevel === 'number'
+    ? rawLevel
+    : parseInt(String(rawLevel ?? '').replace(/[^0-9-]/g, ''), 10);
+
+  if (Number.isFinite(grade)) {
+    if (grade >= 10 && grade <= 12) return 7; // Senior School
+    if (grade >= 7 && grade <= 9) return 9;   // Junior School
+    if (grade >= 4 && grade <= 6) return 7;   // Upper Primary
+    if (grade >= 1 && grade <= 3) return 5;   // Lower Primary
+  }
+
+  const name = String(classData?.name || '').toLowerCase();
+  if (/senior|grade\s*1[012]/.test(name)) return 7;
+  if (/junior|jss|grade\s*[789]/.test(name)) return 9;
+  return null; // playgroup / PP / unknown: keep old divide-by-count behaviour
+}
+
+// ── Learning Area Performance status band ────────────────────────────────────
+// Maps a competency grade to a display status. EE1/EE2/ME1 are STRONG,
+// ME2 is AVERAGE, and AE1 or below is WEAK (AE1 must never show AVERAGE).
+export function statusForGrade(subLevel?: string | null): 'STRONG' | 'AVERAGE' | 'WEAK' {
+  const g = String(subLevel || '').trim().toUpperCase();
+  if (g === 'EE1' || g === 'EE2' || g === 'ME1' || g === 'EE' || g === 'ME') return 'STRONG';
+  if (g === 'ME2') return 'AVERAGE';
+  if (g === 'AE1' || g === 'AE2' || g === 'BE1' || g === 'BE2' || g === 'AE' || g === 'BE') return 'WEAK';
+  return 'AVERAGE';
+}
+
+// ── Grade band labels for a school level band ────────────────────────────────
+export function gradeLabelsForBand(band: SchoolLevelBand): string[] {
+  if (band === 'primary') return ['EE', 'ME', 'AE', 'BE'];
+  return ['EE1', 'EE2', 'ME1', 'ME2', 'AE1', 'AE2', 'BE1', 'BE2'];
+}
+
+// ── Canonical learning areas per curriculum level ────────────────────────────
+// Returns the fixed, ordered learning areas for levels whose national
+// curriculum defines a stable set (Junior School and Upper Primary). Returns an
+// empty list for Lower Primary, Senior School, 8-4-4 and unknown levels so
+// callers fall back to the learning areas actually present in the results.
+export function getCanonicalLearningAreas(classData?: {
+  curriculum?: Curriculum | string | null;
+  grade_level?: number | string | null;
+  level?: number | string | null;
+  name?: string | null;
+}): string[] {
+  if (is844Curriculum(classData)) return [];
+  const rawLevel = classData?.grade_level ?? classData?.level;
+  const grade = typeof rawLevel === 'number'
+    ? rawLevel
+    : parseInt(String(rawLevel ?? '').replace(/[^0-9-]/g, ''), 10);
+
+  const junior = [
+    'English', 'Kiswahili', 'Mathematics', 'Integrated Science',
+    'Pre-Technical Studies', 'Agriculture', 'Social Studies', 'CRE', 'Creative Arts',
+  ];
+  const upperPrimary = [
+    'English', 'Kiswahili', 'Mathematics', 'Science and Technology',
+    'Social Studies', 'CRE', 'Creative Arts',
+  ];
+
+  if (Number.isFinite(grade)) {
+    if (grade >= 7 && grade <= 9) return junior;
+    if (grade >= 4 && grade <= 6) return upperPrimary;
+  }
+
+  const name = String(classData?.name || '').toLowerCase();
+  if (/junior|jss|grade\s*[789]/.test(name)) return junior;
+  if (/grade\s*[4-6]/.test(name)) return upperPrimary;
+  return [];
 }

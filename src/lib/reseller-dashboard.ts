@@ -1,5 +1,5 @@
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { currencyCode, feeOrDefault } from '@/lib/reseller';
+import { DEFAULT_ANNUAL_FEE_PER_LEARNER, currencyCode, feeOrDefault } from '@/lib/reseller';
 
 export interface SchoolPortfolioItem {
   id: string;
@@ -54,7 +54,7 @@ type SchoolRow = {
   dos_portal_locked: boolean | null;
 };
 
-type SchoolScopedRow = { id: string; school_id: string | null; parent_id?: string | null };
+type SchoolScopedRow = { id: string; school_id: string | null; parent_id?: string | null; is_active?: boolean | null };
 type ParentLinkRow = { parent_id: string | null; student_id: string | null };
 
 function countBySchool(rows: SchoolScopedRow[]): Map<string, number> {
@@ -85,7 +85,7 @@ export async function loadResellerPortfolio(resellerId: string): Promise<Reselle
   const { data: schoolData, error: schoolError } = await supabaseUntyped
     .from('schools')
     .select('id, name, code, county, sub_county, email, phone, status, registration_source, currency, fee_per_learner_per_term, fee_per_learner_per_year, admin_portal_locked, dos_portal_locked')
-    .or(`reseller_id.eq.${resellerId},reseller_id.is.null`)
+    .eq('reseller_id', resellerId)
     .order('name');
 
   if (schoolError) throw schoolError;
@@ -94,14 +94,19 @@ export async function loadResellerPortfolio(resellerId: string): Promise<Reselle
   if (!schools.length) return emptyPortfolio();
 
   const schoolIds = schools.map((school) => school.id);
-  const [studentsResponse, teachersResponse, adminsResponse, parentLinksResponse] = await Promise.all([
-    supabaseUntyped.from('students').select('id, school_id, parent_id').in('school_id', schoolIds),
+  const [studentsResponse, studentCountResponses, teachersResponse, adminsResponse, parentLinksResponse] = await Promise.all([
+    supabaseUntyped.from('students').select('id, school_id, parent_id, is_active').in('school_id', schoolIds).eq('is_active', true),
+    Promise.all(schoolIds.map((schoolId) => supabaseUntyped
+      .from('students')
+      .select('id', { count: 'exact', head: true })
+      .eq('school_id', schoolId)
+      .eq('is_active', true))),
     supabaseUntyped.from('teachers').select('id, school_id').in('school_id', schoolIds),
     supabaseUntyped.from('school_admins').select('id, school_id').in('school_id', schoolIds),
     supabaseUntyped.from('parent_student_links').select('parent_id, student_id'),
   ]);
 
-  const responses = [studentsResponse, teachersResponse, adminsResponse, parentLinksResponse];
+  const responses = [studentsResponse, ...studentCountResponses, teachersResponse, adminsResponse, parentLinksResponse];
   const firstError = responses.find((response) => response.error)?.error;
   if (firstError) throw firstError;
 
@@ -110,7 +115,7 @@ export async function loadResellerPortfolio(resellerId: string): Promise<Reselle
   const admins = (adminsResponse.data || []) as SchoolScopedRow[];
   const parentLinks = (parentLinksResponse.data || []) as ParentLinkRow[];
 
-  const studentCounts = countBySchool(students);
+  const studentCounts = new Map<string, number>(schoolIds.map((schoolId, index) => [schoolId, studentCountResponses[index].count || 0]));
   const teacherCounts = countBySchool(teachers);
   const adminCounts = countBySchool(admins);
   const studentSchoolById = new Map(students.map((student) => [student.id, student.school_id]));
@@ -133,7 +138,7 @@ export async function loadResellerPortfolio(resellerId: string): Promise<Reselle
   const portfolioSchools = schools.map((school) => {
     const learners = studentCounts.get(school.id) || 0;
     const feePerLearnerPerTerm = feeOrDefault(school.fee_per_learner_per_term);
-    const feePerLearnerPerYear = feeOrDefault(school.fee_per_learner_per_year, feePerLearnerPerTerm * 3);
+    const feePerLearnerPerYear = feeOrDefault(school.fee_per_learner_per_year, DEFAULT_ANNUAL_FEE_PER_LEARNER);
     const revenueThisTerm = learners * feePerLearnerPerTerm;
 
     return {
@@ -187,7 +192,7 @@ export async function updateSchoolFee(resellerId: string, schoolId: string, rawF
     .from('schools')
     .update({ fee_per_learner_per_term: fee })
     .eq('id', schoolId)
-    .or(`reseller_id.eq.${resellerId},reseller_id.is.null`);
+    .eq('reseller_id', resellerId);
 
   if (error) throw error;
   return fee;
@@ -203,7 +208,7 @@ export async function updateSchoolAnnualFee(resellerId: string, schoolId: string
     .from('schools')
     .update({ fee_per_learner_per_year: fee })
     .eq('id', schoolId)
-    .or(`reseller_id.eq.${resellerId},reseller_id.is.null`);
+    .eq('reseller_id', resellerId);
 
   if (error) throw error;
   return fee;

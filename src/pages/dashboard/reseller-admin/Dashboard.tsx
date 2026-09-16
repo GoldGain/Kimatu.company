@@ -3,7 +3,6 @@ import { Link } from 'react-router';
 import {
   ArrowRight,
   Building2,
-  CreditCard,
   DollarSign,
   GraduationCap,
   Mail,
@@ -389,12 +388,6 @@ export default function ResellerDashboard() {
               <h2 className="mt-3 font-semibold text-slate-900">Access control</h2>
               <p className="mt-1 text-sm leading-6 text-slate-500">Review and manage school administrator and Dean of Studies portal access.</p>
               <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-blue-700">Manage access <ArrowRight className="h-4 w-4" /></span>
-            </Link>
-            <Link to="/reseller-admin/pricing" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:shadow-md">
-              <CreditCard className="h-5 w-5 text-emerald-600" />
-              <h2 className="mt-3 font-semibold text-slate-900">Pricing defaults</h2>
-              <p className="mt-1 text-sm leading-6 text-slate-500">Set the starting fee used when new schools are added to your portfolio.</p>
-              <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-blue-700">Open pricing <ArrowRight className="h-4 w-4" /></span>
             </Link>
             <Link to="/reseller-admin/payments" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-200 hover:shadow-md">
               <DollarSign className="h-5 w-5 text-indigo-600" />

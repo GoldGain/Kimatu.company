@@ -2,7 +2,6 @@ import { Routes, Route, Navigate, Outlet } from 'react-router';
 import { Toaster } from '@/components/ui/sonner';
 import { Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { TrialProvider } from '@/contexts/TrialContext';
 import MainLayout from '@/components/layout/MainLayout';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -30,7 +29,6 @@ import ResellerSchoolAdmins from '@/pages/dashboard/reseller-admin/SchoolAdmins'
 import ResellerPayments from '@/pages/dashboard/reseller-admin/Payments';
 import ResellerChangePassword from '@/pages/dashboard/reseller-admin/ChangePassword';
 import ResellerAccessControl from '@/pages/dashboard/reseller-admin/AccessControl';
-import ResellerPricing from '@/pages/dashboard/reseller-admin/Pricing';
 import ResellerStudents from '@/pages/dashboard/reseller-admin/Students';
 import SchoolPortalLockGate from '@/components/SchoolPortalLockGate';
 // Dashboard pages
@@ -192,7 +190,6 @@ function AppRoutes() {
       <Route path="/reseller-admin/schools" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerSchools /></ProtectedRoute>} />
       <Route path="/reseller-admin/school-admins" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerSchoolAdmins /></ProtectedRoute>} />
       <Route path="/reseller-admin/payments" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerPayments /></ProtectedRoute>} />
-      <Route path="/reseller-admin/pricing" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerPricing /></ProtectedRoute>} />
       <Route path="/reseller-admin/access-control" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerAccessControl /></ProtectedRoute>} />
       <Route path="/reseller-admin/students" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerStudents /></ProtectedRoute>} />
       <Route path="/reseller-admin/change-password" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerChangePassword /></ProtectedRoute>} />
@@ -309,13 +306,11 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <TrialProvider>
-          <AppRoutes />
-          <PWAInstallBanner />
-          <PWAFloatingButton />
-          <AIAssistant />
-          <Toaster position="top-right" richColors closeButton />
-        </TrialProvider>
+        <AppRoutes />
+        <PWAInstallBanner />
+        <PWAFloatingButton />
+        <AIAssistant />
+        <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
     </ErrorBoundary>
   );

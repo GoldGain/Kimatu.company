@@ -11,6 +11,7 @@ import {
   BookOpen,
   Library,
   FileText,
+  FilePlus2,
   Bell,
   Settings,
   LogOut,
@@ -43,6 +44,7 @@ import {
   FileSpreadsheet,
   Shield,
   WalletCards,
+  Trash2,
 } from 'lucide-react';
 
 interface NavItem {
@@ -66,8 +68,8 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'My Schools', icon: <School className="w-5 h-5" />, path: '/reseller-admin/schools' },
     { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/reseller-admin/students' },
     { label: 'School Admins', icon: <UserCheck className="w-5 h-5" />, path: '/reseller-admin/school-admins' },
+    { label: 'Communicate', icon: <MessageSquare className="w-5 h-5" />, path: '/reseller-admin/communicate' },
     { label: 'Payments', icon: <DollarSign className="w-5 h-5" />, path: '/reseller-admin/payments' },
-    { label: 'Pricing', icon: <CreditCard className="w-5 h-5" />, path: '/reseller-admin/pricing' },
     { label: 'Access Control', icon: <Shield className="w-5 h-5" />, path: '/reseller-admin/access-control' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/reseller-admin/change-password' },
   ],
@@ -78,8 +80,10 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: '/super-admin/settings' },
   ],
   'school-admin': [
-    { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin' },
+    { label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/school-admin/dashboard' },
+    { label: 'Promote Next Term', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/promote-next-term' },
     { label: 'Learners', icon: <Users className="w-5 h-5" />, path: '/school-admin/students' },
+    { label: 'Recycle Bin', icon: <Trash2 className="w-5 h-5" />, path: '/school-admin/recycle-bin' },
     { label: 'Bulk Student Upload', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/school-admin/students/bulk-import' },
     { label: 'Attendance', icon: <ClipboardList className="w-5 h-5" />, path: '/school-admin/attendance' },
     { label: 'Graduated Students', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/graduated-students' },
@@ -95,13 +99,17 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'View Timetable', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/timetable/view' },
     { label: 'Fees', icon: <CreditCard className="w-5 h-5" />, path: '/school-admin/fees' },
     { label: 'Results', icon: <FileText className="w-5 h-5" />, path: '/school-admin/results' },
+    { label: 'Upload Results', icon: <Upload className="w-5 h-5" />, path: '/school-admin/upload-results' },
+    { label: 'Combine Exams', icon: <FilePlus2 className="w-5 h-5" />, path: '/school-admin/combine-exams' },
     { label: 'Assessments', icon: <BookOpen className="w-5 h-5" />, path: '/school-admin/assessments' },
-    { label: 'Marks Overview', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/marks-overview' },
+    { label: 'Assessment Progress', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/assessment-progress' },
     { label: 'Assign Roles', icon: <UserCheck className="w-5 h-5" />, path: '/school-admin/assign-roles' },
     { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/school-admin/stream-dashboard' },
     { label: 'Promote Grade', icon: <GraduationCap className="w-5 h-5" />, path: '/school-admin/promote-class' },
+    { label: 'Class List', icon: <FileSpreadsheet className="w-5 h-5" />, path: '/school-admin/class-list' },
     { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: '/school-admin/announcements' },
     { label: 'Branding & Notifications', icon: <Palette className="w-5 h-5" />, path: '/school-admin/branding' },
+    { label: 'School Calendar Settings', icon: <Calendar className="w-5 h-5" />, path: '/school-admin/settings' },
     { label: 'My Profile', icon: <User className="w-5 h-5" />, path: '/school-admin/profile' },
     { label: 'Change Password', icon: <Settings className="w-5 h-5" />, path: '/school-admin/change-password' },
   ],
@@ -110,9 +118,12 @@ const navConfig: Record<string, NavItem[]> = {
     { label: 'Class Teacher Workspace', icon: <Users className="w-5 h-5" />, path: '/teacher/class-dashboard' },
     { label: 'DoS Dashboard', icon: <GraduationCap className="w-5 h-5" />, path: '/dean-of-studies' },
     { label: 'DoS Results', icon: <FileText className="w-5 h-5" />, path: '/dean-of-studies/results' },
+    { label: 'Combine Exams', icon: <FilePlus2 className="w-5 h-5" />, path: '/dean-of-studies/combine-exams' },
+    { label: 'Stream Dashboard', icon: <BarChart3 className="w-5 h-5" />, path: '/dean-of-studies/stream-dashboard' },
     { label: 'Class Results', icon: <FileText className="w-5 h-5" />, path: '/teacher/results' },
     { label: 'Subject Teacher Workspace', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/subject-dashboard' },
     { label: 'My Learning Areas', icon: <BookOpen className="w-5 h-5" />, path: '/teacher/my-subjects' },
+    { label: 'Select My Learners', icon: <Users className="w-5 h-5" />, path: '/teacher/select-learners' },
     { label: 'My Personal Timetable', icon: <Calendar className="w-5 h-5" />, path: '/teacher/timetable' },
     { label: 'Results Upload', icon: <Upload className="w-5 h-5" />, path: '/teacher/results/assigned' },
     { label: 'View My Marks', icon: <Eye className="w-5 h-5" />, path: '/teacher/view-marks' },
@@ -192,7 +203,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (user.role === 'teacher') {
         const { data: teacherData } = await (supabase as any)
           .from('teachers')
-          .select('is_class_teacher, id, school_id')
+          .select('is_class_teacher, is_dean_of_studies, id, school_id')
           .eq('profile_id', user.id)
           .maybeSingle();
         setIsClassTeacher(Boolean(teacherData?.is_class_teacher));
@@ -210,7 +221,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             .select('dean_of_studies_id')
             .eq('id', teacherData.school_id)
             .maybeSingle();
-          if (schoolInfo?.dean_of_studies_id === teacherData.id) setIsDoS(true);
+          if (teacherData.is_dean_of_studies || schoolInfo?.dean_of_studies_id === teacherData.id) setIsDoS(true);
         }
       }
     };
@@ -240,7 +251,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     navItems = navItems.filter(item => {
       if (item.path === '/teacher/class-dashboard' && !isClassTeacher) return false;
       if (item.path === '/teacher/subject-dashboard' && !hasSubjectAssignments) return false;
-      if ((item.path === '/dean-of-studies' || item.path === '/dean-of-studies/results') && !isDoS) return false;
+      if ((item.path === '/dean-of-studies' || item.path === '/dean-of-studies/results' || item.path === '/dean-of-studies/stream-dashboard') && !isDoS) return false;
       if (item.path === '/teacher/results' && !isClassTeacher) return false;
       return true;
     });

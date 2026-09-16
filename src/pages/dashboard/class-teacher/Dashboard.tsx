@@ -6,8 +6,9 @@ import {
   Search, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, Download, Send
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateCompetencyGrade, getSchoolLevelBand } from '@/lib/grading';
+import { calculateCompetencyGrade, getSchoolLevelBand, getRequiredLearningAreas } from '@/lib/grading';
 import { MarksProgress } from '@/components/MarksProgress';
+import { AddMarksModal, type AddMarksTarget } from '@/components/AddMarksModal';
 
 interface StudentPerformance {
   id: string;
@@ -44,6 +45,7 @@ export default function ClassTeacherDashboard() {
   const [loadingPerf, setLoadingPerf] = useState(false);
   const [search, setSearch] = useState('');
   const [remindingSubjectId, setRemindingSubjectId] = useState<string | null>(null);
+  const [addingMarks, setAddingMarks] = useState<AddMarksTarget | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'marks-progress' | 'students' | 'performance'>('overview');
 
   useEffect(() => {
@@ -166,7 +168,9 @@ export default function ClassTeacherDashboard() {
       const perf: StudentPerformance[] = students.map((student) => {
         const sResults = resultsMap[student.id] || {};
         const pcts = Object.values(sResults).map((r: any) => r.pct).filter((p) => p != null && p > 0);
-        const avgPct = pcts.length > 0 ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
+        const req = getRequiredLearningAreas(assignedClass || {}) || 0;
+        const denom = req > 0 ? req : pcts.length;
+        const avgPct = pcts.length > 0 ? Math.round(pcts.reduce((a, b) => a + b, 0) / denom) : null;
         
         const marks = Object.values(sResults).map((r: any) => r.marks).filter((m) => m != null);
         const outOfs = Object.values(sResults).map((r: any) => r.out_of).filter((o) => o != null);
@@ -267,6 +271,20 @@ export default function ClassTeacherDashboard() {
     } finally {
       setRemindingSubjectId(null);
     }
+  };
+
+  const openAddMarks = (learner: any, subject: SubjectInfo) => {
+    setAddingMarks({
+      schoolId: user?.schoolId || '',
+      classId: assignedClass.id,
+      subjectId: subject.id,
+      subjectName: subject.name,
+      termId: selectedTerm,
+      examId: null,
+      studentId: learner.id,
+      studentName: `${learner.first_name} ${learner.last_name}`,
+      admissionNumber: learner.admission_number,
+    });
   };
 
   if (loading) {
@@ -445,7 +463,19 @@ export default function ClassTeacherDashboard() {
                     {missingLearnerRows.map((learner) => (
                       <tr key={learner.id} className="border-b border-amber-50 bg-white">
                         <td className="px-4 py-3 font-medium text-gray-900">{learner.first_name} {learner.last_name}</td>
-                        <td className="px-4 py-3 text-gray-600">{learner.missingSubjects.map((subject) => subject.name).join(', ')}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          <div className="flex flex-wrap gap-1.5">
+                            {learner.missingSubjects.map((subject) => (
+                              <button
+                                key={subject.id}
+                                onClick={() => openAddMarks(learner, subject)}
+                                className="rounded-lg bg-green-50 border border-green-200 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+                              >
+                                + {subject.name}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-right">
                           <button
                             onClick={() => { setSearch(`${learner.first_name} ${learner.last_name}`); setActiveTab('students'); }}
@@ -643,6 +673,9 @@ export default function ClassTeacherDashboard() {
           )}
           </div>
         </div>
+      )}
+      {addingMarks && (
+        <AddMarksModal target={addingMarks} onClose={() => setAddingMarks(null)} onSaved={() => { setAddingMarks(null); fetchPerformance(); }} />
       )}
     </div>
   );

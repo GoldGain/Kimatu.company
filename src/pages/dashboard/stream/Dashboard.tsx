@@ -1,109 +1,272 @@
 import { useState, useEffect } from 'react';
+import PdfFontSizeDialog from '@/components/PdfFontSizeDialog';
 import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { BarChart3, Users, Filter, Loader2, TrendingUp, Award, BookOpen, Search, ClipboardList, Download } from 'lucide-react';
+import {
+  BarChart3, Users, Loader2, TrendingUp, Award, BookOpen,
+  Search, Download, FileSpreadsheet, Trophy, GitCompareArrows,
+  ListOrdered, Layers, AlertCircle, Medal,
+} from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { getSchoolLevelBand, is844Curriculum } from '@/lib/grading';
+import * as XLSX from 'xlsx';
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend, Cell,
+} from 'recharts';
+import { getSchoolLevelBand, is844Curriculum, calculateCompetencyGrade, calculate844Grade, getRequiredLearningAreas } from '@/lib/grading';
+import { addLogoToPDF } from '@/lib/reportCardPdf';
+import { configurePdfFontSize, pdfFontSize, type PdfFontSize } from '@/lib/pdfFontSize';
 
-interface StudentRanking {
+interface StreamClass {
+  id: string;
+  name: string;
+  stream: string | null;
+  stream_name: string | null;
+  label: string;
+  curriculum: string | null;
+  level: number | null;
+  grade_level: number | null;
+  gradeKey: string;
+  gradeLabel: string;
+}
+
+interface StudentRow {
   id: string;
   first_name: string;
   last_name: string;
   admission_number: string;
-  avgPercentage: number | null;
-  totalPoints: number | null;
-  position: number | null;
-  subjectResults: Record<string, { pct: number; grade: string }>;
+  class_id: string;
+  stream_id?: string | null;
 }
 
-interface SubjectSummary {
-  id: string;
-  name: string;
-  average: number;
-  highest: number;
-  lowest: number;
+interface ResultRow {
+  student_id: string;
+  class_id: string;
+  subject_id: string;
+  percentage: number | null;
+  marks: number | null;
+  out_of: number | null;
+  cbc_points: number | null;
+  points_844: number | null;
+  cbc_sublevel: string | null;
+  cbc_grade: string | null;
+  grade_844: string | null;
+  exam_id: string | null;
+  created_at?: string | null;
+}
+
+interface StudentStats {
+  avg: number | null;
+  pctTotal: number;
+  totalPoints: number;
+  totalMarks: number;
+  totalOutOf: number;
   count: number;
 }
 
-interface ClassComparison {
-  id: string;
-  name: string;
-  stream: string;
-  learnerCount: number;
-  resultsCount: number;
+interface OverviewRow {
+  classId: string;
+  label: string;
+  learners: number;
+  withResults: number;
   average: number | null;
-  highest: number | null;
-  lowest: number | null;
-  position: number | null;
+  meanMarks: number | null;
+  meanMarksOutOf: number;
+  points: number | null;
+  grade: string;
+  rank: number | null;
 }
 
-interface StreamLearner extends StudentRanking {
-  className: string;
-  classPosition: number | null;
+interface SubjectMatrixRow {
+  subjectId: string;
+  subjectName: string;
+  byClass: Record<string, number | null>;
+  bestClassId: string | null;
+  bestAvg: number | null;
+  diff: number | null;
+}
+
+interface LearnerRank {
+  classId: string;
+  label: string;
+  studentId: string;
+  first_name: string;
+  last_name: string;
+  admission_number: string;
+  avg: number | null;
+  points: number;
+  totalMarks: number;
+  totalOutOf: number;
+  grade: string;
+  position: number | null;
+  subjects: Record<string, { marks: number | null; percentage: number; points: number; grade: string }>;
+}
+
+interface ImprovedRow {
+  studentId: string;
+  label: string;
+  first_name: string;
+  last_name: string;
+  admission_number: string;
+  prevAvg: number | null;
+  avg: number | null;
+  diff: number | null;
+}
+
+interface ClassPerfRow {
+  label: string;
+  rows: { subject: string; avgMarks: number | null; outOf: number; grade: string; points: number | null }[];
+  totalMarks: number;
+  totalOutOf: number;
+  totalPoints: number;
+  overallAvg: number | null;
+  grade: string;
+}
+
+interface PerfDistRow {
+  grade: string;
+  current: number;
+  previous: number;
+  difference: number;
+}
+
+type TabKey = 'overview' | 'subjects' | 'rankings' | 'comparison' | 'class' | 'improved';
+
+function deduplicateResults(rows: ResultRow[]): ResultRow[] {
+  const byStudentSubject = new Map<string, ResultRow>();
+  rows.forEach((row) => {
+    const key = `${row.student_id}:${row.subject_id}`;
+    const previous = byStudentSubject.get(key);
+    if (!previous || String(row.created_at || '') >= String(previous.created_at || '')) {
+      byStudentSubject.set(key, row);
+    }
+  });
+  return Array.from(byStudentSubject.values());
+}
+
+function gradeLevelOf(c: any): number | null {
+  if (c?.level != null) { const n = Number(c.level); if (Number.isFinite(n)) return n; }
+  if (c?.grade_level != null) { const n = Number(c.grade_level); if (Number.isFinite(n)) return n; }
+  const parsed = parseInt(String(c?.name || '').replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function gradeGroupOf(c: any): { key: string; label: string } {
+  const name = String(c?.name || '').trim();
+  const lvl = gradeLevelOf(c);
+  if (lvl != null && lvl >= 1) {
+    if (/^form\s*\d+/i.test(name)) return { key: `lvl:${lvl}`, label: name };
+    let label = name;
+    const stream = String(c?.stream_name || c?.stream || '').trim();
+    if (stream) {
+      const esc = stream.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      label = label.replace(new RegExp(`\\s+${esc}\\s*$`, 'i'), '').trim();
+    }
+    const leading = label.match(/^(grade\s*\d+)(.*)$/i);
+    if (leading) {
+      const tail = leading[2].trim();
+      if (tail && !/^\d+$/.test(tail)) label = leading[1].trim();
+    }
+    if (!/\d/.test(label)) label = `Grade ${lvl}`;
+    return { key: `lvl:${lvl}`, label: label || `Grade ${lvl}` };
+  }
+  return { key: `name:${name || 'unassigned'}`, label: name || 'Unassigned' };
 }
 
 export default function StreamDashboard() {
-  const { user } = useAuth();
+  const { user, schoolData } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [selectedStream, setSelectedStream] = useState<string>('');
-  const [selectedClass, setSelectedClass] = useState<string>('');
-  const [classComparisons, setClassComparisons] = useState<ClassComparison[]>([]);
-  const [streamLearners, setStreamLearners] = useState<StreamLearner[]>([]);
-  const [terms, setTerms] = useState<any[]>([]);
-  const [selectedTerm, setSelectedTerm] = useState<string>('');
-  const [rankings, setRankings] = useState<StudentRanking[]>([]);
-  const [subjectSummaries, setSubjectSummaries] = useState<SubjectSummary[]>([]);
   const [loadingData, setLoadingData] = useState(false);
-  const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'rankings' | 'subjects'>('rankings');
-  const [classInfo, setClassInfo] = useState<any>(null);
+  const [classes, setClasses] = useState<StreamClass[]>([]);
+  const [grades, setGrades] = useState<{ key: string; label: string }[]>([]);
+  const [terms, setTerms] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
+
+  const [selectedGrade, setSelectedGrade] = useState<string>('');
+  const [selectedTerm, setSelectedTerm] = useState<string>('');
   const [selectedExam, setSelectedExam] = useState<string>('');
 
-  const streamNameForClass = (classRow: any) =>
-    String(classRow?.stream || classRow?.name || 'Unassigned stream').trim() || 'Unassigned stream';
+  const [overview, setOverview] = useState<OverviewRow[]>([]);
+  const [subjectMatrix, setSubjectMatrix] = useState<SubjectMatrixRow[]>([]);
+  const [rankings, setRankings] = useState<LearnerRank[]>([]);
+  const [improved, setImproved] = useState<ImprovedRow[]>([]);
+  const [dropped, setDropped] = useState<ImprovedRow[]>([]);
+  const [pdfOptionsOpen, setPdfOptionsOpen] = useState(false);
+  const [classPerf, setClassPerf] = useState<ClassPerfRow[]>([]);
+  const [perfDistribution, setPerfDistribution] = useState<PerfDistRow[]>([]);
+  const [search, setSearch] = useState('');
+  const [showTop10, setShowTop10] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [pdfTarget, setPdfTarget] = useState<'full' | 'tab'>('full');
+
+  const classById = new Map(classes.map((c) => [c.id, c]));
 
   useEffect(() => {
     if (user?.schoolId) fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
-    if (selectedClass && selectedTerm) fetchStreamData();
-  }, [selectedClass, selectedTerm, selectedExam]);
+    if (selectedGrade && selectedTerm) fetchStreamData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGrade, selectedTerm, selectedExam]);
+
+  const streamLabel = (c: any): string => {
+    const base = String(c?.name || 'Class').trim();
+    const stream = String(c?.stream_name || c?.stream || '').trim();
+    return stream ? `${base} ${stream}` : (base || 'Unassigned stream');
+  };
 
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const { data: classesData } = await supabaseUntyped
-        .from('classes')
-        .select('*')
-        .eq('school_id', user?.schoolId)
-        .eq('is_active', true)
-        .order('name');
-      setClasses(classesData || []);
-      if (classesData && classesData.length > 0) {
-        const firstStream = streamNameForClass(classesData[0]);
-        setSelectedStream(firstStream);
-        setSelectedClass(classesData[0].id);
-        setClassInfo(classesData[0]);
-      }
-
-      const { data: termsData } = await supabaseUntyped
-        .from('terms')
-        .select('*')
-        .eq('school_id', user?.schoolId)
-        .order('academic_year', { ascending: false });
-      setTerms(termsData || []);
-      if (termsData && termsData.length > 0) setSelectedTerm(termsData[0].id);
-
-      const { data: examsData } = await supabaseUntyped
-        .from('school_exams')
-        .select('id, name, type, is_active')
-        .eq('school_id', user?.schoolId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+      const [{ data: classesData }, { data: termsData }, { data: examsData }] = await Promise.all([
+        supabaseUntyped
+          .from('classes')
+          .select('id, name, stream, stream_name, curriculum, level, grade_level, is_active')
+          .eq('school_id', user?.schoolId)
+          .eq('is_active', true)
+          .order('level', { ascending: true })
+          .order('name', { ascending: true }),
+        supabaseUntyped
+          .from('terms')
+          .select('*')
+          .eq('school_id', user?.schoolId)
+          .order('academic_year', { ascending: false })
+          .order('name', { ascending: true }),
+        supabaseUntyped
+          .from('school_exams')
+          .select('id, name, type, term_id, is_active, target_type, target_grade_level')
+          .eq('school_id', user?.schoolId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false }),
+      ]);
+      const streamClasses: StreamClass[] = (classesData || []).map((c: any) => {
+        const group = gradeGroupOf(c);
+        return {
+          id: c.id, name: c.name, stream: c.stream ?? null, stream_name: c.stream_name ?? null,
+          label: streamLabel(c), curriculum: c.curriculum ?? null,
+          level: c.level ?? null, grade_level: c.grade_level ?? null,
+          gradeKey: group.key, gradeLabel: group.label,
+        };
+      });
+      setClasses(streamClasses);
+      const gradeOptions: { key: string; label: string }[] = [];
+      streamClasses.forEach((c) => {
+        if (!gradeOptions.some((g) => g.key === c.gradeKey)) gradeOptions.push({ key: c.gradeKey, label: c.gradeLabel });
+      });
+      gradeOptions.sort((a, b) => {
+        const an = parseInt(String(a.label).replace(/[^0-9]/g, ''), 10) || 999;
+        const bn = parseInt(String(b.label).replace(/[^0-9]/g, ''), 10) || 999;
+        return an - bn;
+      });
+      setGrades(gradeOptions);
+      if (gradeOptions.length > 0) setSelectedGrade(gradeOptions[0].key);
+      const allTerms = termsData || [];
+      setTerms(allTerms);
+      const current = allTerms.find((t: any) => t.is_current);
+      if (allTerms.length > 0) setSelectedTerm(current?.id || allTerms[0].id);
       setExams(examsData || []);
     } catch (err) {
       console.error(err);
@@ -113,124 +276,324 @@ export default function StreamDashboard() {
   };
 
   const fetchStreamData = async () => {
+    if (!selectedGrade || !selectedTerm) return;
     setLoadingData(true);
     try {
-      const cls = classes.find(c => c.id === selectedClass);
-      setClassInfo(cls);
-      const streamClasses = classes.filter(c => streamNameForClass(c) === selectedStream);
-      const streamClassIds = streamClasses.map(c => c.id);
-      if (!selectedClass || streamClassIds.length === 0) {
-        setRankings([]); setSubjectSummaries([]); setClassComparisons([]); setStreamLearners([]);
+      const streamClasses = classes
+        .filter((c) => c.gradeKey === selectedGrade)
+        .sort((a, b) => (a.stream || a.name).localeCompare(b.stream || b.name));
+      const classIds = streamClasses.map((c) => c.id);
+      if (classIds.length === 0) {
+        setOverview([]); setSubjectMatrix([]); setRankings([]); setImproved([]); setDropped([]); setClassPerf([]); setPerfDistribution([]);
         return;
       }
 
-      const { data: students, error: studentsError } = await supabaseUntyped
-        .from('students').select('id, first_name, last_name, admission_number, class_id')
-        .in('class_id', streamClassIds).eq('is_active', true).order('first_name');
-      let resultsQuery: any = supabaseUntyped
-        .from('results')
-        .select('student_id, class_id, subject_id, marks, out_of, percentage, cbc_grade, cbc_sublevel, cbc_points, grade_844, points_844, exam_id')
-        .in('class_id', streamClassIds).eq('term_id', selectedTerm);
-      if (selectedExam) resultsQuery = resultsQuery.eq('exam_id', selectedExam);
-      const { data: results, error: resultsError } = await resultsQuery;
-      if (studentsError) throw studentsError;
-      if (resultsError) throw resultsError;
+      const [{ data: students }, { data: results }, subjectRes] = await Promise.all([
+        supabaseUntyped
+          .from('students')
+          .select('id, first_name, last_name, admission_number, class_id, stream_id')
+          .in('class_id', classIds)
+          .eq('is_active', true)
+          .eq('school_id', user?.schoolId)
+          .range(0, 9999),
+        (() => {
+          let q: any = supabaseUntyped
+            .from('results')
+            .select('student_id, class_id, subject_id, percentage, marks, out_of, cbc_points, points_844, cbc_sublevel, cbc_grade, grade_844, exam_id, created_at')
+            .in('class_id', classIds)
+            .eq('school_id', user?.schoolId)
+            .eq('term_id', selectedTerm);
+          if (selectedExam) q = q.eq('exam_id', selectedExam);
+          return q.range(0, 9999);
+        })(),
+        (async () => {              const subjectQuery = supabaseUntyped
+                .from('results')
+                .select('subject_id')
+                .in('class_id', classIds)
+                .eq('school_id', user?.schoolId)
+                .eq('term_id', selectedTerm);
+              if (selectedExam) subjectQuery.eq('exam_id', selectedExam);
+              const { data: subjectResultRows } = await subjectQuery;
+              const subjectIds = [...new Set((subjectResultRows || []).map((x: any) => x.subject_id).filter(Boolean))];
+          if (subjectIds.length === 0) return { data: [], error: null };
+          return supabaseUntyped.from('subjects').select('id, name').in('id', subjectIds);
+        })(),
+      ]);
 
-      const allResults = results || [];
-      const selectedResults = allResults.filter((r: any) => r.class_id === selectedClass);
-      const resultStudentIds = [...new Set(selectedResults.map((r: any) => r.student_id).filter(Boolean))];
-      let linkedStudents: any[] = [];
-      if (resultStudentIds.length > 0) {
-        const { data: linked } = await supabaseUntyped.from('students')
-          .select('id, first_name, last_name, admission_number, class_id').in('id', resultStudentIds);
-        linkedStudents = linked || [];
-      }
-      const rosterById = new Map<string, any>();
-      [...(students || []), ...linkedStudents].forEach((student: any) => rosterById.set(student.id, student));
-      const classNameById = new Map(streamClasses.map((c: any) => [c.id, c.name]));
-      const classById = new Map(streamClasses.map((c: any) => [c.id, c]));
-      const subjectIds = [...new Set(selectedResults.map((r: any) => r.subject_id).filter(Boolean))];
-      const { data: subjectRows, error: subjectsError } = subjectIds.length > 0
-        ? await supabaseUntyped.from('subjects').select('id, name').in('id', subjectIds)
-        : { data: [], error: null };
-      if (subjectsError) throw subjectsError;
-      const subjectNames = new Map((subjectRows || []).map((s: any) => [s.id, s.name]));
-      const studentMap: Record<string, { total: number; count: number; points: number }> = {};
-      const selectedSubjectMap: Record<string, { name: string; values: number[]; id: string }> = {};
-      allResults.forEach((r: any) => {
-        if (!studentMap[r.student_id]) studentMap[r.student_id] = { total: 0, count: 0, points: 0 };
-        const pct = r.percentage ?? (r.out_of > 0 ? Math.round((r.marks / r.out_of) * 100) : 0);
-        studentMap[r.student_id].total += pct;
-        studentMap[r.student_id].count += 1;
-        studentMap[r.student_id].points += r.cbc_points ?? r.points_844 ?? 0;
-        if (r.class_id === selectedClass) {
-          const subjectName = subjectNames.get(r.subject_id) || r.subject_id;
-          if (!selectedSubjectMap[r.subject_id]) selectedSubjectMap[r.subject_id] = { name: subjectName, values: [], id: r.subject_id };
-          selectedSubjectMap[r.subject_id].values.push(pct);
+      const studentList: StudentRow[] = (students || []) as StudentRow[];
+      const rawResultList: ResultRow[] = (results || []) as ResultRow[];
+      const resultList: ResultRow[] = deduplicateResults(rawResultList);
+      const subjectRows: any[] = (subjectRes?.data || []) as any[];
+      const subjectName = new Map(subjectRows.map((s: any) => [s.id, s.name]));
+      const previousTerm = (() => {
+        const ordered = [...terms].sort((a, b) => Number(a.academic_year) - Number(b.academic_year) || Number(a.term_number || 0) - Number(b.term_number || 0));
+        const index = ordered.findIndex((term) => term.id === selectedTerm);
+        return index > 0 ? ordered[index - 1] : null;
+      })();
+      const previousResultList: ResultRow[] = previousTerm
+        ? deduplicateResults(((await supabaseUntyped.from('results').select('student_id, class_id, subject_id, percentage, marks, out_of, cbc_points, points_844, cbc_sublevel, cbc_grade, grade_844, exam_id, created_at').in('student_id', (students || []).map((st: any) => st.id)).eq('school_id', user?.schoolId).eq('term_id', previousTerm.id).range(0, 9999)).data || []) as ResultRow[])
+        : [];
+
+      const pctOf = (r: ResultRow): number => {
+        if (r.percentage != null) return Math.round(r.percentage);
+        if (r.out_of && r.out_of > 0) return Math.round(((r.marks ?? 0) / r.out_of) * 100);
+        return 0;
+      };
+
+      const pointsOf = (r: ResultRow): number => {
+        const c = classById.get(r.class_id);
+        if (is844Curriculum(c)) return r.points_844 ?? calculate844Grade(pctOf(r)).points;
+        const band = getSchoolLevelBand(c);
+        if (band === 'primary') return 0;
+        return r.cbc_points ?? calculateCompetencyGrade(pctOf(r), band).points;
+      };
+      const gradeOf = (r: ResultRow, percentage: number): string => {
+        const classInfo = classById.get(r.class_id);
+        if (is844Curriculum(classInfo)) return calculate844Grade(percentage).grade;
+        const band = getSchoolLevelBand(classInfo);
+        const grade = calculateCompetencyGrade(percentage, band);
+        return band === 'primary' ? grade.grade : grade.subLevel;
+      };
+
+      const statsByStudent: Record<string, StudentStats> = {};
+      const subjectValuesByStudent: Record<string, Record<string, { marks: number | null; percentage: number; points: number }>> = {};
+      const subjectAgg: Record<string, { name: string; byClass: Record<string, { sum: number; count: number; marksSum: number; marksCount: number; outOfSum: number; outOfCount: number }> }> = {};
+      const studentClass: Record<string, string> = {};
+
+      resultList.forEach((r) => {
+        const sid = r.student_id;
+        if (!statsByStudent[sid]) statsByStudent[sid] = { avg: null, pctTotal: 0, totalPoints: 0, totalMarks: 0, totalOutOf: 0, count: 0 };
+        if (!subjectValuesByStudent[sid]) subjectValuesByStudent[sid] = {};
+        const pct = pctOf(r);
+        statsByStudent[sid].pctTotal += pct;
+        statsByStudent[sid].count += 1;
+        const rowPoints = pointsOf(r);
+        statsByStudent[sid].totalPoints += rowPoints;
+        statsByStudent[sid].totalMarks += r.marks ?? pct;
+        statsByStudent[sid].totalOutOf += r.out_of ?? 100;
+        subjectValuesByStudent[sid][subjectName.get(r.subject_id) || r.subject_id] = { marks: r.marks, percentage: pct, points: rowPoints, grade: gradeOf(r, pct) };
+        studentClass[sid] = r.class_id;
+        const sub = r.subject_id;
+        if (!subjectAgg[sub]) subjectAgg[sub] = { name: subjectName.get(sub) || sub, byClass: {} };
+        const clsId = r.class_id;
+        if (!subjectAgg[sub].byClass[clsId]) subjectAgg[sub].byClass[clsId] = { sum: 0, count: 0, marksSum: 0, marksCount: 0, outOfSum: 0, outOfCount: 0 };
+        subjectAgg[sub].byClass[clsId].sum += pct;
+        subjectAgg[sub].byClass[clsId].count += 1;
+        const mVal = r.marks ?? pct;
+        if (r.marks != null || Number.isFinite(mVal)) {
+          subjectAgg[sub].byClass[clsId].marksSum += mVal;
+          subjectAgg[sub].byClass[clsId].marksCount += 1;
         }
+        subjectAgg[sub].byClass[clsId].outOfSum += r.out_of ?? 100;
+        subjectAgg[sub].byClass[clsId].outOfCount += 1;
       });
 
-      const learners: StreamLearner[] = [...rosterById.values()].map((student: any) => {
-        const data = studentMap[student.id];
-        const subjectResults: Record<string, { pct: number; grade: string }> = {};
-        allResults.filter((r: any) => r.student_id === student.id && r.class_id === selectedClass).forEach((r: any) => {
-          const pct = r.percentage ?? (r.out_of > 0 ? Math.round((r.marks / r.out_of) * 100) : 0);
-          const subjectName = subjectNames.get(r.subject_id) || r.subject_id;
-          const classRow = classById.get(r.class_id);
-          subjectResults[subjectName] = { pct, grade: is844Curriculum(classRow) ? (r.grade_844 || '') : (r.cbc_sublevel || r.cbc_grade || '') };
+      // Recompute averages from percentages (points are tracked separately)
+      const pctSum: Record<string, { sum: number; count: number }> = {};
+      resultList.forEach((r) => {
+        if (!pctSum[r.student_id]) pctSum[r.student_id] = { sum: 0, count: 0 };
+        pctSum[r.student_id].sum += pctOf(r);
+        pctSum[r.student_id].count += 1;
+      });
+      Object.keys(pctSum).forEach((sid) => {
+        const rec = pctSum[sid];
+        statsByStudent[sid].avg = rec.count > 0 ? Math.round(rec.sum / rec.count) : null;
+      });
+
+      const gradeFromAvg = (c: StreamClass | undefined, avg: number | null): string => {
+        if (avg === null) return '';
+        if (is844Curriculum(c)) return calculate844Grade(avg).grade;
+        const band = getSchoolLevelBand(c);
+        const cg = calculateCompetencyGrade(avg, band);
+        return band === 'primary' ? cg.grade : cg.subLevel;
+      };
+
+      // ---- Stream overview ----
+      const rosterByClass: Record<string, number> = {};
+      studentList.forEach((s) => { rosterByClass[s.class_id] = (rosterByClass[s.class_id] || 0) + 1; });
+      const overviewRows: OverviewRow[] = streamClasses.map((c) => {
+        const ids = studentList.filter((s) => s.class_id === c.id).map((s) => s.id);
+        const avgs = ids.map((id) => statsByStudent[id]?.avg).filter((v): v is number => v != null);
+        const pctTotals = ids.map((id) => statsByStudent[id]?.pctTotal ?? 0);
+        const pts = ids.map((id) => statsByStudent[id]?.totalPoints ?? 0);
+        const nonZeroPts = pts.filter((p) => p > 0);
+        const bandCheck = getSchoolLevelBand(c);
+        const avg = avgs.length ? Math.round(avgs.reduce((a, b) => a + b, 0) / avgs.length) : null;
+        const learnersWithResults = avgs.length;
+        const subjectCountForClass = Object.keys(subjectAgg).filter((subId) => subjectAgg[subId]?.byClass[c.id]?.count > 0).length;
+        const meanMarksOutOf = subjectCountForClass > 0 ? subjectCountForClass * 100 : (getRequiredLearningAreas(c) !== null ? (getRequiredLearningAreas(c) as number) * 100 : learnersWithResults * 100);
+        const meanMarks = learnersWithResults > 0 ? Math.round((pctTotals.reduce((a, b) => a + b, 0) / learnersWithResults) * 10) / 10 : null;
+        return {
+          classId: c.id,
+          label: c.label,
+          learners: rosterByClass[c.id] || ids.length,
+          withResults: learnersWithResults,
+          average: avg,
+          meanMarks,
+          meanMarksOutOf,
+          points: (bandCheck === 'primary' || nonZeroPts.length === 0) ? null : Math.round(nonZeroPts.reduce((a, b) => a + b, 0) / nonZeroPts.length),
+          grade: meanMarks === null ? '' : gradeFromAvg(c, meanMarksOutOf > 0 ? (meanMarks / meanMarksOutOf) * 100 : null),
+          rank: null,
+        };
+      });
+      // RANK STREAMS BY CLASS MEAN MARKS (not average marks)
+      const sortedOverview = [...overviewRows].sort((a, b) => (b.meanMarks ?? -1) - (a.meanMarks ?? -1));
+      sortedOverview.forEach((row, i) => { row.rank = row.meanMarks === null ? null : i + 1; });
+      setOverview(sortedOverview);
+
+      // ---- Subject matrix ----
+      const matrix: SubjectMatrixRow[] = Object.keys(subjectAgg).map((subId) => {
+        const agg = subjectAgg[subId];
+        const byClass: Record<string, number | null> = {};
+        streamClasses.forEach((c) => {
+          const b = agg.byClass[c.id];
+          byClass[c.id] = b && b.count > 0 ? Math.round(b.sum / b.count) : null;
+        });
+        let bestClassId: string | null = null;
+        let bestAvg: number | null = null;
+        let minAvg: number | null = null;
+        streamClasses.forEach((c) => {
+          const v = byClass[c.id];
+          if (v == null) return;
+          if (bestAvg === null || v > bestAvg) { bestAvg = v; bestClassId = c.id; }
+          if (minAvg === null || v < minAvg) minAvg = v;
         });
         return {
-          id: student.id, first_name: student.first_name, last_name: student.last_name,
-          admission_number: student.admission_number, avgPercentage: data?.count ? Math.round(data.total / data.count) : null,
-          totalPoints: data?.points ?? null, position: null, subjectResults,
-          className: classNameById.get(student.class_id) || 'Class', classPosition: null,
+          subjectId: subId,
+          subjectName: agg.name,
+          byClass,
+          bestClassId,
+          bestAvg,
+          diff: bestAvg !== null && minAvg !== null ? Math.round((bestAvg - minAvg) * 10) / 10 : null,
         };
-      });
-      const positionedLearners = learners.map(learner => {
-        const sameClass = learners.filter(other => other.className === learner.className && other.avgPercentage !== null)
-          .sort((a, b) => (b.avgPercentage ?? -1) - (a.avgPercentage ?? -1));
-        const index = sameClass.findIndex(other => other.id === learner.id);
-        return { ...learner, classPosition: index >= 0 ? index + 1 : null };
-      });
-      const selectedClassName = classNameById.get(selectedClass) || cls?.name || 'Class';
-      const selectedRankings = positionedLearners.filter(learner => learner.className === selectedClassName)
-        .map(learner => ({ ...learner, position: learner.classPosition }));
-      selectedRankings.sort((a, b) => (b.avgPercentage ?? -1) - (a.avgPercentage ?? -1));
-      setRankings(selectedRankings);
-      setStreamLearners(positionedLearners.sort((a, b) => (b.avgPercentage ?? -1) - (a.avgPercentage ?? -1)));
+      }).sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+      setSubjectMatrix(matrix);
 
-      const comparisons = streamClasses.map((classRow: any) => {
-        const classLearners = positionedLearners.filter(learner => learner.className === classRow.name);
-        const values = classLearners.filter(learner => learner.avgPercentage !== null).map(learner => learner.avgPercentage as number);
+      // ---- Global learner rankings across every stream in the selected grade ----
+      const rankRows: LearnerRank[] = studentList
+        .map((student) => ({ student, stats: statsByStudent[student.id] }))
+        .filter((entry) => entry.stats && entry.stats.avg !== null)
+        .sort((a, b) => (
+          (b.stats!.totalMarks - a.stats!.totalMarks)
+          || (b.stats!.totalPoints - a.stats!.totalPoints)
+          || ((b.stats!.avg ?? -1) - (a.stats!.avg ?? -1))
+          || `${a.student.first_name} ${a.student.last_name}`.localeCompare(`${b.student.first_name} ${b.student.last_name}`)
+        ))
+        .map((entry, index) => {
+          const stats = entry.stats!;
+          const classId = entry.student.stream_id || entry.student.class_id;
+          const classInfo = classById.get(classId) || classById.get(entry.student.class_id);
+          return {
+            classId: classInfo?.id || entry.student.class_id,
+            label: classInfo?.label || 'Unassigned stream',
+            studentId: entry.student.id,
+            first_name: entry.student.first_name,
+            last_name: entry.student.last_name,
+            admission_number: entry.student.admission_number,
+            avg: stats.avg,
+            points: stats.totalPoints,
+            totalMarks: Math.round(stats.totalMarks * 10) / 10,
+            totalOutOf: Math.round(stats.totalOutOf * 10) / 10,
+            grade: gradeFromAvg(classInfo, stats.avg),
+            position: index + 1,
+            subjects: subjectValuesByStudent[entry.student.id] || {},
+          };
+        });
+      setRankings(rankRows);
+
+      // ---- Previous averages and both five-learner movement lists ----
+      const prevAvgById: Record<string, number | null> = {};
+      const previousPctSums: Record<string, { sum: number; count: number }> = {};
+      previousResultList.forEach((r) => {
+        const pct = pctOf(r);
+        if (!previousPctSums[r.student_id]) previousPctSums[r.student_id] = { sum: 0, count: 0 };
+        previousPctSums[r.student_id].sum += pct;
+        previousPctSums[r.student_id].count += 1;
+      });
+      Object.entries(previousPctSums).forEach(([sid, value]) => { prevAvgById[sid] = value.count ? Math.round(value.sum / value.count) : null; });
+      const movementRows: ImprovedRow[] = [];
+      Object.keys(statsByStudent).forEach((sid) => {
+        const avg = statsByStudent[sid].avg;
+        const prev = prevAvgById[sid] ?? null;
+        const st = studentList.find((student) => student.id === sid);
+        if (avg == null || prev == null || !st) return;
+        movementRows.push({ studentId: sid, label: classById.get(st.stream_id || st.class_id)?.label || classById.get(st.class_id)?.label || '', first_name: st.first_name, last_name: st.last_name, admission_number: st.admission_number, prevAvg: prev, avg, diff: Math.round((avg - prev) * 10) / 10 });
+      });
+      setImproved(movementRows.filter((row) => (row.diff || 0) > 0).sort((a, b) => (b.diff ?? -1) - (a.diff ?? -1)).slice(0, 5));
+      setDropped(movementRows.filter((row) => (row.diff || 0) < 0).sort((a, b) => (a.diff ?? 1) - (b.diff ?? 1)).slice(0, 5));
+
+
+      // ---- Performance Distribution (current vs previous exam) ----
+      const bandOrder: string[] = streamClasses.some((c) => is844Curriculum(c))
+        ? ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'E']
+        : streamClasses.every((c) => getSchoolLevelBand(c) === 'primary')
+          ? ['EE', 'ME', 'AE', 'BE']
+          : ['EE1', 'EE2', 'ME1', 'ME2', 'AE1', 'AE2', 'BE1', 'BE2'];
+      const currentBandCounts: Record<string, number> = {};
+      rankRows.forEach((r) => { if (r.grade) currentBandCounts[r.grade] = (currentBandCounts[r.grade] || 0) + 1; });
+      const previousBandCounts: Record<string, number> = {};
+      Object.keys(statsByStudent).forEach((sid) => {
+        const prev = prevAvgById[sid] ?? null;
+        if (prev == null) return;
+        const st = studentList.find((s) => s.id === sid);
+        const ci = st ? (classById.get(st.stream_id || st.class_id) || classById.get(st.class_id)) : undefined;
+        const b = gradeFromAvg(ci, prev);
+        if (b) previousBandCounts[b] = (previousBandCounts[b] || 0) + 1;
+      });
+      const perfDistBands = [...new Set([...bandOrder, ...Object.keys(currentBandCounts), ...Object.keys(previousBandCounts)])];
+      setPerfDistribution(perfDistBands.map((b) => {
+        const current = currentBandCounts[b] || 0;
+        const previous = previousBandCounts[b] || 0;
+        return { grade: b, current, previous, difference: current - previous };
+      }));
+
+      // ---- Class performance per stream (all subjects + totals) ----
+      const perfRows: ClassPerfRow[] = streamClasses.map((c) => {
+        const band = getSchoolLevelBand(c);
+        const is844 = is844Curriculum(c);
+        const subjRows: { subject: string; avgMarks: number | null; outOf: number; grade: string; points: number | null }[] = [];
+        Object.keys(subjectAgg).forEach((subId) => {
+          const agg = subjectAgg[subId];
+          const b = agg.byClass[c.id];
+          if (!b || b.count === 0) return;
+          const pct = Math.round(b.sum / b.count);
+          const cg = is844 ? calculate844Grade(pct) : calculateCompetencyGrade(pct, band);
+          subjRows.push({
+            subject: agg.name,
+            avgMarks: b.marksCount > 0 ? Math.round(b.marksSum / b.marksCount) : null,
+            outOf: b.outOfCount > 0 ? Math.round(b.outOfSum / b.outOfCount) : 100,
+            grade: band === 'primary' ? cg.grade : (is844 ? cg.grade : cg.subLevel),
+            points: band === 'primary' ? null : cg.points,
+          });
+        });
+        const ids = studentList.filter((s) => s.class_id === c.id).map((s) => s.id);
+        const avgs = ids.map((id) => statsByStudent[id]?.avg).filter((v): v is number => v != null);
+        const pts = ids.map((id) => statsByStudent[id]?.totalPoints ?? 0);
+        const overallAvg = avgs.length ? Math.round(avgs.reduce((a, b2) => a + b2, 0) / avgs.length) : null;
         return {
-          id: classRow.id, name: classRow.name, stream: streamNameForClass(classRow), learnerCount: classLearners.length,
-          resultsCount: allResults.filter((r: any) => r.class_id === classRow.id).length,
-          average: values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
-          highest: values.length ? Math.max(...values) : null, lowest: values.length ? Math.min(...values) : null, position: null,
+          label: c.label,
+          rows: subjRows,
+          totalMarks: Math.round(subjRows.reduce((s, r2) => s + (r2.avgMarks ?? 0), 0)),
+          totalOutOf: Math.round(subjRows.reduce((s, r2) => s + r2.outOf, 0)),
+          totalPoints: band === 'primary' ? 0 : pts.filter((p) => p > 0).reduce((a, b2) => a + b2, 0),
+          overallAvg,
+          grade: gradeFromAvg(c, overallAvg),
         };
-      }).sort((a, b) => (b.average ?? -1) - (a.average ?? -1));
-      comparisons.forEach((comparison, index) => { comparison.position = comparison.average === null ? null : index + 1; });
-      setClassComparisons(comparisons);
-      setSubjectSummaries(Object.values(selectedSubjectMap).map(sub => ({
-        id: sub.id, name: sub.name,
-        average: sub.values.length ? Math.round(sub.values.reduce((a, b) => a + b, 0) / sub.values.length) : 0,
-        highest: sub.values.length ? Math.max(...sub.values) : 0, lowest: sub.values.length ? Math.min(...sub.values) : 0, count: sub.values.length,
-      })).sort((a, b) => b.average - a.average));
+      });
+      setClassPerf(perfRows);
     } catch (err) {
-      console.error(err); setRankings([]); setSubjectSummaries([]); setClassComparisons([]); setStreamLearners([]);
-    } finally { setLoadingData(false); }
+      console.error(err);
+      setOverview([]); setSubjectMatrix([]); setRankings([]); setImproved([]); setDropped([]); setClassPerf([]); setPerfDistribution([]);
+    } finally {
+      setLoadingData(false);
+    }
   };
 
-  const classAvg = rankings.filter(r => r.avgPercentage !== null).length > 0
-    ? Math.round(rankings.filter(r => r.avgPercentage !== null).reduce((s, r) => s + (r.avgPercentage || 0), 0) / rankings.filter(r => r.avgPercentage !== null).length)
-    : null;
-
-  const gradeColor = (grade: string) => {
-    if (grade?.startsWith('EE') || grade === 'A' || grade === 'A-') return 'bg-green-100 text-green-700';
-    if (grade?.startsWith('ME') || grade?.startsWith('B')) return 'bg-blue-100 text-blue-700';
-    if (grade?.startsWith('AE') || grade?.startsWith('C')) return 'bg-orange-100 text-orange-700';
-    return 'bg-red-100 text-red-700';
-  };
+  const topStream = overview.find((r) => r.rank === 1) || null;
+  const filteredRankings = rankings.filter((r) =>
+    `${r.first_name} ${r.last_name}`.toLowerCase().includes(search.toLowerCase()) ||
+    (r.admission_number || '').toLowerCase().includes(search.toLowerCase())
+  );
 
   const avgColor = (avg: number) => {
     if (avg >= 75) return 'text-green-600';
@@ -238,294 +601,666 @@ export default function StreamDashboard() {
     if (avg >= 30) return 'text-orange-600';
     return 'text-red-600';
   };
+  const gradeColor = (grade: string) => {
+    if (grade?.startsWith('EE') || grade === 'A' || grade === 'A-') return 'bg-green-100 text-green-700';
+    if (grade?.startsWith('ME') || grade?.startsWith('B')) return 'bg-blue-100 text-blue-700';
+    if (grade?.startsWith('AE') || grade?.startsWith('C')) return 'bg-orange-100 text-orange-700';
+    return 'bg-red-100 text-red-700';
+  };
 
-  const filteredRankings = rankings.filter(s =>
-    `${s.first_name} ${s.last_name}`.toLowerCase().includes(search.toLowerCase()) ||
-    s.admission_number?.toLowerCase().includes(search.toLowerCase())
-  );
+  const termName = terms.find((t) => t.id === selectedTerm);
+  const examName = exams.find((e) => e.id === selectedExam);
+  const selectedGradeLabel = grades.find((g) => g.key === selectedGrade)?.label || '';
 
-  const downloadStreamRanking = () => {
-    if (rankings.length === 0 && classComparisons.length === 0) return;
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    doc.setFontSize(14); doc.text(`Stream Rankings — ${selectedStream || classInfo?.name || 'Stream'}`, 14, 15);
-    doc.setFontSize(9); doc.text(`Term: ${terms.find(t => t.id === selectedTerm)?.name || selectedTerm}`, 14, 21);
-    autoTable(doc, {
-      startY: 26, head: [['Position', 'Class', 'Learners', 'Results', 'Average %', 'Highest %', 'Lowest %']],
-      body: classComparisons.map(row => [row.position ?? '', row.name, row.learnerCount, row.resultsCount, row.average ?? '', row.highest ?? '', row.lowest ?? ''].map(value => String(value ?? ''))),
-      styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid',
+  const STREAM_COLORS = ['#2563EB', '#16A34A', '#F59E0B', '#DC2626', '#8B5CF6', '#0891B2', '#DB2777', '#65A30D'];
+  const chartData = overview.map((o) => ({ name: o.label, average: o.average ?? 0 }));
+  const subjectChartData = subjectMatrix.map((m) => {
+    const row: any = { name: m.subjectName };
+    overview.forEach((o) => { row[o.label] = m.byClass[o.classId]; });
+    return row;
+  });
+  const distributionData = (() => {
+    const buckets = Array.from({ length: 10 }, (_, i) => ({ name: `${i * 10}-${i * 10 + 9}`, count: 0 }));
+    rankings.forEach((r) => {
+      if (r.avg == null) return;
+      const bIdx = Math.min(9, Math.max(0, Math.floor(r.avg / 10)));
+      buckets[bIdx].count += 1;
     });
-    if (streamLearners.length > 0) {
-      doc.addPage(); doc.setFontSize(12); doc.text('Learner Performance Across Stream Classes', 14, 15);
+    return buckets;
+  })();
+
+  const downloadExcel = () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Stream Dashboard — ' + (selectedGradeLabel || 'All'), '', '', '', '', '', ''],
+      ['Term', termName ? `${termName.name} ${termName.academic_year || ''}` : (selectedTerm || '')],
+      ['Assessment', examName ? examName.name : 'All Assessments'],
+      [],
+      ['Stream Overview'],
+      ['Rank', 'Stream', 'Learners', 'Results In', 'Class Mean Marks', 'Points', 'Grade'],
+      ...overview.map((r) => [r.rank ?? '', r.label, r.learners, r.withResults, r.meanMarks !== null ? `${r.meanMarks} / ${r.meanMarksOutOf}` : '', r.points ?? '', r.grade]),
+      [],
+      ['Subject Performance by Stream'],
+      ['Subject', ...overview.map((r) => r.label), 'Best Stream', 'Highest %', 'Diff'],
+      ...subjectMatrix.map((m) => [
+        m.subjectName,
+        ...overview.map((o) => m.byClass[o.classId] ?? ''),
+        m.bestClassId ? classById.get(m.bestClassId)?.label || '' : '',
+        m.bestAvg ?? '',
+        m.diff ?? '',
+      ]),
+      [],
+      ['Learner Performance — All Streams'],
+      ['POS', 'Student', 'Adm No', 'Stream', ...Array.from(new Set(rankings.flatMap((r) => Object.keys(r.subjects)))).sort().flatMap((subject) => [`${subject} Marks`, `${subject} Points`, `${subject} Grade`]), 'Total Marks', 'Total Out Of', 'Points', 'Average %', 'Grade'],
+      ...rankings.map((r) => [r.position ?? '', `${r.first_name} ${r.last_name}`, r.admission_number, r.label, ...Array.from(new Set(rankings.flatMap((row) => Object.keys(row.subjects)))).sort().flatMap((subject) => [r.subjects[subject]?.marks ?? '', r.subjects[subject]?.points ?? '', r.subjects[subject]?.grade ?? '']), r.totalMarks, r.totalOutOf, r.points, r.avg ?? '', r.grade]),
+    ]), { sheetName: 'Stream Dashboard' });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Most Improved Learners — ' + (selectedGradeLabel || '')],
+      ['Rank', 'Student', 'Stream', 'Adm No', 'Previous %', 'Current %', 'Diff %'],
+      ...improved.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff ?? '']),
+    ]), 'Most Improved');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Most Dropped Learners — ' + (selectedGradeLabel || '')],
+      ['Rank', 'Student', 'Stream', 'Adm No', 'Previous %', 'Current %', 'Diff %'],
+      ...dropped.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff ?? '']),
+    ]), 'Most Dropped');
+    const cpRows: any[] = [['Class Performance — ' + (selectedGradeLabel || '')], []];
+    classPerf.forEach((cp) => {
+      cpRows.push([cp.label]);
+      cpRows.push(['Subject', 'Avg Marks', 'Out Of', 'Grade', 'Points']);
+      cp.rows.forEach((r) => cpRows.push([r.subject, r.avgMarks ?? '', r.outOf, r.grade, r.points ?? '']));
+      cpRows.push(['TOTAL', cp.totalMarks || '', cp.totalOutOf, cp.grade, cp.totalPoints || '']);
+      cpRows.push([]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cpRows), 'Class Performance');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Performance Distribution \u2014 ' + (selectedGradeLabel || 'All')],
+      ['Grade', 'Current Exam', 'Previous Exam', 'Difference'],
+      ...perfDistribution.map((r) => [r.grade, r.current, r.previous, (r.difference > 0 ? `+${r.difference}` : r.difference)]),
+    ]), 'Performance Distribution');
+    XLSX.writeFile(wb, `stream_dashboard_${(selectedGradeLabel || 'grade').replace(/\s+/g, '_')}_${(termName?.name || 'term').replace(/\s+/g, '_')}.xlsx`);
+  };
+
+  const downloadPdf = async (fontSize: PdfFontSize) => {
+    if (overview.length === 0 && rankings.length === 0) return;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    configurePdfFontSize(doc, fontSize);
+    await addLogoToPDF(doc, schoolData?.logo_url, 135, 2, 18, 18);
+    doc.setFontSize(pdfFontSize(doc, 16)); doc.text('Stream Dashboard', 14, 14);
+    doc.setFontSize(pdfFontSize(doc, 9)); doc.text(`Grade: ${selectedGradeLabel || 'All'}  |  Term: ${termName ? `${termName.name} ${termName.academic_year || ''}` : (selectedTerm || '')}  |  Assessment: ${examName ? examName.name : 'All Assessments'}`, 14, 20);
+    const startY = 26;
+    if (overview.length) {
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text('Stream Overview', 14, startY + 2);
       autoTable(doc, {
-        startY: 22, head: [['Class', 'Position', 'Learner', 'Admission Number', 'Average %', 'Subjects']],
-        body: streamLearners.map(row => [row.className, row.classPosition ?? '', `${row.first_name} ${row.last_name}`, row.admission_number || '', row.avgPercentage ?? '', Object.keys(row.subjectResults).length].map(value => String(value ?? ''))),
-        styles: { fontSize: 7, cellPadding: 2 }, headStyles: { fillColor: [16, 185, 129] }, theme: 'grid',
+        startY: startY + 5,
+        head: [['Rank', 'Stream', 'Learners', 'Results In', 'Class Mean Marks', 'Points', 'Grade']],
+        body: overview.map((r) => [r.rank ?? '', r.label, r.learners, r.withResults, r.meanMarks !== null ? `${r.meanMarks} / ${r.meanMarksOutOf}` : '', r.points ?? '', r.grade]),
+        styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid',
       });
     }
-    doc.save(`stream_rankings_${selectedStream || 'stream'}_${selectedTerm || 'term'}.pdf`.replace(/\s+/g, '_'));
+    if (subjectMatrix.length) {
+      doc.addPage();
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text('Subject Performance by Stream', 14, 15);
+      autoTable(doc, {
+        startY: 20,
+        head: [['Subject', ...overview.map((r) => r.label), 'Best', 'Diff']],
+        body: subjectMatrix.map((m) => [
+          m.subjectName,
+          ...overview.map((o) => m.byClass[o.classId] != null ? `${m.byClass[o.classId]}%` : ''),
+          m.bestClassId ? classById.get(m.bestClassId)?.label || '' : '',
+          m.diff != null ? `+${m.diff}%` : '',
+        ].map((v) => String(v ?? ''))),
+        styles: { fontSize: pdfFontSize(doc, 7), cellPadding: 2 }, headStyles: { fillColor: [16, 185, 129] }, theme: 'grid',
+      });
+    }
+    if (rankings.length) {
+      doc.addPage();
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text(`TOP 10 PERFORMERS — ${selectedGradeLabel || 'All Streams'}`, 14, 15);
+      const rankingSubjects = Array.from(new Set(rankings.flatMap((r) => Object.keys(r.subjects)))).sort();
+      autoTable(doc, {
+        startY: 20,
+        head: [['POS', 'Student', 'Adm No', 'Stream', ...rankingSubjects.map((subject) => subject.slice(0, 9)), 'Total Marks', 'Points', 'Grade']],
+        body: rankings.slice(0, 10).map((r) => [r.position ?? '', `${r.first_name} ${r.last_name}`, r.admission_number, r.label, ...rankingSubjects.map((subject) => { const value = r.subjects[subject]; return value ? `${value.marks ?? value.percentage} / ${value.points}pt / ${value.grade}` : ''; }), r.totalMarks, r.points, r.grade]),
+        styles: { fontSize: pdfFontSize(doc, 6.5), cellPadding: 1.3 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid',
+      });
+      doc.addPage();
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text('TOP 10 LEARNERS PER LEARNING AREA', 14, 15);
+      const topAreaRows = rankingSubjects.flatMap((subject) => rankings
+        .filter((r) => r.subjects[subject])
+        .sort((a, b) => (b.subjects[subject].percentage - a.subjects[subject].percentage) || a.last_name.localeCompare(b.last_name))
+        .slice(0, 10)
+        .map((r, index) => [subject, index + 1, `${r.first_name} ${r.last_name}`, r.label, r.subjects[subject].marks ?? r.subjects[subject].percentage, r.subjects[subject].grade]));
+      autoTable(doc, {
+        startY: 20,
+        head: [['Learning Area', 'Rank', 'Learner', 'Stream', 'Marks', 'Grade']],
+        body: topAreaRows,
+        styles: { fontSize: pdfFontSize(doc, 7), cellPadding: 1.5 }, headStyles: { fillColor: [245, 158, 11] }, theme: 'grid',
+      });
+      const labels = [...new Set(rankings.map((r) => r.label))];
+      labels.forEach((label) => {
+        doc.addPage();
+        doc.setFontSize(pdfFontSize(doc, 11)); doc.text(`Student Rankings — ${label}`, 14, 15);
+        autoTable(doc, {
+          startY: 20,
+          head: [['Pos', 'Student', 'Adm No', 'Average %', 'Points', 'Grade']],
+          body: rankings.filter((r) => r.label === label && (!showTop10 || r.position <= 10)).map((r) => [r.position ?? '', `${r.first_name} ${r.last_name}`, r.admission_number, r.avg ?? '', r.points, r.grade]),
+          styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [245, 158, 11] }, theme: 'grid',
+        });
+      });
+    }
+    if (improved.length) {
+      doc.addPage();
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text('Most Improved Learners', 14, 15);
+      autoTable(doc, {
+        startY: 20,
+        head: [['Rank', 'Student', 'Stream', 'Adm No', 'Previous %', 'Current %', 'Diff %']],
+        body: improved.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff != null ? `+${r.diff}%` : '']),
+        styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [16, 185, 129] }, theme: 'grid',
+      });
+    }
+    if (dropped.length) {
+      doc.addPage();
+      doc.setFontSize(pdfFontSize(doc, 11)); doc.text('Most Dropped Learners', 14, 15);
+      autoTable(doc, {
+        startY: 20,
+        head: [['Rank', 'Student', 'Stream', 'Adm No', 'Previous %', 'Current %', 'Diff %']],
+        body: dropped.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff != null ? `${r.diff}%` : '']),
+        styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [220, 38, 38] }, theme: 'grid',
+      });
+    }
+    if (classPerf.length) {
+      classPerf.forEach((cp) => {
+        doc.addPage();
+        doc.setFontSize(pdfFontSize(doc, 11)); doc.text(`Class Performance — ${cp.label}`, 14, 15);
+        autoTable(doc, {
+          startY: 20,
+          head: [['Subject', 'Avg Marks', 'Out Of', 'Grade', 'Points']],
+          body: [
+            ...cp.rows.map((r) => [r.subject, r.avgMarks ?? '', r.outOf, r.grade, r.points ?? '']),
+            ['TOTAL', cp.totalMarks || '', cp.totalOutOf, cp.grade, cp.totalPoints || ''],
+          ],
+          styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid',
+        });
+      });
+    }
+    doc.save(`stream_dashboard_${(selectedGradeLabel || 'grade').replace(/\s+/g, '_')}_${(termName?.name || 'term').replace(/\s+/g, '_')}.pdf`);
+  };
+
+
+  const downloadTabPdf = async (fontSize: PdfFontSize) => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    configurePdfFontSize(doc, fontSize);
+    await addLogoToPDF(doc, schoolData?.logo_url, 135, 2, 18, 18);
+    const tabLabels: Record<TabKey, string> = { overview: 'Stream Overview', subjects: 'Subject Performance', rankings: 'Student Rankings', comparison: 'Stream Comparison', class: 'Class Performance', improved: 'Improved & Dropped' };
+    const tabLabel = tabLabels[activeTab] || activeTab;
+    doc.setFontSize(pdfFontSize(doc, 15)); doc.text(tabLabel, 14, 12);
+    doc.setFontSize(pdfFontSize(doc, 9));
+    doc.text(`Grade: ${selectedGradeLabel || 'All'}  |  Term: ${termName ? `${termName.name} ${termName.academic_year || ''}` : (selectedTerm || '')}  |  Assessment: ${examName ? examName.name : 'All Assessments'}`, 14, 19);
+    const startY = 25;
+    if (activeTab === 'overview') {
+      autoTable(doc, { startY, head: [['Rank', 'Stream', 'Learners', 'Results In', 'Class Mean Marks', 'Points', 'Grade']], body: overview.map((r) => [r.rank ?? '', r.label, r.learners, r.withResults, r.meanMarks !== null ? `${r.meanMarks} / ${r.meanMarksOutOf}` : '', r.points ?? '', r.grade]), styles: { fontSize: pdfFontSize(doc, 9), cellPadding: 2 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid' });
+    } else if (activeTab === 'subjects' || activeTab === 'comparison') {
+      autoTable(doc, { startY, head: [['Subject', ...overview.map((r) => r.label), 'Best', activeTab === 'comparison' ? 'Gap' : 'Diff']], body: subjectMatrix.map((m) => [m.subjectName, ...overview.map((o) => m.byClass[o.classId] != null ? `${m.byClass[o.classId]}%` : ''), m.bestClassId ? classById.get(m.bestClassId)?.label || '' : '', m.diff != null ? `+${m.diff}%` : ''].map((v) => String(v ?? ''))), styles: { fontSize: pdfFontSize(doc, 7.5), cellPadding: 2 }, headStyles: { fillColor: [16, 185, 129] }, theme: 'grid' });
+    } else if (activeTab === 'rankings') {
+      const rankingSubjects = Array.from(new Set(rankings.flatMap((r) => Object.keys(r.subjects)))).sort();
+      const visibleRankings = showTop10 ? rankings.slice(0, 10) : rankings;
+      autoTable(doc, { startY, head: [['POS', 'Student', 'Adm No', 'Stream', ...rankingSubjects.map((s) => s.slice(0, 9)), 'Total Marks', 'Points', 'Grade']], body: visibleRankings.map((r) => [r.position ?? '', `${r.first_name} ${r.last_name}`, r.admission_number, r.label, ...rankingSubjects.map((s) => { const v = r.subjects[s]; return v ? `${v.marks ?? v.percentage} / ${v.points}pt / ${v.grade}` : ''; }), r.totalMarks, r.points, r.grade]), styles: { fontSize: pdfFontSize(doc, 6.5), cellPadding: 1.3 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid' });
+    } else if (activeTab === 'class') {
+      classPerf.forEach((cp, idx) => {
+        if (idx > 0) doc.addPage();
+        doc.setFontSize(pdfFontSize(doc, 11)); doc.text(`Class Performance — ${cp.label}`, 14, 15);
+        autoTable(doc, { startY: 20, head: [['Subject', 'Avg Marks', 'Out Of', 'Grade', 'Points']], body: [...cp.rows.map((r) => [r.subject, r.avgMarks ?? '', r.outOf, r.grade, r.points ?? '']), ['TOTAL', cp.totalMarks || '', cp.totalOutOf, cp.grade, cp.totalPoints || '']], styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [37, 99, 235] }, theme: 'grid' });
+      });
+    } else if (activeTab === 'improved') {
+      autoTable(doc, { startY, head: [['Rank', 'Student', 'Stream', 'Adm No', 'Previous %', 'Current %', 'Diff %']], body: [...improved.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff != null ? `+${r.diff}%` : '']), ...dropped.map((r, i) => [i + 1, `${r.first_name} ${r.last_name}`, r.label, r.admission_number, r.prevAvg ?? '', r.avg ?? '', r.diff != null ? `${r.diff}%` : ''])], styles: { fontSize: pdfFontSize(doc, 8), cellPadding: 2 }, headStyles: { fillColor: [245, 158, 11] }, theme: 'grid' });
+    }
+    doc.save(`stream_dashboard_${tabLabel.replace(/\s+/g, '_')}_${(selectedGradeLabel || 'grade').replace(/\s+/g, '_')}_${(termName?.name || 'term').replace(/\s+/g, '_')}.pdf`);
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
 
+  const tabs: { key: TabKey; label: string; icon: any }[] = [
+    { key: 'overview', label: 'Stream Overview', icon: Layers },
+    { key: 'subjects', label: 'Subject Performance', icon: BookOpen },
+    { key: 'rankings', label: 'Student Rankings', icon: ListOrdered },
+    { key: 'comparison', label: 'Stream Comparison', icon: GitCompareArrows },
+    { key: 'class', label: 'Class Performance', icon: Layers },
+    { key: 'improved', label: 'Improved & Dropped', icon: Medal },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#111111]">Stream Dashboard</h1>
-          <p className="text-sm text-[#666666]">Comparative performance analysis by stream / class</p>
+          <div className="flex items-center gap-3">
+            <img src={schoolData?.logo_url || '/logo.png'} alt={schoolData?.name || 'School logo'} className="h-14 w-14 rounded-xl border border-gray-200 bg-white object-contain p-1 shadow-sm" />
+            <div><h1 className="text-2xl font-bold text-[#111111]">Stream Dashboard</h1>
+            <p className="text-sm text-[#666666]">{schoolData?.name || 'School'} · Compare streams, subjects and learners across a grade.</p></div>
+          </div>
         </div>
         <div className="flex flex-wrap gap-3">
           <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-200">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <select
-              value={selectedStream}
-              onChange={e => {
-                const nextStream = e.target.value;
-                const nextClass = classes.find(c => streamNameForClass(c) === nextStream);
-                setSelectedStream(nextStream); setSelectedClass(nextClass?.id || ''); setClassInfo(nextClass || null); setSelectedExam('');
-              }}
-              className="text-sm font-medium border-none focus:ring-0 bg-transparent"
-            >
-              {[...new Set(classes.map(c => streamNameForClass(c)))].map(stream => <option key={stream} value={stream}>{stream}</option>)}
+            <BarChart3 className="w-4 h-4 text-gray-400" />
+            <select value={selectedGrade} onChange={(e) => { setSelectedGrade(e.target.value); setSelectedExam(''); }} className="text-sm font-medium border-none focus:ring-0 bg-transparent">
+              {grades.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
             </select>
-            <select
-              value={selectedClass}
-              onChange={e => {
-                setSelectedClass(e.target.value);
-                setClassInfo(classes.find(c => c.id === e.target.value));
-              }}
-              className="text-sm font-medium border-none focus:ring-0 bg-transparent"
-            >
-              {classes.filter(c => streamNameForClass(c) === selectedStream).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            {terms.length > 0 && (
+              <select value={selectedTerm} onChange={(e) => { setSelectedTerm(e.target.value); setSelectedExam(''); }} className="text-sm font-medium border-none focus:ring-0 bg-transparent">
+                {terms.map((t) => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
+              </select>
+            )}
           </div>
-          {terms.length > 0 && (
-            <select
-              value={selectedTerm}
-              onChange={e => { setSelectedTerm(e.target.value); setSelectedExam(''); }}
-              className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-            >
-              {terms.map(t => <option key={t.id} value={t.id}>{t.name} {t.academic_year}</option>)}
-            </select>
-          )}
           {exams.length > 0 && (
-            <select
-              value={selectedExam}
-              onChange={e => setSelectedExam(e.target.value)}
-              className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-            >
+            <select value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)} className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">All Assessments</option>
-              {exams.map(e => <option key={e.id} value={e.id}>{e.name} {e.type ? `(${e.type})` : ''}</option>)}
+              {exams.filter((e) => !e.term_id || e.term_id === selectedTerm).map((e) => (
+                <option key={e.id} value={e.id}>{e.name} {e.type ? `(${e.type})` : ''}</option>
+              ))}
             </select>
           )}
+          <button onClick={() => { setPdfTarget('full'); setPdfOptionsOpen(true); }} disabled={overview.length === 0 && rankings.length === 0} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+            <Download className="w-4 h-4" /> Full PDF
+          </button>
+          <button onClick={() => { setPdfTarget('tab'); setPdfOptionsOpen(true); }} disabled={overview.length === 0 && rankings.length === 0} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-40">
+            <Download className="w-4 h-4" /> Page PDF
+          </button>
+          <button onClick={downloadExcel} disabled={overview.length === 0 && rankings.length === 0} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-40">
+            <FileSpreadsheet className="w-4 h-4" /> Excel
+          </button>
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><Users className="w-4 h-4 text-blue-600" /><span className="text-xs text-gray-500">Students</span></div>
-          <div className="text-2xl font-bold text-gray-900">{rankings.length}</div>
+          <div className="flex items-center gap-2 mb-1"><Layers className="w-4 h-4 text-blue-600" /><span className="text-xs text-gray-500">Streams</span></div>
+          <div className="text-2xl font-bold text-gray-900">{overview.length}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-green-600" /><span className="text-xs text-gray-500">Stream Average</span></div>
-          <div className="text-2xl font-bold text-gray-900">{classAvg !== null ? `${classAvg}%` : '—'}</div>
+          <div className="flex items-center gap-2 mb-1"><Users className="w-4 h-4 text-green-600" /><span className="text-xs text-gray-500">Learners</span></div>
+          <div className="text-2xl font-bold text-gray-900">{overview.reduce((s, r) => s + r.learners, 0)}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><BookOpen className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">Subjects</span></div>
-          <div className="text-2xl font-bold text-gray-900">{subjectSummaries.length}</div>
+          <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-purple-600" /><span className="text-xs text-gray-500">With Results</span></div>
+          <div className="text-2xl font-bold text-gray-900">{overview.reduce((s, r) => s + r.withResults, 0)}</div>
         </div>
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-1"><Award className="w-4 h-4 text-yellow-600" /><span className="text-xs text-gray-500">Results In</span></div>
-          <div className="text-2xl font-bold text-gray-900">{rankings.filter(r => r.avgPercentage !== null).length}/{rankings.length}</div>
+          <div className="flex items-center gap-2 mb-1"><Trophy className="w-4 h-4 text-yellow-600" /><span className="text-xs text-gray-500">Top Stream</span></div>
+          <div className="text-lg font-bold text-gray-900 truncate">{topStream ? topStream.label : '—'}</div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['rankings', 'subjects', 'class-means', 'learners'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            {tab === 'rankings' ? 'Student Rankings' : tab === 'subjects' ? 'Subject Analysis' : tab === 'class-means' ? 'Class Means' : 'Learner Performance'}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto">
+        {tabs.map((tab) => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
+            <tab.icon className="w-4 h-4" /> {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Search */}
-      {activeTab === 'rankings' && (
-        <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search students..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          />
+      {loadingData ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+      ) : overview.length === 0 && rankings.length === 0 ? (
+        <div className="bg-white rounded-2xl p-10 text-center border border-dashed border-gray-300">
+          <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">No results uploaded for this grade and term yet.</p>
         </div>
-      )}
-
-      {/* Rankings Tab */}
-      {activeTab === 'rankings' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3">
-            <h3 className="font-bold text-gray-900">Student Rankings — {classInfo?.name}</h3>
-            <button onClick={downloadStreamRanking} disabled={rankings.length === 0} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50">
-              <Download className="w-4 h-4" /> Download Stream Rankings
-            </button>
-          </div>
-          {loadingData ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
-          ) : filteredRankings.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">No results found for this stream and term.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Pos</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Student</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Adm No</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg %</th>
-                    <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subjects</th>
-                    {subjectSummaries.map(sub => (
-                      <th key={sub.id} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{sub.name.substring(0, 6)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {filteredRankings.map((s) => (
-                    <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="py-3 px-6">
-                        {s.position !== null ? (
-                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${s.position === 1 ? 'bg-yellow-100 text-yellow-700' : s.position === 2 ? 'bg-gray-200 text-gray-700' : s.position === 3 ? 'bg-orange-100 text-orange-700' : 'bg-blue-50 text-blue-600'}`}>
-                            {s.position}
-                          </span>
-                        ) : <span className="text-gray-300">—</span>}
-                      </td>
-                      <td className="py-3 px-6 font-medium text-gray-900">{s.first_name} {s.last_name}</td>
-                      <td className="py-3 px-6 text-gray-500">{s.admission_number}</td>
-                      <td className={`py-3 px-6 font-bold ${s.avgPercentage !== null ? avgColor(s.avgPercentage) : 'text-gray-300'}`}>
-                        {s.avgPercentage !== null ? `${s.avgPercentage}%` : '—'}
-                      </td>
-                      <td className="py-3 px-6 text-gray-500">{Object.keys(s.subjectResults).length}</td>
-                      {subjectSummaries.map(sub => {
-                        const sr = s.subjectResults[sub.name];
-                        return (
-                          <td key={sub.id} className="py-3 px-6">
-                            {sr ? (
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(sr.grade)}`}>{sr.pct}%{sr.grade ? ` · ${sr.grade}` : ''}</span>
-                            ) : <span className="text-gray-300">—</span>}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Subject Analysis Tab */}
-      {activeTab === 'subjects' && (
-        <div className="space-y-4">
-          {loadingData ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
-          ) : subjectSummaries.length === 0 ? (
-            <div className="bg-white rounded-2xl p-10 text-center border border-dashed border-gray-300">
-              <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No results uploaded for this term yet.</p>
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {subjectSummaries.map(sub => (
-                  <div key={sub.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="p-2 bg-blue-50 rounded-lg"><BookOpen className="w-5 h-5 text-blue-600" /></div>
-                      <span className={`text-lg font-bold ${avgColor(sub.average)}`}>{sub.average}%</span>
-                    </div>
-                    <h4 className="font-bold text-gray-900 mb-3">{sub.name}</h4>
-                    <div className="space-y-1.5 text-sm">
-                      <div className="flex justify-between text-gray-600">
-                        <span>Highest</span><span className="font-semibold text-green-600">{sub.highest}%</span>
-                      </div>
-                      <div className="flex justify-between text-gray-600">
-                        <span>Lowest</span><span className="font-semibold text-red-600">{sub.lowest}%</span>
-                      </div>
-                      <div className="flex justify-between text-gray-600">
-                        <span>Students</span><span className="font-semibold">{sub.count}</span>
-                      </div>
-                    </div>
-                    {/* Mini progress bar */}
-                    <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${sub.average >= 75 ? 'bg-green-500' : sub.average >= 50 ? 'bg-blue-500' : sub.average >= 30 ? 'bg-orange-500' : 'bg-red-500'}`}
-                        style={{ width: `${sub.average}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Subject ranking table */}
+      ) : (
+        <>
+          {activeTab === 'overview' && (
+            <div className="space-y-4">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-5 border-b border-gray-100">
-                  <h3 className="font-bold text-gray-900">Subject Performance Ranking</h3>
+                  <h3 className="font-bold text-gray-900">Stream Overview — {selectedGradeLabel}</h3>
+                  <p className="text-xs text-gray-500 mt-1">Ranking of every stream in this grade for the selected term and assessment.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">#</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Average</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Highest</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Lowest</th>
-                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Students</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Rank</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Stream</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learners</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Results In</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Class Mean Marks</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Points</th>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Grade</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {subjectSummaries.map((sub, i) => (
-                        <tr key={sub.id} className="hover:bg-gray-50">
-                          <td className="py-3 px-6 text-gray-500">{i + 1}</td>
-                          <td className="py-3 px-6 font-medium text-gray-900">{sub.name}</td>
-                          <td className={`py-3 px-6 font-bold ${avgColor(sub.average)}`}>{sub.average}%</td>
-                          <td className="py-3 px-6 text-green-600 font-semibold">{sub.highest}%</td>
-                          <td className="py-3 px-6 text-red-600 font-semibold">{sub.lowest}%</td>
-                          <td className="py-3 px-6 text-gray-500">{sub.count}</td>
+                      {overview.map((row) => (
+                        <tr key={row.classId} className="hover:bg-gray-50">
+                          <td className="py-3 px-6">
+                            {row.rank !== null ? (
+                              <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${row.rank === 1 ? 'bg-yellow-500' : row.rank === 2 ? 'bg-gray-400' : row.rank === 3 ? 'bg-amber-600' : 'bg-gray-300'}`}>{row.rank}</span>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="py-3 px-6 font-medium text-gray-900">{row.label}</td>
+                          <td className="py-3 px-6 text-gray-600">{row.learners}</td>
+                          <td className="py-3 px-6 text-gray-600">{row.withResults}</td>
+                          <td className="py-3 px-6 font-bold text-gray-900">{row.meanMarks === null ? '—' : `${row.meanMarks} / ${row.meanMarksOutOf}`}</td>
+                          <td className="py-3 px-6 text-gray-600">{row.points === null ? '—' : row.points}</td>
+                          <td className="py-3 px-6">{row.grade ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(row.grade)}`}>{row.grade}</span> : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            </>
+              {topStream && (
+                <div className="flex items-center gap-3 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-2xl p-4">
+                  <Trophy className="w-8 h-8 text-yellow-500" />
+                  <div>
+                    <p className="text-xs font-semibold text-yellow-700 uppercase tracking-wide">Top Stream</p>
+                    <p className="font-bold text-gray-900">{topStream.label} <span className="text-sm font-medium text-gray-500">— {topStream.meanMarks} / {topStream.meanMarksOutOf} class mean marks</span></p>
+                  </div>
+                </div>
+              )}
+              {overview.length > 1 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                  <h3 className="font-bold text-gray-900 mb-1">Stream Performance — {selectedGradeLabel}</h3>
+                  <p className="text-xs text-gray-500 mb-4">Average performance of each stream for the selected assessment.</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} unit="%" />
+                      <Tooltip formatter={(v: any) => [`${v}%`, 'Average']} />
+                      <Bar dataKey="average" radius={[6, 6, 0, 0]}>
+                        {chartData.map((_, i) => <Cell key={i} fill={STREAM_COLORS[i % STREAM_COLORS.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
           )}
-        </div>
+
+          {activeTab === 'subjects' && (
+            <div className="space-y-4">
+              {subjectMatrix.length > 1 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                  <h3 className="font-bold text-gray-900 mb-1">Subject Performance Comparison</h3>
+                  <p className="text-xs text-gray-500 mb-4">Compare each stream's average across learning areas.</p>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={subjectChartData} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 12 }} unit="%" />
+                      <Tooltip />
+                      <Legend />
+                      {overview.map((o, i) => (
+                        <Line key={o.classId} type="monotone" dataKey={o.label} stroke={STREAM_COLORS[i % STREAM_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-5 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-900">Subject Performance by Stream — {selectedGradeLabel}</h3>
+                  <p className="text-xs text-gray-500 mt-1">Average score per subject for each stream. Best stream highlighted.</p>
+                </div>
+                {subjectMatrix.length === 0 ? (
+                  <div className="p-10 text-center text-gray-500 text-sm">No subject results found.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
+                          {overview.map((o) => (
+                            <th key={o.classId} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{o.label}</th>
+                          ))}
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Best</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {subjectMatrix.map((m) => (
+                          <tr key={m.subjectId} className="hover:bg-gray-50">
+                            <td className="py-3 px-6 font-medium text-gray-900">{m.subjectName}</td>
+                            {overview.map((o) => {
+                              const v = m.byClass[o.classId];
+                              const isBest = m.bestClassId === o.classId;
+                              return (
+                                <td key={o.classId} className="py-3 px-6">
+                                  {v === null ? <span className="text-gray-300">—</span> : (
+                                    <span className={`font-bold ${isBest ? 'text-green-600' : avgColor(v)}`}>
+                                      {v}%{isBest && <Trophy className="w-3 h-3 text-yellow-500 inline ml-1" />}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="py-3 px-6 text-gray-600">{m.bestClassId ? (classById.get(m.bestClassId)?.label || '') + (m.diff != null ? ` (+${m.diff}%)` : '') : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'rankings' && (
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="text" placeholder="Search students by name or admission number..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white rounded-2xl text-sm border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="flex items-center justify-between">
+                <div><h3 className="font-bold text-gray-900">Learner Performance — {selectedGradeLabel} — All Streams</h3><p className="text-xs text-gray-500">Ranked by total marks first, then points. Each subject shows marks and points.</p></div>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none"><input type="checkbox" checked={showTop10} onChange={(e) => setShowTop10(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" /> Show top 10</label>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50"><tr>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">POS</th><th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Student</th><th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Adm No</th><th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Stream</th>
+                {Array.from(new Set(rankings.flatMap((r) => Object.keys(r.subjects)))).sort().map((subject) => <th key={subject} className="text-center py-3 px-3 text-[10px] font-semibold text-gray-500 uppercase whitespace-nowrap">{subject}<br /><span className="font-normal">Marks · Pts · Grade</span></th>)}
+                <th className="text-center py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Total Marks</th><th className="text-center py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Points</th><th className="text-center py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Grade</th>
+              </tr></thead><tbody className="divide-y divide-gray-50">
+                {(showTop10 ? filteredRankings.slice(0, 10) : filteredRankings).map((r) => <tr key={r.studentId} className="hover:bg-gray-50"><td className="py-3 px-4 font-bold">{r.position}</td><td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">{r.first_name} {r.last_name}</td><td className="py-3 px-4 text-gray-500">{r.admission_number}</td><td className="py-3 px-4 text-gray-600 whitespace-nowrap">{r.label}</td>
+                  {Array.from(new Set(rankings.flatMap((row) => Object.keys(row.subjects)))).sort().map((subject) => { const value = r.subjects[subject]; return <td key={subject} className="py-2 px-3 text-center whitespace-nowrap">{value ? <><div className="font-bold text-gray-700">{value.marks ?? value.percentage}</div><div className="text-[10px] text-purple-600">{value.points || '—'} pt · {value.grade}</div></> : <span className="text-gray-300">—</span>}</td>; })}
+                  <td className="py-3 px-4 text-center font-bold text-blue-600">{r.totalMarks}</td><td className="py-3 px-4 text-center font-bold text-purple-600">{r.points || '—'}</td><td className="py-3 px-4 text-center"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(r.grade)}`}>{r.grade || '—'}</span></td></tr>)}
+              </tbody></table></div></div>
+              {filteredRankings.length === 0 && <div className="bg-white rounded-2xl p-10 text-center text-gray-500 text-sm border border-dashed border-gray-300">No students found.</div>}
+            </div>
+          )}
+
+          {activeTab === 'comparison' && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-5 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-900">Stream Comparison — {selectedGradeLabel}</h3>
+                  <p className="text-xs text-gray-500 mt-1">Side-by-side subject averages and the gap between the best and weakest stream.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
+                        {overview.map((o) => <th key={o.classId} className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">{o.label}</th>)}
+                        <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Gap</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {subjectMatrix.map((m) => (
+                        <tr key={m.subjectId} className="hover:bg-gray-50">
+                          <td className="py-3 px-6 font-medium text-gray-900">{m.subjectName}</td>
+                          {overview.map((o) => {
+                            const v = m.byClass[o.classId];
+                            const isBest = m.bestClassId === o.classId;
+                            return <td key={o.classId} className={`py-3 px-6 font-bold ${v === null ? 'text-gray-300' : isBest ? 'text-green-600' : avgColor(v)}`}>{v === null ? '—' : `${v}%`}</td>;
+                          })}
+                          <td className="py-3 px-6 text-gray-600">{m.diff !== null ? <span className="font-semibold text-purple-700">+{m.diff}%</span> : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-5 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-900">Performance Distribution</h3>
+                  <p className="text-xs text-gray-500 mt-1">Learners by grade band compared with the previous exam.</p>
+                </div>
+                {perfDistribution.length === 0 ? (
+                  <div className="p-10 text-center text-gray-500 text-sm">No distribution data available.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Grade</th>
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Current Exam</th>
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Previous Exam</th>
+                          <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Difference</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {perfDistribution.map((row) => (
+                          <tr key={row.grade} className="hover:bg-gray-50">
+                            <td className="py-3 px-6 font-medium text-gray-900">{row.grade}</td>
+                            <td className="py-3 px-6 text-gray-600">{row.current} learner{row.current === 1 ? '' : 's'}</td>
+                            <td className="py-3 px-6 text-gray-600">{row.previous} learner{row.previous === 1 ? '' : 's'}</td>
+                            <td className={`py-3 px-6 font-bold ${row.difference > 0 ? 'text-green-700' : row.difference < 0 ? 'text-red-700' : 'text-gray-500'}`}>{row.difference > 0 ? `+${row.difference}` : row.difference}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <h3 className="font-bold text-gray-900 mb-1">Score Histogram</h3>
+                <p className="text-xs text-gray-500 mb-4">Histogram of average learner scores across all streams.</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={distributionData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <h3 className="font-bold text-gray-900 mb-3">Stream Ranking</h3>
+                <ol className="space-y-2">
+                  {overview.map((r) => (
+                    <li key={r.classId} className="flex items-center gap-3 text-sm">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${r.rank === 1 ? 'bg-yellow-500' : r.rank === 2 ? 'bg-gray-400' : r.rank === 3 ? 'bg-amber-600' : 'bg-gray-300'}`}>{r.rank ?? '—'}</span>
+                      <span className="font-medium text-gray-900">{r.label}</span>
+                      <span className="ml-auto font-bold text-gray-900">{r.meanMarks !== null ? `${r.meanMarks} / ${r.meanMarksOutOf}` : '—'}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'class' && (
+            <div className="space-y-4">
+              {classPerf.length === 0 ? (
+                <div className="bg-white rounded-2xl p-10 text-center border border-dashed border-gray-300 text-gray-500 text-sm">No class performance data available.</div>
+              ) : (
+                classPerf.map((cp) => (
+                  <div key={cp.label} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-5 border-b border-gray-100 flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-blue-600" />
+                      <div>
+                        <h3 className="font-bold text-gray-900">Class Performance — {cp.label}</h3>
+                        <p className="text-xs text-gray-500">All learning areas, average marks, points and grade.</p>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Subject</th>
+                            <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Avg Marks</th>
+                            <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Out Of</th>
+                            <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Grade</th>
+                            <th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Points</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {cp.rows.map((r) => (
+                            <tr key={r.subject} className="hover:bg-gray-50">
+                              <td className="py-3 px-6 font-medium text-gray-900">{r.subject}</td>
+                              <td className="py-3 px-6 text-gray-600">{r.avgMarks === null ? '—' : r.avgMarks}</td>
+                              <td className="py-3 px-6 text-gray-600">{r.outOf}</td>
+                              <td className="py-3 px-6">{r.grade ? <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${gradeColor(r.grade)}`}>{r.grade}</span> : '—'}</td>
+                              <td className="py-3 px-6 text-gray-600">{r.points === null ? '—' : r.points}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-gray-50 border-t border-gray-100">
+                          <tr>
+                            <td className="py-3 px-6 font-bold text-gray-900">TOTAL</td>
+                            <td className="py-3 px-6 font-bold text-gray-900">{cp.totalMarks === 0 ? '—' : cp.totalMarks}</td>
+                            <td className="py-3 px-6 text-gray-600">{cp.totalOutOf}</td>
+                            <td className="py-3 px-6 font-bold text-gray-900">{cp.grade}</td>
+                            <td className="py-3 px-6 font-bold text-gray-900">{cp.totalPoints === 0 ? '—' : cp.totalPoints}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <div className="px-6 py-4 border-t border-gray-100 text-sm text-gray-600">
+                      Average: <span className="font-bold">{cp.overallAvg === null ? '—' : `${cp.overallAvg}%`}</span>
+                      {cp.totalPoints > 0 && <> · Total Points: <span className="font-bold">{cp.totalPoints}</span></>}
+                      {' '}· Grade: <span className="font-bold">{cp.grade}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeTab === 'improved' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {[
+                { title: 'Most Improved Learners', rows: improved, positive: true },
+                { title: 'Most Dropped Learners', rows: dropped, positive: false },
+              ].map((section) => (
+                <div key={section.title} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="p-5 border-b border-gray-100">
+                    <h3 className="font-bold text-gray-900">{section.title} — {selectedGradeLabel}</h3>
+                    <p className="text-xs text-gray-500 mt-1">Top 5 learners compared with the previous term.</p>
+                  </div>
+                  {section.rows.length === 0 ? (
+                    <div className="p-10 text-center text-gray-500 text-sm">No comparison data available.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {['Rank', 'Student', 'Stream', 'Adm No', 'Previous', 'Current', 'Diff'].map((head) => (
+                              <th key={head} className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">{head}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {section.rows.map((r, idx) => (
+                            <tr key={r.studentId} className="hover:bg-gray-50">
+                              <td className="py-3 px-4 font-bold">{idx + 1}</td>
+                              <td className="py-3 px-4 font-medium text-gray-900 whitespace-nowrap">{r.first_name} {r.last_name}</td>
+                              <td className="py-3 px-4 text-gray-600">{r.label}</td>
+                              <td className="py-3 px-4 text-gray-500">{r.admission_number}</td>
+                              <td className="py-3 px-4">{r.prevAvg}%</td>
+                              <td className="py-3 px-4 font-bold">{r.avg}%</td>
+                              <td className={`py-3 px-4 font-bold ${section.positive ? 'text-green-700' : 'text-red-700'}`}>{section.positive ? '+' : ''}{r.diff}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
-
-
-      {activeTab === 'class-means' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100"><h3 className="font-bold text-gray-900">Class Means Comparison — {selectedStream || 'Stream'}</h3><p className="text-xs text-gray-500 mt-1">Compare each class in this stream for the selected term and assessment.</p></div>
-          {classComparisons.length === 0 ? <div className="p-10 text-center text-gray-500 text-sm">No class results found for this stream and term.</div> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Rank</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Class</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learners</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Results</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Mean %</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Highest</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Lowest</th></tr></thead><tbody className="divide-y divide-gray-50">{classComparisons.map(row => <tr key={row.id} className="hover:bg-gray-50"><td className="py-3 px-6 font-bold text-blue-600">{row.position ?? '—'}</td><td className="py-3 px-6 font-medium text-gray-900">{row.name}</td><td className="py-3 px-6 text-gray-600">{row.learnerCount}</td><td className="py-3 px-6 text-gray-600">{row.resultsCount}</td><td className={`py-3 px-6 font-bold ${row.average === null ? 'text-gray-300' : avgColor(row.average)}`}>{row.average === null ? '—' : `${row.average}%`}</td><td className="py-3 px-6 text-green-600">{row.highest === null ? '—' : `${row.highest}%`}</td><td className="py-3 px-6 text-red-600">{row.lowest === null ? '—' : `${row.lowest}%`}</td></tr>)}</tbody></table></div>}
-        </div>
-      )}
-
-      {activeTab === 'learners' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3"><div><h3 className="font-bold text-gray-900">Learner Performance Across Stream Classes</h3><p className="text-xs text-gray-500 mt-1">Learners are ranked within their own class for the selected term.</p></div><button onClick={downloadStreamRanking} disabled={streamLearners.length === 0} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50"><Download className="w-4 h-4" /> Download PDF</button></div>
-          {streamLearners.length === 0 ? <div className="p-10 text-center text-gray-500 text-sm">No learner results found for this stream and term.</div> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Class</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Pos.</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Learner</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Admission No.</th><th className="text-left py-3 px-6 text-xs font-semibold text-gray-500 uppercase">Average</th></tr></thead><tbody className="divide-y divide-gray-50">{streamLearners.map(row => <tr key={`${row.className}-${row.id}`} className="hover:bg-gray-50"><td className="py-3 px-6 text-gray-600">{row.className}</td><td className="py-3 px-6 font-bold text-blue-600">{row.classPosition ?? '—'}</td><td className="py-3 px-6 font-medium text-gray-900">{row.first_name} {row.last_name}</td><td className="py-3 px-6 text-gray-500">{row.admission_number}</td><td className={`py-3 px-6 font-bold ${row.avgPercentage === null ? 'text-gray-300' : avgColor(row.avgPercentage)}`}>{row.avgPercentage === null ? '—' : `${row.avgPercentage}%`}</td></tr>)}</tbody></table></div>}
-        </div>
-      )}
-
+      <PdfFontSizeDialog open={pdfOptionsOpen} title={pdfTarget === 'tab' ? 'Download Current Page PDF' : 'Download Stream Dashboard PDF (All Pages)'} description="Choose the font size for the downloaded PDF. Font options: 10 (Small), 12 (Compact), 14 (Default), 16 (Large)." onCancel={() => setPdfOptionsOpen(false)} onConfirm={async (fontSize) => { if (pdfTarget === 'tab') await downloadTabPdf(fontSize); else await downloadPdf(fontSize); setPdfOptionsOpen(false); }} />
     </div>
   );
 }

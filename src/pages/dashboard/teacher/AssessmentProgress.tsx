@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
-import { supabase, supabaseUntyped } from '@/lib/supabase/client';
+import { useState, useEffect, useMemo } from 'react';
+import { supabaseUntyped } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, BookOpen, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, BarChart3, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { deleteResults } from '@/lib/resultActions';
+import { resolveTeacherIdentity } from '@/lib/teacher-restrictions';
+import { ASSESSMENT_LEVEL_OPTIONS, getAssessmentLevelLabel, getEffectiveGradeLevel, matchesAssessmentScope, resultBelongsToAssessment, resultHasMarks } from '@/lib/assessment-progress';
 
 interface ProgressData {
   assessmentId: string;
@@ -10,6 +13,8 @@ interface ProgressData {
   assessmentType: string;
   className: string;
   classId: string;
+  levelKey: string;
+  levelLabel: string;
   termName: string;
   totalSubjects: number;
   enteredSubjects: number;
@@ -28,6 +33,9 @@ export default function AssessmentProgress() {
   const [progress, setProgress] = useState<ProgressData[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedAssessment, setExpandedAssessment] = useState<string | null>(null);
+  const [currentTeacherId, setCurrentTeacherId] = useState('');
+  const [currentSchoolId, setCurrentSchoolId] = useState('');
+  const [levelFilter, setLevelFilter] = useState('all');
 
   useEffect(() => {
     if (user?.id) fetchProgress();
@@ -36,107 +44,99 @@ export default function AssessmentProgress() {
   const fetchProgress = async () => {
     setLoading(true);
     try {
-      // Get teacher record
-      const { data: teacherData } = await supabaseUntyped
-        .from('teachers')
-        .select('id, school_id')
-        .eq('profile_id', user?.id)
-        .single();
+      const identity = await resolveTeacherIdentity(user?.id);
+      if (!identity) return;
 
-      const teacherId = teacherData?.id;
-      if (!teacherId) {
-        setLoading(false);
-        return;
+      const resolvedSchoolId = user?.schoolId || identity.schoolId;
+      if (!resolvedSchoolId) return;
+      setCurrentTeacherId(identity.teacherId);
+      setCurrentSchoolId(resolvedSchoolId);
+
+      const teacherIds = [...new Set([identity.teacherId, identity.profileId].filter(Boolean))];
+      let assignments: any[] = [];
+      for (const teacherId of teacherIds) {
+        const { data } = await supabaseUntyped
+          .from('teacher_subject_assignments')
+          .select('id, class_id, subject_id, school_id, is_active, classes(id, name, stream, grade_level, level, curriculum), subjects(id, name)')
+          .eq('teacher_id', teacherId)
+          .eq('school_id', resolvedSchoolId)
+          .eq('is_active', true);
+        if (data?.length) {
+          assignments = data;
+          break;
+        }
       }
+      if (!assignments.length) return;
 
-      // Issue 9: Resolve school_id from teacher record as fallback when user.schoolId is null
-      const resolvedSchoolId = user?.schoolId || teacherData?.school_id;
-      if (!resolvedSchoolId) {
-        setLoading(false);
-        return;
-      }
-
-      // Get teacher's class-subject assignments
-      const { data: assignments } = await supabaseUntyped
-        .from('teacher_subject_assignments')
-        .select('*, classes(id, name), subjects(id, name)')
-        .eq('teacher_id', teacherId);
-
-      if (!assignments || assignments.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      // Get active assessments for this school
-      const { data: exams } = await supabaseUntyped
+      const { data: exams, error: examsError } = await supabaseUntyped
         .from('school_exams')
-        .select('*, terms(name, academic_year)')
+        .select('id, name, type, term_id, target_type, target_class_id, target_grade_level, terms(name, academic_year)')
         .eq('school_id', resolvedSchoolId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
+      if (examsError) throw examsError;
 
-      const activeExams = exams || [];
-
-      // Get all results entered by this teacher
-      const { data: teacherResults } = await supabaseUntyped
+      const { data: teacherResults, error: resultsError } = await supabaseUntyped
         .from('results')
-        .select('subject_id, class_id, exam_id')
-        .eq('teacher_id', teacherId);
+        .select('subject_id, class_id, exam_id, term_id, marks, out_of')
+        .eq('teacher_id', identity.teacherId)
+        .eq('school_id', resolvedSchoolId);
+      if (resultsError) throw resultsError;
 
-      const resultsMap = new Map<string, Set<string>>();
-      (teacherResults || []).forEach((r: any) => {
-        const key = `${r.class_id}-${r.subject_id}-${r.exam_id || 'no-exam'}`;
-        if (!resultsMap.has(key)) resultsMap.set(key, new Set());
-        resultsMap.get(key)!.add(r.subject_id);
+      const resultsByClassSubject = new Map<string, any[]>();
+      (teacherResults || []).forEach((result: any) => {
+        if (!resultHasMarks(result)) return;
+        const key = `${result.class_id}-${result.subject_id}`;
+        resultsByClassSubject.set(key, [...(resultsByClassSubject.get(key) || []), result]);
       });
 
-      // Build progress data
+      const classMap = new Map<string, { classRecord: any; assignments: any[] }>();
+      assignments.forEach((assignment: any) => {
+        const classId = String(assignment.class_id || '');
+        if (!classId) return;
+        const classRecord = assignment.classes || { id: classId, name: 'Unknown' };
+        const existing = classMap.get(classId) || { classRecord, assignments: [] };
+        if (!existing.assignments.some((item) => String(item.subject_id) === String(assignment.subject_id))) {
+          existing.assignments.push(assignment);
+        }
+        classMap.set(classId, existing);
+      });
+
       const progressData: ProgressData[] = [];
-
-      for (const exam of activeExams) {
-        // Group assignments by class
-        const classMap = new Map<string, any[]>();
-        assignments.forEach((a: any) => {
-          const classId = a.class_id;
-          if (!classMap.has(classId)) classMap.set(classId, []);
-          classMap.get(classId)!.push(a);
-        });
-
-        for (const [classId, classAssignments] of classMap) {
-          const className = classAssignments[0]?.classes?.name || 'Unknown';
-          const subjects = classAssignments.map((a: any) => ({
-            subjectId: a.subject_id || a.subjects?.id,
-            subjectName: a.subjects?.name || 'Unknown',
+      for (const exam of exams || []) {
+        for (const [classId, classGroup] of classMap) {
+          if (!matchesAssessmentScope(exam, { ...classGroup.classRecord, id: classId })) continue;
+          const classRecord = classGroup.classRecord;
+          const subjects = classGroup.assignments.map((assignment: any) => ({
+            subjectId: assignment.subject_id || assignment.subjects?.id,
+            subjectName: assignment.subjects?.name || 'Unknown',
           }));
-
-          const totalSubjects = subjects.length;
-          let enteredSubjects = 0;
-
-          const subjectProgress = subjects.map((s: any) => {
-            const key = `${classId}-${s.subjectId}-${exam.id}`;
-            const hasMarks = resultsMap.has(key);
-            if (hasMarks) enteredSubjects++;
-            return {
-              subjectId: s.subjectId,
-              subjectName: s.subjectName,
-              hasMarks,
-              studentCount: 0,
-            };
-          });
-
-          const percentComplete = totalSubjects > 0 ? Math.round((enteredSubjects / totalSubjects) * 100) : 0;
-
+          const subjectProgress = subjects.map((subject: any) => ({
+            subjectId: subject.subjectId,
+            subjectName: subject.subjectName,
+            hasMarks: (resultsByClassSubject.get(`${classId}-${subject.subjectId}`) || [])
+              .some((result) => resultBelongsToAssessment(result, exam)),
+            studentCount: 0,
+          }));
+          const enteredSubjects = subjectProgress.filter((subject) => subject.hasMarks).length;
+          const totalSubjects = subjectProgress.length;
+          const level = getEffectiveGradeLevel(classRecord);
+          const levelKey = level === null ? 'unknown' : String(level);
+          const streamLabel = String(classRecord.stream || '').trim();
+          const className = `${classRecord.name || 'Unknown'}${streamLabel ? ` (${streamLabel})` : ''}`;
           progressData.push({
             assessmentId: exam.id,
             assessmentName: exam.name,
             assessmentType: exam.type,
             className,
             classId,
-            termName: `${exam.terms?.name || ''} ${exam.terms?.academic_year || ''}`,
+            levelKey,
+            levelLabel: getAssessmentLevelLabel(classRecord),
+            termName: `${exam.terms?.name || ''} ${exam.terms?.academic_year || ''}`.trim(),
             totalSubjects,
             enteredSubjects,
             pendingSubjects: totalSubjects - enteredSubjects,
-            percentComplete,
+            percentComplete: totalSubjects > 0 ? Math.round((enteredSubjects / totalSubjects) * 100) : 0,
             subjectProgress,
           });
         }
@@ -145,38 +145,62 @@ export default function AssessmentProgress() {
       setProgress(progressData);
     } catch (err: any) {
       toast.error('Failed to load progress: ' + err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+  const handleDeleteClassResults = async (p: ProgressData) => {
+    if (!currentTeacherId || !currentSchoolId) return;
+    if (!confirm(`Delete your results for ${p.assessmentName} (${p.className}, ${p.termName})? This cannot be undone.`)) return;
+    try {
+      const deleted = await deleteResults({ schoolId: currentSchoolId, classId: p.classId, examId: p.assessmentId, teacherId: currentTeacherId });
+      toast.success(`Deleted ${deleted} result(s)`);
+      fetchProgress();
+    } catch (err: any) { toast.error('Failed to delete results: ' + err.message); }
+  };
+
+  const visibleProgress = useMemo(
+    () => levelFilter === 'all' ? progress : progress.filter((item) => item.levelKey === levelFilter),
+    [levelFilter, progress],
+  );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#111111]">Assessment Progress</h1>
-        <p className="text-sm text-[#666666]">Track marks entry progress for your assessments</p>
+        <p className="text-sm text-[#666666]">Track marks entry progress for every assigned level, from Playgroup to Form 4.</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4">
+        <label className="text-sm font-semibold text-gray-700" htmlFor="assessment-level-filter">Level</label>
+        <select id="assessment-level-filter" value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
+          {ASSESSMENT_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <span className="text-xs text-gray-500">{visibleProgress.length} assessment view{visibleProgress.length === 1 ? '' : 's'}</span>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-          <div className="text-2xl font-bold text-blue-600">{progress.length}</div>
+          <div className="text-2xl font-bold text-blue-600">{visibleProgress.length}</div>
           <div className="text-xs text-gray-500">Active Assessments</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
           <div className="text-2xl font-bold text-green-600">
-            {progress.filter(p => p.percentComplete === 100).length}
+            {visibleProgress.filter(p => p.percentComplete === 100).length}
           </div>
           <div className="text-xs text-gray-500">Complete</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
           <div className="text-2xl font-bold text-orange-600">
-            {progress.filter(p => p.percentComplete > 0 && p.percentComplete < 100).length}
+            {visibleProgress.filter(p => p.percentComplete > 0 && p.percentComplete < 100).length}
           </div>
           <div className="text-xs text-gray-500">In Progress</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-gray-100 text-center">
           <div className="text-2xl font-bold text-purple-600">
-            {progress.reduce((sum, p) => sum + p.enteredSubjects, 0)}
+            {visibleProgress.reduce((sum, p) => sum + p.enteredSubjects, 0)}
           </div>
           <div className="text-xs text-gray-500">Learning Areas Done</div>
         </div>
@@ -186,14 +210,14 @@ export default function AssessmentProgress() {
         <div className="flex items-center justify-center py-16">
           <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
         </div>
-      ) : progress.length === 0 ? (
+      ) : visibleProgress.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
           <AlertCircle className="w-10 h-10 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500">No assessments found. Ask your School Admin or DoS to create assessments.</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {progress.map((p) => (
+          {visibleProgress.map((p) => (
             <div key={`${p.assessmentId}-${p.classId}`} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
               {/* Header */}
               <button
@@ -206,7 +230,7 @@ export default function AssessmentProgress() {
                   </div>
                   <div className="text-left">
                     <p className="font-semibold text-[#111111]">{p.assessmentName}</p>
-                    <p className="text-xs text-gray-500">{p.className} &middot; {p.termName} &middot; {p.assessmentType}</p>
+                    <p className="text-xs text-gray-500">{p.levelLabel} &middot; {p.className} &middot; {p.termName} &middot; {p.assessmentType}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -247,6 +271,12 @@ export default function AssessmentProgress() {
               {expandedAssessment === `${p.assessmentId}-${p.classId}` && (
                 <div className="px-5 pb-4 border-t border-gray-100 pt-3">
                   <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Learning Area Progress</p>
+                  <button
+                    onClick={() => handleDeleteClassResults(p)}
+                    className="mb-3 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" /> Delete My Results
+                  </button>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                     {p.subjectProgress.map((sp) => (
                       <div

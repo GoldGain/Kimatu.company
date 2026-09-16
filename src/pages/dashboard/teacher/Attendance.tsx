@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 export default function TeacherAttendance() {
   const { user } = useAuth();
   const [classes, setClasses] = useState<any[]>([]);
+  const [teacherRecordId, setTeacherRecordId] = useState<string | null>(null);
   const [students, setStudents] = useState<any[]>([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -17,12 +18,33 @@ export default function TeacherAttendance() {
 
   useEffect(() => {
     fetchClasses();
-  }, []);
+  }, [user?.id, user?.schoolId]);
+
+  useEffect(() => {
+    if (selectedClass) fetchStudents(selectedClass);
+  }, [selectedClass, selectedDate]);
 
   const fetchClasses = async () => {
     const schoolId = user?.schoolId;
-    const { data } = await supabaseUntyped.from('classes').select('*').eq('school_id', schoolId);
-    setClasses(data || []);
+    if (!schoolId || !user?.id) return;
+    const { data: teacher } = await supabaseUntyped
+      .from('teachers')
+      .select('id, assigned_class_id, is_class_teacher')
+      .eq('profile_id', user.id)
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    setTeacherRecordId(teacher?.id || null);
+
+    const { data: schoolClasses } = await supabaseUntyped
+      .from('classes')
+      .select('id, name, stream, class_teacher_id, is_active')
+      .eq('school_id', schoolId)
+      .eq('is_active', true)
+      .order('name');
+    const allowedClasses = (schoolClasses || []).filter((classRow: any) => (
+      classRow.class_teacher_id === user.id || (teacher?.is_class_teacher === true && classRow.id === teacher?.assigned_class_id)
+    ));
+    setClasses(allowedClasses);
   };
 
   const fetchStudents = async (classId: string) => {
@@ -42,7 +64,10 @@ export default function TeacherAttendance() {
   const handleClassChange = (classId: string) => {
     setSelectedClass(classId);
     setSaved(false);
-    if (classId) fetchStudents(classId);
+    if (!classId) {
+      setStudents([]);
+      setAttendance({});
+    }
   };
 
   const toggleStatus = (studentId: string, status: string) => {
@@ -51,15 +76,16 @@ export default function TeacherAttendance() {
   };
 
   const handleSave = async () => {
+    if (!selectedClass || !teacherRecordId || !user?.schoolId) {
+      toast.error('Only the assigned class teacher can save learner attendance.');
+      return;
+    }
     setSaving(true);
-    const { data: teacherData } = await supabaseUntyped.from('teachers').select('id').eq('profile_id', user?.id).single();
-    const teacherId = teacherData?.id;
-    
     const records = Object.entries(attendance).filter(([_, status]) => status).map(([studentId, status]) => ({
-      school_id: user?.schoolId,
+      school_id: user.schoolId,
       student_id: studentId,
       class_id: selectedClass,
-      teacher_id: teacherId,
+      teacher_id: teacherRecordId,
       date: selectedDate,
       status,
     }));
@@ -175,7 +201,7 @@ export default function TeacherAttendance() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#111111]">Mark Attendance</h1>
-          <p className="text-sm text-[#666666]">Take attendance for your class</p>
+          <p className="text-sm text-[#666666]">Take attendance only for the class assigned to you</p>
         </div>
         {selectedClass && students.length > 0 && (
           <button
@@ -190,7 +216,7 @@ export default function TeacherAttendance() {
       <div className="bg-white rounded-2xl p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.08)]">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <select value={selectedClass} onChange={e => handleClassChange(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white">
-            <option value="">Select Class</option>
+            <option value="">Select Your Class</option>
             {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.stream && `(${c.stream})`}</option>)}
           </select>
           <input type="date" value={selectedDate} onChange={e => { setSelectedDate(e.target.value); setSaved(false); }} className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
@@ -202,15 +228,15 @@ export default function TeacherAttendance() {
              students.length === 0 ? <div className="text-center py-8 text-sm text-[#666666]">No students in this class</div> :
              <div className="space-y-3">
                {students.map(s => (
-                 <div key={s.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                   <div className="flex items-center gap-3">
+                 <div key={s.id} className="flex flex-col gap-3 p-3 bg-gray-50 rounded-xl sm:flex-row sm:items-center sm:justify-between">
+                   <div className="flex min-w-0 items-center gap-3">
                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-bold">{s.first_name[0]}{s.last_name[0]}</div>
                      <div><span className="text-sm font-medium">{s.first_name} {s.last_name}</span><br/><span className="text-xs text-[#666666]">{s.admission_number}</span></div>
                    </div>
-                   <div className="flex gap-2">
+                   <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
                      {statusConfig.map(st => (
                        <button key={st.key} onClick={() => toggleStatus(s.id, st.key)}
-                         className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${attendance[s.id] === st.key ? `${st.color} text-white` : 'bg-white text-gray-400 hover:bg-gray-100'}`}>
+                         className={`flex min-h-10 w-full items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium transition-all sm:min-h-0 sm:w-auto sm:px-3 sm:py-1.5 ${attendance[s.id] === st.key ? `${st.color} text-white` : 'bg-white text-gray-400 hover:bg-gray-100'}`}>
                          {st.icon} {st.label}
                        </button>
                      ))}
