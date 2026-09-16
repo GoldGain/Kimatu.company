@@ -1,5 +1,6 @@
-// CBE-Analytics Service Worker - v2.0
-const CACHE_NAME = 'eduhub-v2';
+// Kimatu Analytics Service Worker - v3.0
+// Bumped to invalidate stale portal bundles, including removed trial/pricing UI.
+const CACHE_NAME = 'kimatu-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
