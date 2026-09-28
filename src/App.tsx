@@ -111,6 +111,7 @@ import ExamGeneratorPage from '@/pages/dashboard/teacher/ExamGeneratorPage';
 import TeacherProfile from '@/pages/dashboard/teacher/Profile';
 import TeacherMarklist from '@/pages/dashboard/teacher/Marklist';
 import TeacherClassList from '@/pages/dashboard/teacher/ClassList';
+import SelectMyLearners from '@/pages/dashboard/teacher/SelectMyLearners';
 import PathwayFinder from '@/components/PathwayFinder';
 import SchoolAdminProfile from '@/pages/dashboard/school-admin/Profile';
 import ParentProfile from '@/pages/dashboard/parent/Profile';
@@ -217,6 +218,8 @@ function AppRoutes() {
       {/* Public routes */}
       <Route path="/" element={<PublicRoute><Home /></PublicRoute>} />
       <Route path="/auth/login" element={<Login />} />
+      <Route path="/login" element={<Navigate to="/auth/login" replace />} />
+      <Route path="/get-started" element={<Navigate to="/register-school" replace />} />
       <Route path="/auth/register" element={<SchoolRegister />} />
       <Route path="/auth/register/account" element={<Register />} />
       <Route path="/register-school" element={<SchoolRegister />} />
@@ -309,6 +312,7 @@ function AppRoutes() {
       <Route path="/teacher/exam-generator" element={<ProtectedRoute allowedRoles={['teacher']}><ExamGeneratorPage /></ProtectedRoute>} />
       <Route path="/teacher/marklist" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherMarklist /></ProtectedRoute>} />
       <Route path="/teacher/class-list" element={<ProtectedRoute allowedRoles={['teacher']}><TeacherClassList /></ProtectedRoute>} />
+      <Route path="/teacher/select-learners" element={<ProtectedRoute allowedRoles={['teacher']}><SelectMyLearners /></ProtectedRoute>} />
       {/* Issue 5: DoS can manage assessments - shared Assessments component for teachers */}
       <Route path="/teacher/assessments" element={<ProtectedRoute allowedRoles={['teacher']}><SchoolAdminAssessments /></ProtectedRoute>} />
 
