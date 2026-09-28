@@ -15,9 +15,16 @@ export const CBC_QUESTION_TYPES = [
 
 export type QuestionType = (typeof CBC_QUESTION_TYPES)[number]['value'];
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'mixed';
-export type ExamFormat = 'standard30' | 'cbe' | 'kpsea' | 'kjsea' | 'custom';
+export type ExamFormat = 'standard30' | '844' | 'cbe' | 'kpsea' | 'kjsea' | 'custom';
 export type PaperVariant = 'single' | 'paper1' | 'paper2';
 export type AssessmentLevel = 'pre_primary' | 'lower_primary' | 'upper_primary' | 'junior_secondary' | 'senior_secondary';
+
+export function isForm344ExamLevel(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === '11'
+    || normalized === '12'
+    || /(?:form\s*[34]|grade\s*(?:11|12))/.test(normalized);
+}
 
 export interface ExamBlueprintSection {
   id: string;
@@ -156,6 +163,10 @@ export function validateExamRequest(request: ExamGenerationRequest): string[] {
   if (request.totalMarks < 5 || request.totalMarks > 200) errors.push('Total marks must be between 5 and 200.');
   if (request.durationMinutes < 10 || request.durationMinutes > 240) errors.push('Duration must be between 10 and 240 minutes.');
   if (request.format === 'standard30' && request.totalMarks !== 30) errors.push('Standard Assessment papers must total exactly 30 marks.');
+  if (request.format === '844') {
+    if (!isForm344ExamLevel(request.gradeLevel)) errors.push('8-4-4 papers are available only for Form 3/Form 4 (Grade 11/12).');
+    if (request.totalMarks !== 100) errors.push('8-4-4 papers must total exactly 100 marks.');
+  }
   if (request.format === 'kjsea') {
     const expectedMarks = getKjseaPaperSpec(request.subject, normalizePaperVariant(request.paperVariant))?.marks ?? 100;
     if (request.totalMarks !== expectedMarks) errors.push(`This KJSEA paper must total exactly ${expectedMarks} marks.`);
@@ -175,6 +186,37 @@ export function validateExamRequest(request: ExamGenerationRequest): string[] {
 
 export function makeFormatBlueprint(format: ExamFormat, totalMarks: number, difficulty: Difficulty = 'mixed'): ExamBlueprint | undefined {
   const safeTotal = Math.max(1, Math.round(totalMarks));
+  if (format === '844') {
+    return {
+      sections: [
+        {
+          id: '844-objective',
+          title: 'Paper 1: Multiple Choice Questions',
+          question_type: 'multiple_choice',
+          count: 20,
+          marks_per_question: 1,
+          difficulty,
+        },
+        {
+          id: '844-structured',
+          title: 'Paper 2: Structured Questions',
+          question_type: 'short_answer',
+          count: 10,
+          marks_per_question: 3,
+          difficulty,
+        },
+        {
+          id: '844-extended',
+          title: 'Paper 2: Extended Response',
+          question_type: 'essay',
+          count: 5,
+          marks_per_question: 10,
+          difficulty,
+        },
+      ],
+      total_marks: safeTotal,
+    };
+  }
   if (format === 'standard30') {
     return {
       sections: [

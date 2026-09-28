@@ -20,6 +20,7 @@ import {
   type GeneratedExamQuestion,
   type QuestionType,
   type ExamPdfMode,
+  isForm344ExamLevel,
 } from '@/lib/exam-generator';
 import { renderExamVisualDataUrl } from '@/lib/exam-visuals';
 import { filterSubStrands, retainVisibleIds } from '@/lib/curriculum-selection';
@@ -84,6 +85,7 @@ interface ExamGeneratorProps {
 
 const formatOptions: Array<{ value: ExamFormat; label: string; description: string }> = [
   { value: 'standard30', label: 'Standard Assessment · 30 marks', description: '10 MCQs (1 mark each) + 4 structured questions (5 marks each)' },
+  { value: '844', label: '8-4-4 Form 3/4 · 100 marks', description: 'Kenyan 8-4-4 paper: objective, structured, and extended-response sections with a 100-mark total' },
   { value: 'kjsea', label: 'KJSEA format', description: 'Official subject paper structure, marks, duration, and section conventions' },
   { value: 'cbe', label: 'Legacy CBE Assessment', description: 'Compatibility option for previously saved papers' },
   { value: 'kpsea', label: 'Legacy KPSEA Practice', description: 'Compatibility option for previously saved papers' },
@@ -174,17 +176,19 @@ export default function ExamGenerator({
   }, [availableSubStrands]);
 
   const canGenerate = Boolean(gradeLevel && subject && selectedQuestionTypes.size);
+  const is844Level = isForm344ExamLevel(gradeLevel);
   const coveragePreview = useMemo(() => buildCoveragePlanFromRequest({
     strands: strands.filter((strand) => selectedStrands.has(strand.id)).map((strand) => strand.strand_name),
     subStrands: availableSubStrands.filter((subStrand) => selectedSubStrands.has(subStrand.id)).map((subStrand) => subStrand.sub_strand_name),
     curriculumScope,
     totalMarks,
-    blueprint: ['standard30', 'kpsea', 'kjsea'].includes(format) ? makeFormatBlueprint(format, totalMarks, difficulty) : undefined,
+    blueprint: ['standard30', '844', 'kpsea', 'kjsea'].includes(format) ? makeFormatBlueprint(format, totalMarks, difficulty) : undefined,
   }), [strands, selectedStrands, availableSubStrands, selectedSubStrands, curriculumScope, totalMarks, format, difficulty]);
   const coverageNote = useMemo(() => coverageInstruction(coveragePreview), [coveragePreview]);
   const selectedFormatDescription = formatOptions.find((option) => option.value === format)?.description || '';
 
   function handleFormatChange(nextFormat: ExamFormat) {
+    if (is844Level && nextFormat !== '844') return;
     setFormat(nextFormat);
     if (nextFormat === 'standard30') {
       setTotalMarks(30);
@@ -200,6 +204,11 @@ export default function ExamGenerator({
       setDurationMinutes(kjseaSpec?.duration_minutes ?? 150);
       setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice', 'case_study']));
       setIncludeImages(true);
+    } else if (nextFormat === '844') {
+      setTotalMarks(100);
+      setDurationMinutes(180);
+      setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice', 'short_answer', 'essay']));
+      setIncludeImages(true);
     }
   }
 
@@ -208,6 +217,15 @@ export default function ExamGenerator({
     setSelectedStrands(new Set());
     setSelectedSubStrands(new Set());
   }, [gradeLevel, subject]);
+
+  useEffect(() => {
+    if (!is844Level) return;
+    setFormat('844');
+    setTotalMarks(100);
+    setDurationMinutes(180);
+    setDurationSource('standard');
+    setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice', 'short_answer', 'essay']));
+  }, [is844Level]);
 
   useEffect(() => {
     let alive = true;
@@ -229,7 +247,7 @@ export default function ExamGenerator({
     const kjseaSpec = format === 'kjsea' && supportsTwoPapers(subject)
       ? getKjseaPaperSpec(subject, paperVariant)
       : null;
-    const kicdMinutes = kjseaSpec?.duration_minutes ?? gradeExact ?? fallbackMinutes;
+    const kicdMinutes = format === '844' ? (gradeExact || 180) : kjseaSpec?.duration_minutes ?? gradeExact ?? fallbackMinutes;
     if (kicdMinutes) {
       setDurationMinutes(kicdMinutes);
       setDurationSource('kicd');
@@ -237,7 +255,8 @@ export default function ExamGenerator({
       setDurationSource('standard');
     }
     const kicdMarks = defaultExamMarks(paperDefaults, subject, gradeLevel, paperVariant);
-    if (kjseaSpec) setTotalMarks(kjseaSpec.marks);
+    if (format === '844') setTotalMarks(100);
+    else if (kjseaSpec) setTotalMarks(kjseaSpec.marks);
     else if (kicdMarks) setTotalMarks(kicdMarks);
   }, [paperDefaults, subject, gradeLevel, paperVariant, format]);
 
@@ -381,7 +400,7 @@ export default function ExamGenerator({
         topics: [],
         curriculumScope,
         questionTypes: Array.from(selectedQuestionTypes),
-        totalMarks: kjseaSpec?.marks ?? totalMarks,
+        totalMarks: format === '844' ? 100 : kjseaSpec?.marks ?? totalMarks,
         durationMinutes: kjseaSpec?.duration_minutes ?? durationMinutes,
         difficulty,
         includeImages,
@@ -390,7 +409,9 @@ export default function ExamGenerator({
         term,
         schoolName,
         paperVariant: variant === 'single' ? undefined : variant,
-        blueprint: format === 'kjsea' && kjseaSpec
+        blueprint: format === '844'
+          ? makeFormatBlueprint('844', 100, difficulty)
+          : format === 'kjsea' && kjseaSpec
           ? makeKjseaBlueprint(subject, variant, difficulty)
           : ['standard30', 'kpsea'].includes(format)
           ? makeFormatBlueprint(format, totalMarks, difficulty)
@@ -612,7 +633,7 @@ export default function ExamGenerator({
               <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={`${subject || 'Subject'} ${gradeLevel || 'Grade'} Assessment`} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100" />
             </label>
             <label className="block text-xs font-semibold text-slate-700">Assessment format
-              <select value={format} onChange={(event) => handleFormatChange(event.target.value as ExamFormat)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100">
+              <select value={format} disabled={is844Level} onChange={(event) => handleFormatChange(event.target.value as ExamFormat)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70">
                 {formatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               <span className="mt-1 block text-[11px] font-normal leading-4 text-slate-500">{selectedFormatDescription}</span>
@@ -655,7 +676,7 @@ export default function ExamGenerator({
               </select>
             </label>
             <label className="block text-xs font-semibold text-slate-700">Total marks
-              <select value={totalMarks} disabled={['standard30', 'kjsea'].includes(format)} onChange={(event) => setTotalMarks(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70">
+              <select value={totalMarks} disabled={['standard30', '844', 'kjsea'].includes(format)} onChange={(event) => setTotalMarks(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70">
                 {[10, 20, 30, 50, 60, 80, 100].map((marks) => <option key={marks} value={marks}>{marks} marks</option>)}
               </select>
             </label>
@@ -691,7 +712,7 @@ export default function ExamGenerator({
             <div className="grid gap-2 sm:grid-cols-2">
               {CBC_QUESTION_TYPES.map((type) => (
                 <label key={type.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent bg-white px-2.5 py-2 text-xs text-slate-700 transition hover:border-red-100 hover:bg-red-50">
-                  <input type="checkbox" checked={selectedQuestionTypes.has(type.value)} disabled={['standard30', 'kjsea'].includes(format)} onChange={() => setSelectedQuestionTypes((current) => toggleValue(current, type.value))} className="rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50" />
+                  <input type="checkbox" checked={selectedQuestionTypes.has(type.value)} disabled={['standard30', '844', 'kjsea'].includes(format)} onChange={() => setSelectedQuestionTypes((current) => toggleValue(current, type.value))} className="rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50" />
                   <span className="flex-1">{type.label}</span><span className="text-slate-400">{type.defaultMarks}m</span>
                 </label>
               ))}

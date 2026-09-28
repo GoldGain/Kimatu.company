@@ -22,6 +22,7 @@ import {
   makeBalancedBlueprint,
   makeFormatBlueprint,
   makePaperVariantBlueprint,
+  isForm344ExamLevel,
   ExamBlueprintSection,
 } from '../src/lib/exam-schema.js';
 import { filterUnnecessaryExamVisual, withRenderedExamVisual } from '../src/lib/exam-visuals.js';
@@ -167,7 +168,7 @@ function parseExamRequest(raw: unknown): ExamGenerationRequest | null {
   const durationMinutes = Number(body.durationMinutes);
   const difficulty = body.difficulty === 'easy' || body.difficulty === 'medium' || body.difficulty === 'hard' || body.difficulty === 'mixed'
     ? body.difficulty : 'mixed';
-  const format = body.format === 'standard30' || body.format === 'cbe' || body.format === 'kpsea' || body.format === 'kjsea' || body.format === 'custom'
+  const format = body.format === 'standard30' || body.format === '844' || body.format === 'cbe' || body.format === 'kpsea' || body.format === 'kjsea' || body.format === 'custom'
     ? body.format : 'cbe';
   return {
     title: typeof body.title === 'string' ? body.title.trim().slice(0, 255) : undefined,
@@ -350,11 +351,20 @@ async function handleExamGeneration(
   user: { id: string; email?: string; user_metadata?: Record<string, unknown> },
   request: RequestLike,
 ): Promise<void> {
-  const rawParsedRequest = parseExamRequest(parseBody(request.body));
-  if (!rawParsedRequest) {
+  const parsedBodyRequest = parseExamRequest(parseBody(request.body));
+  if (!parsedBodyRequest) {
     jsonError(response, 400, 'Invalid exam-generation request.');
     return;
   }
+  const rawParsedRequest: ExamGenerationRequest = isForm344ExamLevel(parsedBodyRequest.gradeLevel)
+    ? {
+        ...parsedBodyRequest,
+        format: '844',
+        totalMarks: 100,
+        durationMinutes: 180,
+        blueprint: makeFormatBlueprint('844', 100, parsedBodyRequest.difficulty),
+      }
+    : parsedBodyRequest;
   const paperVariant = supportsTwoPapers(rawParsedRequest.subject)
     ? normalizePaperVariant(rawParsedRequest.paperVariant)
     : 'single';
@@ -369,7 +379,7 @@ async function handleExamGeneration(
         blueprint: makeKjseaBlueprint(rawParsedRequest.subject, paperVariant, rawParsedRequest.difficulty)
           || makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty),
       }
-    : ['standard30', 'kpsea'].includes(rawParsedRequest.format)
+    : ['standard30', '844', 'kpsea'].includes(rawParsedRequest.format)
     ? { ...rawParsedRequest, blueprint: makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty) }
     : rawParsedRequest.blueprint
     ? rawParsedRequest

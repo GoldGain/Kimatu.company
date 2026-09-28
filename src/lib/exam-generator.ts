@@ -36,6 +36,7 @@ export {
   allocateQuestionBlueprint,
   makeBalancedBlueprint,
   makeFormatBlueprint,
+  isForm344ExamLevel,
 } from './exam-schema';
 export type {
   Difficulty,
@@ -54,6 +55,7 @@ type BrandedPaper = ExamPaper & { school_logo_url?: string | null };
 
 function formatLabel(format: ExamFormat): string {
   if (format === 'standard30') return 'STANDARD CBE ASSESSMENT';
+  if (format === '844') return 'KENYAN 8-4-4 FORM 3/4 PAPER';
   if (format === 'kpsea') return 'KPSEA-STYLE SCHOOL PRACTICE PAPER';
   if (format === 'kjsea') return 'KJSEA-STYLE SCHOOL PRACTICE PAPER';
   if (format === 'cbe') return 'CBE SCHOOL-BASED ASSESSMENT';
@@ -74,7 +76,7 @@ function groupedQuestions(paper: BrandedPaper): Array<{ type: QuestionType; ques
 }
 
 function isFormalPracticeFormat(paper: BrandedPaper): boolean {
-  return paper.format === 'standard30' || paper.format === 'kpsea' || paper.format === 'kjsea';
+  return paper.format === 'standard30' || paper.format === '844' || paper.format === 'kpsea' || paper.format === 'kjsea';
 }
 
 function isObjectiveKpseaPaper(paper: BrandedPaper): boolean {
@@ -119,6 +121,13 @@ function formatSpecificInstructions(paper: BrandedPaper): string[] {
       'Answer all questions.',
       'Choose one correct answer for each multiple-choice question.',
       'Show your working and write clear responses for structured questions.',
+    ];
+  }
+  if (paper.format === '844') {
+    return [
+      'Answer all questions in the spaces provided.',
+      'Show all working and write clear, well-organized responses.',
+      'The paper is marked out of 100 and follows the Kenyan 8-4-4 Form 3/Form 4 structure.',
     ];
   }
   return [];
@@ -393,7 +402,7 @@ function addStructuredSubParts(doc: jsPDF, paper: BrandedPaper, question: Genera
   doc.setFontSize(paper.format === 'kjsea' ? 8.2 : 8.8);
   for (const part of question.sub_parts) {
     const marks = `  [${part.marks} mark${part.marks === 1 ? '' : 's'}]`;
-    const lines = doc.splitTextToSize(`${part.label} ${part.prompt}${paper.format === 'standard30' ? marks : ''}`, textWidth);
+    const lines = doc.splitTextToSize(`${part.label} ${part.prompt}${paper.format === 'standard30' || paper.format === '844' ? marks : ''}`, textWidth);
     y = ensureRoom(doc, paper, y, lines.length * 4.2 + 4, subtitle);
     doc.text(lines, 19, y);
     y += lines.length * 4.2 + 2;
