@@ -218,7 +218,7 @@ export default function TeacherResultsUpload({ privileged = false }: { privilege
 
   const currentClassData = classes.find((c: any) => c.id === selectedClass);
   const currentBand = getSchoolLevelBand(currentClassData);
-  const currentGradeLabel = gradeDisplayLabel(currentBand);
+  const currentGradeLabel = gradeDisplayLabel(currentBand, currentClassData);
 
   const assignedSubjectsForClass = useMemo(() => {
     if (!selectedClass) return [] as { id: string; name: string }[];
@@ -348,7 +348,7 @@ export default function TeacherResultsUpload({ privileged = false }: { privilege
       'Percentage (%)': row.percentage,
       [currentGradeLabel]: getMainGrade(row),
       Points: getMainPoints(row),
-      Descriptor: row.cbcGrade.descriptor,
+      Descriptor: is844Class && row.grade844 ? row.grade844.descriptor : row.cbcGrade.descriptor,
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Results');
@@ -647,7 +647,7 @@ export default function TeacherResultsUpload({ privileged = false }: { privilege
       'Percentage (%)': row.percentage,
       [currentGradeLabel]: getMainGrade(row),
       Points: getMainPoints(row),
-      Descriptor: row.cbcGrade.descriptor,
+      Descriptor: is844Class && row.grade844 ? row.grade844.descriptor : row.cbcGrade.descriptor,
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Results');
