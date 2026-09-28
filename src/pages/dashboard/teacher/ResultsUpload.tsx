@@ -663,7 +663,7 @@ export default function TeacherResultsUpload({ privileged = false }: { privilege
 
   // Band label for display
   const isPP = /playgroup|pp1|pp2|pre.?primary/i.test(currentClassData?.name || '');
-  const bandLabel = currentBand === '' ? ' (Form 3–4)' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : (isPP ? 'Pre-Primary CBE (Playgroup, PP1–PP2)' : 'Primary CBE (Gr 1–6)');
+  const bandLabel = is844Class ? '8-4-4 (Forms 3–4)' : currentBand === '' ? 'Curriculum not set' : currentBand === 'senior' ? 'Senior CBE (Gr 10–12)' : currentBand === 'junior' ? 'Junior CBE (Gr 7–9)' : (isPP ? 'Pre-Primary CBE (Playgroup, PP1–PP2)' : 'Primary CBE (Gr 1–6)');
 
   return (
     <div className="space-y-6">
