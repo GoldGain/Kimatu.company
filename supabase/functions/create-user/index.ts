@@ -63,13 +63,63 @@ Deno.serve(async (req) => {
 
     // Parse request body
     const body = await req.json();
-    const { email, password, first_name, last_name, role, school_id, metadata } = body;
+    const { email, password, first_name, last_name, role, school_id, metadata, admission_number, assessment_number, class_id } = body;
 
     if (!email || !password || !role) {
       return new Response(JSON.stringify({ error: "Missing required fields: email, password, role" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Learner accounts are keyed by assessment number. Admission numbers remain
+    // optional display identifiers and must never become login credentials.
+    const effectiveAssessmentNumber = String(assessment_number || metadata?.assessment_number || '').trim();
+    console.log(`Creating user: role=${role}, email=${email}, assessment=${effectiveAssessmentNumber}`);
+
+    if (["learner", "student"].includes(role) && !effectiveAssessmentNumber) {
+      return new Response(JSON.stringify({ error: "Assessment number is required for learner accounts", code: "ASSESSMENT_NUMBER_REQUIRED" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (["learner", "student"].includes(role) && effectiveAssessmentNumber) {
+      const tempAdminClient = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      // Assessment numbers are unique within a school, independent of class.
+      const { data: existingStudent, error: checkError } = await tempAdminClient
+        .from("students")
+        .select("id, assessment_number")
+        .eq("assessment_number", effectiveAssessmentNumber)
+        .eq("school_id", school_id || callerProfile.school_id)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== "PGRST116") {
+        console.error("Database error checking assessment number:", checkError);
+        return new Response(JSON.stringify({ error: "Database error checking assessment number" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (existingStudent) {
+        console.warn(`Duplicate assessment number found: ${effectiveAssessmentNumber}`);
+        return new Response(
+          JSON.stringify({
+            error: `Assessment number ${effectiveAssessmentNumber} already exists in this school`,
+            code: "DUPLICATE_ASSESSMENT_NUMBER"
+          }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+    } else {
+      console.log("Skipping learner assessment duplicate check for a non-learner role");
     }
 
     // Use service role client to create user (does NOT change current session)
@@ -89,6 +139,9 @@ Deno.serve(async (req) => {
         last_name: last_name || "",
         role: role,
         school_id: school_id || callerProfile.school_id,
+        admission_number: admission_number || null,
+        assessment_number: effectiveAssessmentNumber || null,
+        class_id: class_id || null,
         ...metadata,
       },
     });
@@ -101,9 +154,9 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         user: { id: newUser.user?.id, email: newUser.user?.email },
-        message: "User created successfully" 
+        message: "User created successfully"
       }),
       {
         status: 200,

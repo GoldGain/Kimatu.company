@@ -22,7 +22,27 @@ import {
   type ExamPdfMode,
 } from '@/lib/exam-generator';
 import { renderExamVisualDataUrl } from '@/lib/exam-visuals';
-import { filterSubStrands, filterTopics, retainVisibleIds } from '@/lib/curriculum-selection';
+import { filterSubStrands, retainVisibleIds } from '@/lib/curriculum-selection';
+import {
+  buildCoveragePlanFromRequest,
+  coverageInstruction,
+  supportsTwoPapers,
+} from '@/lib/exam-construction';
+import {
+  getKjseaPaperSpec,
+  makeKjseaBlueprint,
+  type KJSEACardVariant,
+} from '@/lib/kjsea-paper-formats';
+
+import {
+  defaultExamDuration,
+  defaultExamMarks,
+  fetchPaperDefaults,
+  type PaperDefault,
+  defaultExamDurationStrict,
+} from '@/lib/kicd-defaults';
+
+type UiPaperVariant = 'single' | 'paper1' | 'paper2' | 'both';
 
 export interface CurriculumTopicOption {
   id: string;
@@ -59,16 +79,15 @@ interface ExamGeneratorProps {
   schoolName?: string;
   schoolId?: string;
   strands: CurriculumStrandOption[];
-  topics: CurriculumTopicOption[];
-  initialTopic?: string;
   onGenerated?: (paper: ExamPaper) => void;
 }
 
 const formatOptions: Array<{ value: ExamFormat; label: string; description: string }> = [
-  { value: 'cbe', label: 'CBE Class Assessment', description: 'Competency-based classroom assessment' },
-  { value: 'kpsea', label: 'KPSEA Practice', description: 'Primary assessment practice format' },
-  { value: 'kjsea', label: 'KJSEA Practice', description: 'Junior School assessment practice format' },
-  { value: 'custom', label: 'Custom School Paper', description: 'Flexible internal assessment' },
+  { value: 'standard30', label: 'Standard Assessment · 30 marks', description: '10 MCQs (1 mark each) + 4 structured questions (5 marks each)' },
+  { value: 'kjsea', label: 'KJSEA format', description: 'Official subject paper structure, marks, duration, and section conventions' },
+  { value: 'cbe', label: 'Legacy CBE Assessment', description: 'Compatibility option for previously saved papers' },
+  { value: 'kpsea', label: 'Legacy KPSEA Practice', description: 'Compatibility option for previously saved papers' },
+  { value: 'custom', label: 'Legacy Custom Paper', description: 'Compatibility option for previously saved papers' },
 ];
 
 function toggleValue<T>(current: Set<T>, value: T): Set<T> {
@@ -89,30 +108,36 @@ function questionBadgeClass(type: QuestionType): string {
   return 'bg-emerald-50 text-emerald-700 border-emerald-100';
 }
 
+function kjseaDurationLabel(minutes: number): string {
+  return minutes > 0 ? `${minutes} min` : 'project window';
+}
+
 export default function ExamGenerator({
   gradeLevel,
   subject,
   schoolName,
   schoolId,
   strands,
-  topics,
-  initialTopic,
   onGenerated,
 }: ExamGeneratorProps) {
   const [title, setTitle] = useState('');
   const [term, setTerm] = useState('Term 1');
-  const [format, setFormat] = useState<ExamFormat>('cbe');
-  const [totalMarks, setTotalMarks] = useState(50);
-  const [durationMinutes, setDurationMinutes] = useState(60);
+  const [format, setFormat] = useState<ExamFormat>('standard30');
+  const [totalMarks, setTotalMarks] = useState(30);
+  const [durationMinutes, setDurationMinutes] = useState(45);
+  // Where the current Duration came from: 'kicd' when it is the published KNEC
+  // time for this subject and paper, 'standard' for the internal 30-mark
+  // default, and 'manual' once an admin chooses their own value.
+  const [durationSource, setDurationSource] = useState<'kicd' | 'standard' | 'manual'>('standard');
   const [difficulty, setDifficulty] = useState<Difficulty>('mixed');
   const [selectedStrands, setSelectedStrands] = useState<Set<string>>(new Set());
   const [selectedSubStrands, setSelectedSubStrands] = useState<Set<string>>(new Set());
-  const [selectedTopics, setSelectedTopics] = useState<Set<string>>(new Set());
   const [selectedQuestionTypes, setSelectedQuestionTypes] = useState<Set<QuestionType>>(
-    new Set<QuestionType>(['multiple_choice', 'short_answer', 'essay']),
+    new Set<QuestionType>(['multiple_choice', 'short_answer']),
   );
   const [includeImages, setIncludeImages] = useState(true);
   const [includeMarkingScheme, setIncludeMarkingScheme] = useState(true);
+  const [paperVariant, setPaperVariant] = useState<UiPaperVariant>('single');
   const [generating, setGenerating] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [uploadingQuestionId, setUploadingQuestionId] = useState<string | null>(null);
@@ -122,13 +147,12 @@ export default function ExamGenerator({
   const [approvingPaper, setApprovingPaper] = useState(false);
   const [openingPaper, setOpeningPaper] = useState<string | null>(null);
 
-  const availableSubStrands = useMemo(() => selectedStrands.size > 0 ? filterSubStrands(strands, selectedStrands) : [], [selectedStrands, strands]);
-  const availableTopics = useMemo(() => {
-    if (selectedSubStrands.size > 0) return filterTopics(topics, selectedStrands, selectedSubStrands);
-    if (selectedStrands.size > 0) return filterTopics(topics, selectedStrands, new Set());
-    return [];
-  }, [selectedStrands, selectedSubStrands, topics]);
+  // KICD/KNEC paper defaults. These pre-fill the paper time (and marks, where KNEC
+  // publishes them) for the selected learning area, grade and paper type. The
+  // controls stay editable and the generator's own logic is untouched.
+  const [paperDefaults, setPaperDefaults] = useState<PaperDefault[]>([]);
 
+  const availableSubStrands = useMemo(() => selectedStrands.size > 0 ? filterSubStrands(strands, selectedStrands) : [], [selectedStrands, strands]);
   const curriculumScope = useMemo(() => {
     if (selectedStrands.size === 0) return [];
     return strands
@@ -137,37 +161,44 @@ export default function ExamGenerator({
         const visibleSubStrands = (strand.sub_strands || [])
           .filter((subStrand) => selectedSubStrands.size === 0 || selectedSubStrands.has(subStrand.id));
         const visibleSubStrandIds = new Set(visibleSubStrands.map((subStrand) => subStrand.id));
-        const visibleTopics = availableTopics.filter((topic) => (
-          topic.strand_id === strand.id
-          && (!selectedSubStrands.size || Boolean(topic.sub_strand_id && visibleSubStrandIds.has(topic.sub_strand_id)))
-          && (!selectedTopics.size || selectedTopics.has(topic.id))
-        ));
         return {
           strand: strand.strand_name,
           subStrands: visibleSubStrands.map((subStrand) => subStrand.sub_strand_name),
-          topics: visibleTopics.map((topic) => topic.topic_name),
+          topics: [],
         };
       });
-  }, [availableTopics, selectedStrands, selectedSubStrands, selectedTopics, strands]);
+  }, [selectedStrands, selectedSubStrands, strands]);
 
   useEffect(() => {
     setSelectedSubStrands((current) => retainVisibleIds(current, availableSubStrands.map((subStrand) => subStrand.id)));
   }, [availableSubStrands]);
 
-  useEffect(() => {
-    setSelectedTopics((current) => retainVisibleIds(current, availableTopics.map((topic) => topic.id)));
-  }, [availableTopics]);
-
   const canGenerate = Boolean(gradeLevel && subject && selectedQuestionTypes.size);
+  const coveragePreview = useMemo(() => buildCoveragePlanFromRequest({
+    strands: strands.filter((strand) => selectedStrands.has(strand.id)).map((strand) => strand.strand_name),
+    subStrands: availableSubStrands.filter((subStrand) => selectedSubStrands.has(subStrand.id)).map((subStrand) => subStrand.sub_strand_name),
+    curriculumScope,
+    totalMarks,
+    blueprint: ['standard30', 'kpsea', 'kjsea'].includes(format) ? makeFormatBlueprint(format, totalMarks, difficulty) : undefined,
+  }), [strands, selectedStrands, availableSubStrands, selectedSubStrands, curriculumScope, totalMarks, format, difficulty]);
+  const coverageNote = useMemo(() => coverageInstruction(coveragePreview), [coveragePreview]);
   const selectedFormatDescription = formatOptions.find((option) => option.value === format)?.description || '';
 
   function handleFormatChange(nextFormat: ExamFormat) {
     setFormat(nextFormat);
-    if (nextFormat === 'kpsea') {
+    if (nextFormat === 'standard30') {
+      setTotalMarks(30);
+      setDurationMinutes(45);
+      setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice', 'short_answer']));
+      setIncludeImages(true);
+    } else if (nextFormat === 'kpsea') {
       setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice']));
       setIncludeImages(true);
     } else if (nextFormat === 'kjsea') {
-      setSelectedQuestionTypes(new Set<QuestionType>(['case_study']));
+      const kjseaSpec = getKjseaPaperSpec(subject, paperVariant);
+      setTotalMarks(kjseaSpec?.marks ?? 100);
+      setDurationMinutes(kjseaSpec?.duration_minutes ?? 150);
+      setSelectedQuestionTypes(new Set<QuestionType>(['multiple_choice', 'case_study']));
       setIncludeImages(true);
     }
   }
@@ -176,18 +207,39 @@ export default function ExamGenerator({
     setPaper(null);
     setSelectedStrands(new Set());
     setSelectedSubStrands(new Set());
-    setSelectedTopics(new Set());
   }, [gradeLevel, subject]);
 
   useEffect(() => {
-    if (!initialTopic || !topics.length) return;
-    const requested = initialTopic.toLowerCase().trim();
-    const match = topics.find((topic) => topic.topic_name.toLowerCase().trim() === requested);
-    if (!match) return;
-    if (match.strand_id) setSelectedStrands(new Set([match.strand_id]));
-    if (match.sub_strand_id) setSelectedSubStrands(new Set([match.sub_strand_id]));
-    setSelectedTopics(new Set([match.id]));
-  }, [initialTopic, topics]);
+    let alive = true;
+    void (async () => {
+      const defaults = await fetchPaperDefaults(supabaseUntyped);
+      if (alive) setPaperDefaults(defaults);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // Published KNEC times pre-fill the paper time. For an internal 30-mark
+  // assessment only a time published for that exact grade is used, so a KJSEA
+  // full-paper time is never carried onto a shorter internal paper.
+  useEffect(() => {
+    const gradeExact = defaultExamDurationStrict(paperDefaults, subject, gradeLevel, paperVariant);
+    const fallbackMinutes = format === 'kjsea'
+      ? defaultExamDuration(paperDefaults, subject, gradeLevel, paperVariant)
+      : null;
+    const kjseaSpec = format === 'kjsea' && supportsTwoPapers(subject)
+      ? getKjseaPaperSpec(subject, paperVariant)
+      : null;
+    const kicdMinutes = kjseaSpec?.duration_minutes ?? gradeExact ?? fallbackMinutes;
+    if (kicdMinutes) {
+      setDurationMinutes(kicdMinutes);
+      setDurationSource('kicd');
+    } else {
+      setDurationSource('standard');
+    }
+    const kicdMarks = defaultExamMarks(paperDefaults, subject, gradeLevel, paperVariant);
+    if (kjseaSpec) setTotalMarks(kjseaSpec.marks);
+    else if (kicdMarks) setTotalMarks(kicdMarks);
+  }, [paperDefaults, subject, gradeLevel, paperVariant, format]);
 
   useEffect(() => {
     if (!schoolId) return;
@@ -231,7 +283,7 @@ export default function ExamGenerator({
         if (!row) throw new Error(`Question ${index + 1} could not be loaded from the saved paper.`);
         const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
         const visualSpec = metadata.visual_spec && typeof metadata.visual_spec === 'object' ? metadata.visual_spec : null;
-        const loadedQuestion = {
+          const loadedQuestion = {
           id: row.id,
           question_number: index + 1,
           question_type: row.question_type,
@@ -240,6 +292,7 @@ export default function ExamGenerator({
           correct_answer: row.correct_answer || '',
           marking_scheme: row.marking_scheme || '',
           marks: Number(row.marks || 1),
+          sub_parts: Array.isArray(metadata.sub_parts) ? metadata.sub_parts : undefined,
           difficulty: row.difficulty || 'medium',
           strand: row.strand || undefined,
           sub_strand: row.sub_strand || undefined,
@@ -314,24 +367,32 @@ export default function ExamGenerator({
       const token = sessionData.session?.access_token;
       if (!token) throw new Error('Your session has expired. Please sign in again.');
 
+      const variants: Array<'single' | 'paper1' | 'paper2'> = paperVariant === 'both' ? ['paper1', 'paper2'] : [paperVariant];
+      const generatedPapers: ExamPaper[] = [];
+      const repairNotices: string[] = [];
+      for (const variant of variants) {
+      const kjseaSpec = format === 'kjsea' ? getKjseaPaperSpec(subject, variant) : null;
       const request: ExamGenerationRequest = {
         title,
         gradeLevel,
         subject,
         strands: strands.filter((strand) => selectedStrands.has(strand.id)).map((strand) => strand.strand_name),
         subStrands: availableSubStrands.filter((subStrand) => selectedSubStrands.has(subStrand.id)).map((subStrand) => subStrand.sub_strand_name),
-        topics: availableTopics.filter((topic) => selectedTopics.has(topic.id)).map((topic) => topic.topic_name),
+        topics: [],
         curriculumScope,
         questionTypes: Array.from(selectedQuestionTypes),
-        totalMarks,
-        durationMinutes,
+        totalMarks: kjseaSpec?.marks ?? totalMarks,
+        durationMinutes: kjseaSpec?.duration_minutes ?? durationMinutes,
         difficulty,
         includeImages,
         includeMarkingScheme,
         format,
         term,
         schoolName,
-        blueprint: ['kpsea', 'kjsea'].includes(format)
+        paperVariant: variant === 'single' ? undefined : variant,
+        blueprint: format === 'kjsea' && kjseaSpec
+          ? makeKjseaBlueprint(subject, variant, difficulty)
+          : ['standard30', 'kpsea'].includes(format)
           ? makeFormatBlueprint(format, totalMarks, difficulty)
           : makeBalancedBlueprint(Array.from(selectedQuestionTypes), totalMarks, difficulty),
       };
@@ -342,12 +403,26 @@ export default function ExamGenerator({
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(payload));
+      // The paper may have been repaired on the way here. Tell the author what
+      // changed instead of failing the run.
+      const repairInfo = (payload as { repair?: { status?: string; message?: string } } | null)?.repair;
+      if (repairInfo?.status === 'repaired' && repairInfo.message) repairNotices.push(repairInfo.message);
       const generated = payload?.paper as ExamPaper | undefined;
       if (!generated?.questions?.length) throw new Error('The exam service returned no questions.');
+      generatedPapers.push(generated);
       setPaper(generated);
       onGenerated?.(generated);
       await loadRecentPapers();
-      toast.success(`${generated.questions.length} questions generated and saved securely.`);
+      }
+      const summary = generatedPapers.length > 1
+        ? `${generatedPapers.length} papers (${generatedPapers.map((entry) => entry.title).join(', ')}) generated and saved securely.`
+        : `${generatedPapers[0].questions.length} questions generated and saved securely.`;
+      if (repairNotices.length) {
+        // Non-blocking: the paper saved successfully, it just needed some repairs.
+        toast.info(repairNotices.join(' '));
+      } else {
+        toast.success(summary);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'The exam could not be generated.');
     } finally {
@@ -416,7 +491,7 @@ export default function ExamGenerator({
         body: JSON.stringify({
           title: `${paper?.title || subject} — replacement question`, gradeLevel, subject,
           strands: question.strand ? [question.strand] : [], subStrands: question.sub_strand ? [question.sub_strand] : [],
-          topics: question.topic ? [question.topic] : [], curriculumScope: question.strand ? [{ strand: question.strand, subStrands: question.sub_strand ? [question.sub_strand] : [], topics: question.topic ? [question.topic] : [] }] : [], questionTypes: [question.question_type],
+          topics: [], curriculumScope: question.strand ? [{ strand: question.strand, subStrands: question.sub_strand ? [question.sub_strand] : [], topics: [] }] : [], questionTypes: [question.question_type],
           totalMarks: question.marks, durationMinutes: Math.max(10, Math.min(30, durationMinutes)), difficulty: question.difficulty,
           includeImages: Boolean(question.visual_spec), includeMarkingScheme: true, format, term, schoolName,
           blueprint: { total_marks: question.marks, sections: [{ id: `replacement-${Date.now()}`, question_type: question.question_type, count: 1, marks_per_question: question.marks, difficulty: question.difficulty, strand: question.strand, sub_strand: question.sub_strand, topic: question.topic }] },
@@ -542,6 +617,33 @@ export default function ExamGenerator({
               </select>
               <span className="mt-1 block text-[11px] font-normal leading-4 text-slate-500">{selectedFormatDescription}</span>
             </label>
+            {supportsTwoPapers(subject) && (
+              <div className="sm:col-span-2 rounded-xl border border-red-100 bg-red-50/40 p-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">KJSEA paper selection</p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-500">Choose a source-backed paper structure. The cards show KNEC format metadata; generated questions remain original and are saved separately.</p>
+                  </div>
+                  <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-red-700">{paperVariant === 'both' ? '2 papers' : paperVariant === 'single' ? 'combined' : paperVariant.toUpperCase()}</span>
+                </div>
+                <div className="mt-3 grid gap-2 lg:grid-cols-4">
+                  {(['single', 'paper1', 'paper2', 'both'] as KJSEACardVariant[]).map((variant) => {
+                    const spec = getKjseaPaperSpec(subject, variant);
+                    if (!spec) return null;
+                    const selected = paperVariant === variant;
+                    const cardTitle = variant === 'both' ? 'Generate Paper 1 + Paper 2 separately' : spec.title;
+                    return (
+                      <button key={variant} type="button" aria-pressed={selected} onClick={() => setPaperVariant(variant as UiPaperVariant)} className={`rounded-xl border p-3 text-left transition ${selected ? 'border-red-500 bg-white shadow-sm ring-2 ring-red-100' : 'border-slate-200 bg-white hover:border-red-200 hover:bg-red-50/50'}`}>
+                        <div className="flex items-start justify-between gap-2"><span className="text-xs font-bold text-slate-800">{cardTitle}</span><span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${selected ? 'border-red-600 bg-red-600 text-white' : 'border-slate-300 text-transparent'}`}><Check className="h-3 w-3" /></span></div>
+                        <p className="mt-2 text-[11px] font-semibold text-red-700">{variant === 'both' ? `${spec.marks} marks total · ${kjseaDurationLabel(spec.duration_minutes)}` : `${spec.marks} marks · ${kjseaDurationLabel(spec.duration_minutes)}`}</p>
+                        <div className="mt-2 space-y-1 text-[10px] leading-4 text-slate-600">{spec.components.map((component) => <p key={`${variant}-${component.label}`}><span className="font-semibold text-slate-700">{component.label}:</span> {component.marks}m</p>)}</div>
+                        <p className="mt-2 text-[10px] leading-4 text-slate-500">{spec.code}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <label className="block text-xs font-semibold text-slate-700">Term
               <select value={term} onChange={(event) => setTerm(event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100">
                 <option>Term 1</option><option>Term 2</option><option>Term 3</option><option>End of Year</option>
@@ -553,17 +655,34 @@ export default function ExamGenerator({
               </select>
             </label>
             <label className="block text-xs font-semibold text-slate-700">Total marks
-              <select value={totalMarks} onChange={(event) => setTotalMarks(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100">
+              <select value={totalMarks} disabled={['standard30', 'kjsea'].includes(format)} onChange={(event) => setTotalMarks(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70">
                 {[10, 20, 30, 50, 60, 80, 100].map((marks) => <option key={marks} value={marks}>{marks} marks</option>)}
               </select>
             </label>
             <label className="block text-xs font-semibold text-slate-700">Duration
-              <select value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100">
-                {[30, 45, 60, 75, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
+              <select value={durationMinutes} onChange={(event) => { setDurationMinutes(Number(event.target.value)); setDurationSource('manual'); }} className={`mt-1.5 w-full rounded-lg border px-3 py-2 text-sm font-normal outline-none transition focus:ring-2 ${durationSource === 'kicd' ? 'border-green-400 bg-green-50 font-semibold text-green-800 focus:border-green-500 focus:ring-green-100' : 'border-slate-300 bg-white focus:border-red-500 focus:ring-red-100'}`}>
+                {Array.from(new Set([30, 45, 60, 75, 90, 100, 105, 120, 150, durationMinutes])).sort((a, b) => a - b).map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
               </select>
             </label>
+            {durationSource === 'kicd' && (
+              <p className="mt-1 text-[11px] font-medium text-green-700">KICD/KNEC published time for {subject}{gradeLevel ? ` · Grade ${gradeLevel}` : ''}. You can change it.</p>
+            )}
+            {durationSource === 'manual' && (
+              <p className="mt-1 text-[11px] text-slate-500">Custom value — the published KICD/KNEC time is not applied.</p>
+            )}
           </div>
 
+          {coveragePreview.length > 0 && (
+            <div className="mt-5 rounded-xl border border-slate-200 bg-white p-3.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Strand coverage for this paper</p>
+              <ul className="mt-2 space-y-1 text-[11px] leading-5 text-slate-600">
+                {coveragePreview.map((entry) => (
+                  <li key={entry.strand} className="flex items-start justify-between gap-2"><span>{entry.strand}</span><span className="font-semibold text-slate-700">{entry.questions} question{entry.questions === 1 ? '' : 's'}</span></li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">{coverageNote}</p>
+            </div>
+          )}
           <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
             <div className="mb-2 flex items-center justify-between gap-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Question types</p>
@@ -572,22 +691,19 @@ export default function ExamGenerator({
             <div className="grid gap-2 sm:grid-cols-2">
               {CBC_QUESTION_TYPES.map((type) => (
                 <label key={type.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent bg-white px-2.5 py-2 text-xs text-slate-700 transition hover:border-red-100 hover:bg-red-50">
-                  <input type="checkbox" checked={selectedQuestionTypes.has(type.value)} onChange={() => setSelectedQuestionTypes((current) => toggleValue(current, type.value))} className="rounded border-slate-300 text-red-600 focus:ring-red-500" />
+                  <input type="checkbox" checked={selectedQuestionTypes.has(type.value)} disabled={['standard30', 'kjsea'].includes(format)} onChange={() => setSelectedQuestionTypes((current) => toggleValue(current, type.value))} className="rounded border-slate-300 text-red-600 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-50" />
                   <span className="flex-1">{type.label}</span><span className="text-slate-400">{type.defaultMarks}m</span>
                 </label>
               ))}
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
             <SelectionPanel title="1. Strands" count={selectedStrands.size} description="Choose one or more broad curriculum areas." onSelectAll={() => setSelectedStrands(new Set(strands.map((strand) => strand.id)))} onClear={() => setSelectedStrands(new Set())}>
               {strands.length ? strands.map((strand) => <SelectableRow key={strand.id} checked={selectedStrands.has(strand.id)} label={strand.strand_name} onChange={() => setSelectedStrands((current) => toggleValue(current, strand.id))} />) : <EmptySelection label="Select a grade and subject first." />}
             </SelectionPanel>
             <SelectionPanel title="2. Sub-strands" count={selectedSubStrands.size} description={selectedStrands.size ? 'Filtered by the selected strands.' : 'Select a strand first to unlock sub-strands.'} onSelectAll={() => setSelectedSubStrands(new Set(availableSubStrands.map((subStrand) => subStrand.id)))} onClear={() => setSelectedSubStrands(new Set())}>
               {availableSubStrands.length ? availableSubStrands.map((subStrand) => <SelectableRow key={subStrand.id} checked={selectedSubStrands.has(subStrand.id)} label={subStrand.sub_strand_name} onChange={() => setSelectedSubStrands((current) => toggleValue(current, subStrand.id))} />) : <EmptySelection label="Select one or more strands first." />}
-            </SelectionPanel>
-            <SelectionPanel title="3. Topics" count={selectedTopics.size} description={selectedSubStrands.size ? 'Filtered by the selected sub-strands.' : selectedStrands.size ? 'Filtered by the selected strands; choose sub-strands to narrow further.' : 'Select a strand first, or leave curriculum choices empty for an all-curriculum paper.'} onSelectAll={() => setSelectedTopics(new Set(availableTopics.map((topic) => topic.id)))} onClear={() => setSelectedTopics(new Set())}>
-              {availableTopics.length ? availableTopics.map((topic) => <SelectableRow key={topic.id} checked={selectedTopics.has(topic.id)} label={topic.topic_name} onChange={() => setSelectedTopics((current) => toggleValue(current, topic.id))} />) : <EmptySelection label={selectedSubStrands.size || selectedStrands.size ? 'No topics are available inside the selected curriculum scope.' : 'Select a strand first to unlock topics.'} />}
             </SelectionPanel>
           </div>
 
@@ -671,9 +787,10 @@ function QuestionPreview({ question, index, includeImages, uploading, onAttach, 
       <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${questionBadgeClass(question.question_type)}`}>{question.marks}m</span>
     </div>
     {validationIssues.length > 0 && <div className="mt-2 space-y-1">{validationIssues.map((issue) => <p key={issue.code} className={`flex items-start gap-1 text-[11px] leading-4 ${issue.severity === 'critical' ? 'text-red-700' : issue.severity === 'warning' ? 'text-amber-700' : 'text-blue-700'}`}>{issue.severity === 'critical' ? <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> : <Eye className="mt-0.5 h-3 w-3 shrink-0" />}{issue.message}</p>)}</div>}
+    {question.sub_parts?.length ? <div className="mt-2 space-y-1.5 rounded-lg border border-violet-100 bg-violet-50/60 p-2.5">{question.sub_parts.map((part, partIndex) => <p key={`${part.label}-${partIndex}`} className="text-xs leading-5 text-slate-700"><span className="font-semibold">{part.label}</span> {part.prompt} <span className="font-semibold text-violet-700">[{part.marks}m]</span></p>)}</div> : null}
     {options.length > 0 && <div className="mt-2 grid gap-1 sm:grid-cols-2">{options.map((option, optionIndex) => <p key={`${option}-${optionIndex}`} className="rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">{String.fromCharCode(65 + optionIndex)}. {option}</p>)}</div>}
     {question.image_url ? <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2"><img src={question.image_url} alt={visualCaption || `Automatically rendered visual for question ${index + 1}`} className="max-h-48 w-full rounded object-contain" />{visualCaption && <p className="mt-1 text-center text-[11px] italic text-slate-500">{visualCaption}</p>}</div> : includeImages ? <div className="mt-3 space-y-2"><div className="rounded-lg border border-dashed border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">Automatic visual pending or not required for this question.</div><label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 hover:border-red-300 hover:bg-red-50"><input type="file" accept="image/*" className="sr-only" disabled={uploading} onChange={(event) => onAttach(event.target.files?.[0])} />{uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}{uploading ? 'Attaching image…' : 'Attach school-owned visual as a fallback'}</label></div> : null}
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5"><div className="flex flex-wrap items-center gap-1.5"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${questionBadgeClass(question.question_type)}`}>{questionTypeLabel(question.question_type)}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${question.review_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : question.review_status === 'flagged' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{question.review_status || 'draft'}</span></div><div className="flex flex-wrap items-center gap-1.5"><button type="button" onClick={() => setShowMarking((current) => !current)} className="text-[11px] font-semibold text-red-600 hover:text-red-700">{showMarking ? 'Hide marking' : 'View marking'}</button>{editing ? <><button type="button" onClick={() => { onEdit(draftStem); setEditing(false); }} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white"><Save className="h-3 w-3" />Save</button><button type="button" onClick={() => { setDraftStem(question.question_text); setEditing(false); }} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600"><X className="h-3 w-3" />Cancel</button></> : <button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600"><Edit3 className="h-3 w-3" />Edit</button>}<button type="button" onClick={() => void handleRegenerate()} disabled={busy} className="inline-flex items-center gap-1 rounded-md border border-violet-200 px-2 py-1 text-[11px] font-semibold text-violet-700 disabled:opacity-60"><RefreshCw className={`h-3 w-3 ${busy ? 'animate-spin' : ''}`} />Regenerate</button><button type="button" onClick={() => onReview('approved')} className="inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700"><Check className="h-3 w-3" />Approve</button><button type="button" onClick={() => onReview('flagged')} className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-700"><Flag className="h-3 w-3" />Flag</button></div></div>
-    {showMarking && <div className="mt-2 rounded-lg bg-emerald-50 p-2.5 text-xs leading-5 text-emerald-900"><p className="font-semibold">Expected response</p><p>{question.marking_scheme || question.correct_answer}</p>{question.learning_outcome && <p className="mt-1"><strong>Learning outcome:</strong> {question.learning_outcome}</p>}{question.competency && <p><strong>Competency:</strong> {question.competency}</p>}</div>}
+    {showMarking && <div className="mt-2 rounded-lg bg-emerald-50 p-2.5 text-xs leading-5 text-emerald-900"><p className="font-semibold">Expected response</p>{question.sub_parts?.length ? question.sub_parts.map((part, partIndex) => <p key={`${part.label}-${partIndex}`}><strong>{part.label}</strong> {part.marking_scheme || part.correct_answer || 'Award for a correct response.'} <span className="font-semibold">[{part.marks}m]</span></p>) : <p>{question.marking_scheme || question.correct_answer}</p>}{question.learning_outcome && <p className="mt-1"><strong>Learning outcome:</strong> {question.learning_outcome}</p>}{question.competency && <p><strong>Competency:</strong> {question.competency}</p>}</div>}
   </article>;
 }

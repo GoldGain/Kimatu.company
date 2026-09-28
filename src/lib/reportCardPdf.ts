@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { getSchoolLevelBand, calculateCompetencyGrade, generateSubjectSpecificComment } from './grading';
+import { getSchoolLevelBand, calculateGradeForClass, gradeLabelForClass, generateSubjectSpecificComment } from './grading';
 import type { SchoolLevelBand, SubjectResult } from './grading';
+import { pdfFontSize } from './pdfFontSize';
 
 // ── Shared PDF Helper Functions for Report Cards ─────────────────────────────
 
@@ -14,6 +15,8 @@ export interface SchoolInfo {
   phone?: string;
   email?: string;
   next_term_start_date?: string | null;
+  school_closes_on?: string | null;
+  school_opens_on?: string | null;
 }
 
 export interface SignatureInfo {
@@ -46,11 +49,11 @@ const REPORT_CONTENT_BOTTOM_MARGIN = 8;
 // Readable multi-section layout: allow safe pagination instead of squeezing text into overlapping rows.
 export const COMPACT_MODE = true;
 const ROW = COMPACT_MODE ? 3.2 : 5;   // vertical row step for student info (further reduced)
-const HDR_H = COMPACT_MODE ? 26 : 28; // enough room for matching corner identity squares
+const HDR_H = COMPACT_MODE ? 40 : 42; // room for a centered logo and school identity
 
 export const REPORT_CARD_CORNER_SIZE = 22;
 export const REPORT_CARD_CORNER_Y = 3;
-export const REPORT_CARD_LOGO_X = 14;
+export const REPORT_CARD_LOGO_X = (210 - REPORT_CARD_CORNER_SIZE) / 2;
 export const REPORT_CARD_PHOTO_X = 174;
 
 /**
@@ -128,9 +131,8 @@ export function getPercentage(result: any): number {
 }
 
 export function gradeFromPercentage(percentage: number, classData: any) {
-  const band = getSchoolLevelBand(classData);
-  const g = calculateCompetencyGrade(percentage, band);
-  return { grade: g.subLevel, points: g.points || null, descriptor: g.descriptor };
+  const g = calculateGradeForClass(percentage, classData);
+  return { grade: gradeLabelForClass(percentage, classData), points: g.points || null, descriptor: g.descriptor };
 }
 
 export function overallGradeLabel(avgPct: number, classData?: any) {
@@ -238,9 +240,8 @@ export function generateUniqueAIComment(
   }
 
   // Fallback to template-based generator
-  const band = getSchoolLevelBand(classData);
-  const grade = calculateCompetencyGrade(avgPct, band);
-  const gradeLabel = grade.subLevel;
+  const grade = calculateGradeForClass(avgPct, classData);
+  const gradeLabel = gradeLabelForClass(avgPct, classData);
   const descriptor = grade.descriptor;
 
   const seed = `${studentName}-${avgPct.toFixed(1)}-${position}-${totalStudents}-${deviation || 0}`;
@@ -308,8 +309,21 @@ const termOrder = (name: string): number => {
   return 99;
 };
 
+/**
+ * Groups a learner's result rows by distinct term and assessment, then orders
+ * them chronologically. Older rows without an exam link still fall back to a
+ * term-level point, so historic data remains visible in the graph.
+ */
 export function buildPerformanceTrend(records: PerformanceTrendRecord[]): { term: string; avg: number }[] {
-  const groups = new Map<string, { label: string; year: number; term: number; firstIndex: number; total: number; count: number }>();
+  const groups = new Map<string, {
+    label: string;
+    year: number;
+    term: number;
+    firstIndex: number;
+    total: number;
+    count: number;
+  }>();
+
   records.forEach((record, index) => {
     const termName = String(record.terms?.name || '').trim();
     const yearText = String(record.terms?.academic_year || '').trim();
@@ -319,18 +333,37 @@ export function buildPerformanceTrend(records: PerformanceTrendRecord[]): { term
     const assessmentKey = String(record.exam_id || examName || 'term');
     const key = `${termKey}-${assessmentKey}`;
     const labelBase = [termName, yearText].filter(Boolean).join(' ');
-    const label = examName ? `${examName}${labelBase ? ` · ${labelBase}` : ''}` : labelBase || 'Assessment';
+    const label = examName
+      ? `${examName}${labelBase ? ` · ${labelBase}` : ''}`
+      : labelBase || 'Assessment';
     const percentage = record.percentage !== undefined && record.percentage !== null
       ? Number(record.percentage)
-      : Number(record.out_of) > 0 ? (Number(record.marks) || 0) / Number(record.out_of) * 100 : 0;
+      : Number(record.out_of) > 0
+        ? (Number(record.marks) || 0) / Number(record.out_of) * 100
+        : 0;
     const safePercentage = Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : 0;
     const existing = groups.get(key);
-    if (existing) { existing.total += safePercentage; existing.count += 1; return; }
-    groups.set(key, { label, year, term: termOrder(termName), firstIndex: index, total: safePercentage, count: 1 });
+    if (existing) {
+      existing.total += safePercentage;
+      existing.count += 1;
+      return;
+    }
+    groups.set(key, {
+      label,
+      year,
+      term: termOrder(termName),
+      firstIndex: index,
+      total: safePercentage,
+      count: 1,
+    });
   });
+
   return Array.from(groups.values())
     .sort((a, b) => a.year - b.year || a.term - b.term || a.firstIndex - b.firstIndex)
-    .map(group => ({ term: group.label, avg: group.count > 0 ? group.total / group.count : 0 }));
+    .map((group) => ({
+      term: group.label,
+      avg: group.count > 0 ? group.total / group.count : 0,
+    }));
 }
 
 export function drawTrendGraph(
@@ -340,15 +373,47 @@ export function drawTrendGraph(
   y: number,
   width: number,
   height: number,
-  band: SchoolLevelBand
+  _band: SchoolLevelBand
 ): number {
-  // REMOVED: Performance Trend Graph is no longer displayed on report cards
-  // This function is kept for backward compatibility but returns immediately
-  return y;
-  
-  // Original code below (disabled):
-  // Performance trend graph has been removed to fit report cards on one page
-  // The graph drawing code is intentionally removed for compact layout
+  if (!trendData.length || width <= 20 || height <= 12) return y;
+  // Compact report cards must keep the chart and every following section on
+  // the same A4 page. Move the chart into the safe area instead of letting it
+  // render below the page or disappear behind the footer.
+  const graphY = ensureReportCardSpace(doc, y, height + 1);
+  const safeValues = trendData.map((item) => Math.max(0, Math.min(100, Number(item.avg) || 0)));
+  const maxValue = 100;
+  const left = x + 18;
+  const top = graphY + 8;
+  const graphWidth = Math.max(20, width - 24);
+  const graphHeight = Math.max(12, height - 22);
+  doc.setDrawColor(210, 210, 210);
+  doc.setFillColor(250, 250, 252);
+  doc.roundedRect(x, graphY, width, height, 2, 2, 'FD');
+  doc.setFontSize(pdfFontSize(doc, 6.5));
+  doc.setTextColor(90, 90, 90);
+  doc.text('Previous-exam performance (%)', x + 4, graphY + 6);
+  [0, 50, 100].forEach((value) => {
+    const gridY = top + graphHeight - (value / maxValue) * graphHeight;
+    doc.setDrawColor(232, 232, 232);
+    doc.line(left, gridY, left + graphWidth, gridY);
+    doc.setTextColor(120, 120, 120);
+    doc.text(String(value), x + 3, gridY + 2);
+  });
+  const step = safeValues.length > 1 ? graphWidth / (safeValues.length - 1) : graphWidth;
+  const points = safeValues.map((value, index) => ({
+    x: left + (safeValues.length > 1 ? index * step : graphWidth / 2),
+    y: top + graphHeight - (value / maxValue) * graphHeight,
+  }));
+  doc.setDrawColor(106, 27, 154);
+  doc.setFillColor(106, 27, 154);
+  points.forEach((point, index) => {
+    if (index > 0) doc.line(points[index - 1].x, points[index - 1].y, point.x, point.y);
+    doc.circle(point.x, point.y, 1.2, 'F');
+    const label = String(trendData[index].term || '').slice(0, 14);
+    doc.setTextColor(90, 90, 90);
+    doc.text(label, point.x, graphY + height - 5, { align: 'center' });
+  });
+  return graphY + height;
 }
 
 // ── Add Logo to PDF ──────────────────────────────────────────────────────────
@@ -468,7 +533,7 @@ export function drawLogoPlaceholder(
   doc.setLineWidth(0.6);
   doc.roundedRect(x, y, size, size, 2, 2, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(Math.max(8, size * 0.34));
+  doc.setFontSize(Math.max(pdfFontSize(doc, 8), pdfFontSize(doc, size * 0.34)));
   doc.setTextColor(106, 27, 154);
   doc.text(label, x + size / 2, y + size / 2 + size * 0.12, { align: 'center' });
   doc.setTextColor(0, 0, 0);
@@ -493,7 +558,7 @@ export function drawStudentPhotoPlaceholder(
   doc.setLineWidth(0.6);
   doc.roundedRect(x, y, size, size, 2, 2, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(Math.max(9, size * 0.42));
+  doc.setFontSize(Math.max(pdfFontSize(doc, 9), pdfFontSize(doc, size * 0.42)));
   doc.setTextColor(106, 27, 154);
   doc.text(initials, x + size / 2, y + size / 2 + size * 0.14, { align: 'center' });
   doc.setTextColor(0, 0, 0);
@@ -542,13 +607,13 @@ export async function drawReportHeader(
   // The school logo is always on the left and the learner photo/initials on the right.
   const logoAdded = await addLogoToPDF(
     doc,
-    school.logo_url || '/logo.png',
+    school.logo_url || '/kimatu-icon.png',
     REPORT_CARD_LOGO_X,
-    REPORT_CARD_CORNER_Y,
+    2,
     REPORT_CARD_CORNER_SIZE,
     REPORT_CARD_CORNER_SIZE,
   );
-  if (!logoAdded) drawLogoPlaceholder(doc, 'ZA', REPORT_CARD_LOGO_X, REPORT_CARD_CORNER_Y, REPORT_CARD_CORNER_SIZE);
+  if (!logoAdded) drawLogoPlaceholder(doc, 'ZA', REPORT_CARD_LOGO_X, 2, REPORT_CARD_CORNER_SIZE);
   const photoAdded = learner?.photoUrl
     ? await addStudentPhotoToPDF(doc, learner.photoUrl, REPORT_CARD_PHOTO_X, REPORT_CARD_CORNER_Y, REPORT_CARD_CORNER_SIZE)
     : false;
@@ -560,15 +625,15 @@ export async function drawReportHeader(
   // text cannot collide with either the logo or the learner image.
   const centerX = 105;
   doc.setTextColor(26, 35, 126);
-  doc.setFontSize(COMPACT_MODE ? 13 : 16);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 13 : 16));
   doc.setFont('helvetica', 'bold');
-  doc.text(school.name || 'School Name', centerX, 10, { align: 'center', maxWidth: 132 });
-  doc.setFontSize(COMPACT_MODE ? 7.5 : 9);
+  doc.text(school.name || 'School Name', centerX, 28, { align: 'center', maxWidth: 180 });
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7.5 : 9));
   doc.setFont('helvetica', 'normal');
-  doc.text(school.motto || '', centerX, 15.5, { align: 'center', maxWidth: 132 });
+  doc.text(school.motto || '', centerX, 32, { align: 'center', maxWidth: 180 });
   const contactLine = `${school.address || ''} | ${school.phone || ''} | ${school.email || ''}`;
-  const contactLines = doc.splitTextToSize(contactLine, 132);
-  doc.text(contactLines, centerX, 21, { align: 'center' });
+  const contactLines = doc.splitTextToSize(contactLine, 180);
+  doc.text(contactLines, centerX, 37, { align: 'center' });
 }
 
 // ── Add Signatures to PDF ────────────────────────────────────────────────────
@@ -583,10 +648,20 @@ export async function addSignaturesToPDF(
   const sigImgH = COMPACT_MODE ? 8 : 16;
   const sigImgY = COMPACT_MODE ? 0.5 : 3;
   const sigLabelY = COMPACT_MODE ? 9 : 22;
-  y = ensureReportCardSpace(doc, y, sigBlockH + (schoolInfo?.next_term_start_date ? 8 : 5));
+  const closingDate = schoolInfo?.school_closes_on ? new Date(`${schoolInfo.school_closes_on}T00:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+  const openingDate = schoolInfo?.school_opens_on
+    ? new Date(`${schoolInfo.school_opens_on}T00:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    : schoolInfo?.next_term_start_date
+      ? new Date(`${schoolInfo.next_term_start_date}T00:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+      : '';
+  const calendarNoticeLines = [
+    closingDate ? `School closes on: ${closingDate}` : '',
+    openingDate ? `School opens on: ${openingDate}` : '',
+  ].filter(Boolean);
+  y = ensureReportCardSpace(doc, y, sigBlockH + (calendarNoticeLines.length > 0 ? (COMPACT_MODE ? 12 : 15) : 5));
   const hasPrincipalSig = signatures.principal_signature_url && signatures.principal_signature_url.startsWith('data:');
   const hasTeacherSig = signatures.teacher_signature_url && signatures.teacher_signature_url.startsWith('data:');
-  doc.setFontSize(COMPACT_MODE ? 6 : 7);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 6 : 7));
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(60, 60, 70);
   if (hasTeacherSig || hasPrincipalSig) {
@@ -607,7 +682,7 @@ export async function addSignaturesToPDF(
       doc.setDrawColor(150, 150, 155);
       doc.line(14, y + sigLabelY - 2, 56, y + sigLabelY - 2);
     }
-    doc.setFontSize(COMPACT_MODE ? 5.5 : 6);
+    doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 5.5 : 6));
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
     doc.text('Class Teacher Signature', 14, y + sigLabelY);
@@ -627,7 +702,7 @@ export async function addSignaturesToPDF(
       doc.setDrawColor(150, 150, 155);
       doc.line(118, y + sigLabelY - 2, 160, y + sigLabelY - 2);
     }
-    doc.setFontSize(COMPACT_MODE ? 5.5 : 6);
+    doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 5.5 : 6));
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
     doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 118, y + sigLabelY);
@@ -635,14 +710,14 @@ export async function addSignaturesToPDF(
     doc.setDrawColor(150, 150, 155);
     doc.line(14, y + (COMPACT_MODE ? 9 : 12), 75, y + (COMPACT_MODE ? 9 : 12));
     doc.line(118, y + (COMPACT_MODE ? 9 : 12), 181, y + (COMPACT_MODE ? 9 : 12));
-    doc.setFontSize(COMPACT_MODE ? 6 : 7);
+    doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 6 : 7));
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(80, 80, 85);
     doc.text('Class Teacher Signature', 14, y + (COMPACT_MODE ? 15 : 18));
     doc.text(`Principal Signature${schoolInfo?.principal_name ? ` (${schoolInfo.principal_name})` : ''}`, 118, y + (COMPACT_MODE ? 15 : 18));
   }
   // Date
-  doc.setFontSize(COMPACT_MODE ? 6 : 7);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 6 : 7));
   doc.setTextColor(80, 80, 85);
   doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, y + (COMPACT_MODE ? 12 : 27));
   // School stamp area
@@ -650,20 +725,17 @@ export async function addSignaturesToPDF(
   doc.setLineDashPattern([2, 2], 0);
   doc.rect(118, y + sigImgY, 32, sigImgH + 2);
   doc.setLineDashPattern([], 0);
-  doc.setFontSize(5.5);
+  doc.setFontSize(pdfFontSize(doc, 5.5));
   doc.setTextColor(150, 150, 155);
   doc.text('OFFICIAL STAMP', 134, y + sigImgY + sigImgH / 2, { align: 'center' });
 
-  // Move "Next term begins on" to AFTER the signatures as requested
-  if (schoolInfo?.next_term_start_date) {
-    const dateObj = new Date(schoolInfo.next_term_start_date);
-    const formattedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (calendarNoticeLines.length > 0) {
     doc.setTextColor(0, 102, 102);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
-    doc.text(`Next term begins on: ${formattedDate}`, 14, y + sigBlockH + (COMPACT_MODE ? 4 : 4));
+    doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7.2 : 8));
+    doc.text(calendarNoticeLines, 14, y + sigBlockH + (COMPACT_MODE ? 4 : 5), { maxWidth: 180 });
     doc.setTextColor(0, 0, 0);
-    return y + sigBlockH + (COMPACT_MODE ? 8 : 10);
+    return y + sigBlockH + (COMPACT_MODE ? 12 : 16);
   }
 
   return y + sigBlockH;
@@ -672,7 +744,7 @@ export async function addSignaturesToPDF(
 // ── Draw Footer ──────────────────────────────────────────────────────────────
 export function drawReportFooter(doc: jsPDF) {
   const pageHeight = doc.internal.pageSize.getHeight();
-  doc.setFontSize(8);
+  doc.setFontSize(pdfFontSize(doc, 8));
   doc.setTextColor(150, 150, 150);
   doc.setFont('helvetica', 'normal');
   doc.text('Kimatu Analytics School Management System | Support: tutorsultimate@gmail.com', 105, pageHeight - 6, { align: 'center' });
@@ -688,23 +760,31 @@ export function drawStudentInfo(
   academicYear: string,
   position: string,
   y: number = 38,
-  assessmentName?: string
+  assessmentName?: string,
+  assessmentNumber?: string,
+  positionDetails?: { classPosition?: string; streamPosition?: string }
 ) {
   // Compact: two-column grid, denser rows so the info block uses <= 14mm
-  const fs = COMPACT_MODE ? 8 : 9;
+  const fs = pdfFontSize(doc, COMPACT_MODE ? 8 : 9);
   doc.setTextColor(0, 0, 0); doc.setFontSize(fs); doc.setFont('helvetica', 'normal');
   doc.text(`Learner: ${studentName}`, 14, y);
-  doc.text(`Adm No: ${admissionNo}`, 14, y + ROW);
-  doc.text(`Class: ${className}`, 14, y + ROW * 2);
+  doc.text(`Admission Number: ${admissionNo || 'N/A'}`, 14, y + ROW);
+  doc.text(`Assessment Number: ${assessmentNumber || 'N/A'}`, 14, y + ROW * 2);
+  doc.text(`Class: ${className}`, 14, y + ROW * 3);
   doc.text(`Term: ${termName} ${academicYear}`, 120, y);
   if (assessmentName) {
     doc.text(`Assessment: ${assessmentName}`, 120, y + ROW);
-    doc.text(`Position: ${position}`, 120, y + ROW * 2);
+    doc.text(`Class Position: ${positionDetails?.classPosition || position}`, 120, y + ROW * 2);
+    doc.text(`Stream Position: ${positionDetails?.streamPosition || position}`, 120, y + ROW * 3);
+  } else if (positionDetails) {
+    doc.text(`Class Position: ${positionDetails.classPosition || position}`, 120, y + ROW);
+    doc.text(`Stream Position: ${positionDetails.streamPosition || position}`, 120, y + ROW * 2);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + ROW * 3);
   } else {
     doc.text(`Position: ${position}`, 120, y + ROW);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 120, y + ROW * 2);
   }
-  doc.setDrawColor(106, 27, 154); doc.line(14, y + ROW * 2 + 3, 196, y + ROW * 2 + 3);
+  doc.setDrawColor(106, 27, 154); doc.line(14, y + ROW * 3 + 3, 196, y + ROW * 3 + 3);
 }
 
 // ── Draw Results Table ───────────────────────────────────────────────────────
@@ -732,8 +812,8 @@ export function drawResultsTable(
     body: tableBody,
     pageBreak: COMPACT_MODE ? 'avoid' : 'auto',
     rowPageBreak: 'avoid',
-    styles: { fontSize: COMPACT_MODE ? 6.8 : 8, cellPadding: COMPACT_MODE ? 0.6 : 1.5 },
-    headStyles: { fillColor: [106, 27, 154], textColor: 255, fontSize: COMPACT_MODE ? 7.2 : 8, cellPadding: 0.8 },
+    styles: { fontSize: pdfFontSize(doc, COMPACT_MODE ? 6.8 : 8), cellPadding: COMPACT_MODE ? 0.6 : 1.5 },
+    headStyles: { fillColor: [106, 27, 154], textColor: 255, fontSize: pdfFontSize(doc, COMPACT_MODE ? 7.2 : 8), cellPadding: 0.8 },
     alternateRowStyles: { fillColor: [232, 234, 246] }, margin: { left: 14, right: 14 },
   });
   return (doc as any).lastAutoTable.finalY;
@@ -757,11 +837,11 @@ export function drawPathwayPerformance(
     const percentage = outOf > 0 ? (score / outOf) * 100 : 0;
     return [pathway, areasUsed || 'None', `${score}/${outOf}`, `${percentage.toFixed(1)}%`];
   });
-  doc.setFontSize(COMPACT_MODE ? 9 : 10); doc.setFont('helvetica', 'bold'); doc.setTextColor(26, 35, 126);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 9 : 10)); doc.setFont('helvetica', 'bold'); doc.setTextColor(26, 35, 126);
   doc.text('Pathway Performance Profile', 14, startY + (COMPACT_MODE ? 5 : 6));
   autoTable(doc, {
     startY: startY + (COMPACT_MODE ? 6 : 8), head: [['Pathway', 'Learning Areas Used', 'Score', 'Performance']], body: pathwayData,
-    styles: { fontSize: COMPACT_MODE ? 7.5 : 8, cellPadding: COMPACT_MODE ? 1 : 2 }, headStyles: { fillColor: [106, 27, 154], textColor: 255 },
+    styles: { fontSize: pdfFontSize(doc, COMPACT_MODE ? 7.5 : 8), cellPadding: COMPACT_MODE ? 1 : 2 }, headStyles: { fillColor: [106, 27, 154], textColor: 255, fontSize: pdfFontSize(doc, COMPACT_MODE ? 7.5 : 8) },
     alternateRowStyles: { fillColor: [255, 248, 225] }, margin: { left: 14, right: 14 },
   });
   return (doc as any).lastAutoTable.finalY;
@@ -783,7 +863,7 @@ export function drawSummaryBox(
   const totalMarks = results.reduce((s, r) => s + (Number(r.marks || 0)), 0);
   const overallGrading = gradeFromPercentage(avgPercentage, classData);
   doc.setFillColor(0, 137, 123); doc.rect(14, startY, 182, boxH, 'F');
-  const fs = COMPACT_MODE ? 7.2 : 8;
+  const fs = pdfFontSize(doc, COMPACT_MODE ? 7.2 : 8);
   const gap = COMPACT_MODE ? 5.8 : 8;
   doc.setFontSize(fs); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
   doc.text(`Learning Areas: ${results.length}`, 20, startY + gap);
@@ -810,7 +890,7 @@ export function drawNextTermStartDate(
   
   doc.setTextColor(0, 102, 102);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(COMPACT_MODE ? 7.5 : 8);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7.5 : 8));
   doc.text(`Next term begins on: ${formattedDate}`, 14, startY);
   doc.setTextColor(0, 0, 0);
   
@@ -830,15 +910,15 @@ export function drawDeviation(
     const arrow = deviation >= 0 ? '\u25B2' : '\u25BC';
     const sign = deviation >= 0 ? '+' : '';
     if (deviation >= 0) doc.setTextColor(76, 175, 80); else doc.setTextColor(244, 67, 54);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7 : 8));
     doc.text(`${arrow} ${sign}${deviation.toFixed(1)}% vs previous (Prev: ${previousAvg?.toFixed(1)}% - Pos: ${previousPosition || 'N/A'})`, 14, startY);
     doc.setTextColor(0, 0, 0);
   } else if (previousAvg !== null) {
-    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
+    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7 : 8));
     doc.text(`Previous performance: ${previousAvg.toFixed(1)}% - Position: ${previousPosition || 'N/A'}`, 14, startY);
     doc.setTextColor(0, 0, 0);
   } else {
-    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(COMPACT_MODE ? 7 : 8);
+    doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal'); doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7 : 8));
     doc.text('First Term — No previous data for comparison', 14, startY);
     doc.setTextColor(0, 0, 0);
   }
@@ -857,7 +937,7 @@ export function drawAchievements(
   const boxHeight = 4 + visibleBestSubjects.length * rowH;
   startY = ensureReportCardSpace(doc, startY, boxHeight + (COMPACT_MODE ? 4 : 6));
   doc.setFillColor(255, 248, 225); doc.rect(14, startY, 182, boxHeight, 'F');
-  doc.setFontSize(COMPACT_MODE ? 6.5 : 7); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 6.5 : 7)); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
   doc.text('ACHIEVEMENT:', 18, startY + 3.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0);
   visibleBestSubjects.forEach((b, bi) => {
     const pts = b.points !== null ? ` (${b.points} pts)` : '';
@@ -876,7 +956,7 @@ export function drawAchievements(
 function wrapCommentText(doc: jsPDF, text: string): string[] {
   // Configure the exact font/size that the text will be drawn with.
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(COMPACT_MODE ? 7 : 7.5);
+  doc.setFontSize(pdfFontSize(doc, COMPACT_MODE ? 7 : 7.5));
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const textX = 18;
@@ -911,7 +991,7 @@ export function drawAIComment(
   comment: string,
   startY: number
 ): number {
-  const fontSize = COMPACT_MODE ? 7 : 7.5;
+  const fontSize = pdfFontSize(doc, COMPACT_MODE ? 7 : 7.5);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(fontSize);
   const commentLines = wrapCommentText(doc, (comment || 'No class teacher comment provided.').trim());
@@ -934,7 +1014,7 @@ export function drawAIComment(
     doc.setLineWidth(0.5);
     doc.setFillColor(232, 234, 246);
     doc.rect(14, y, 182, boxHeight, 'FD');
-    doc.setFontSize(7.5);
+    doc.setFontSize(pdfFontSize(doc, 7.5));
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 35, 126);
     doc.text("Class Teacher's Comment:", 18, y + 4);
@@ -959,7 +1039,7 @@ export function drawAIComment(
     doc.setLineWidth(0.5);
     doc.setFillColor(232, 234, 246);
     doc.rect(14, y, 182, boxHeight, 'FD');
-    doc.setFontSize(8);
+    doc.setFontSize(pdfFontSize(doc, 8));
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 35, 126);
     doc.text(isContinuation ? "Class Teacher's Comment (continued):" : "Class Teacher's Comment:", 18, y + 7);

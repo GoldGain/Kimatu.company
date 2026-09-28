@@ -66,36 +66,41 @@ async function hashOtp(otp: string): Promise<string> {
 async function sendViaOlympus(phone: string, message: string): Promise<SmsResult> {
   if (!OLYMPUS_API_TOKEN) return { success: false, error: "SMS provider authentication failed. Please configure a valid SMS API token." };
   const recipient = normalizePhone(phone).replace(/^\+/, "");
-  const response = await fetch(OLYMPUS_API_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OLYMPUS_API_TOKEN}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      recipient,
-      sender_id: OLYMPUS_SENDER_ID,
-      type: "plain",
-      message: cleanSmsMessage(message),
-    }),
-  });
-  const data = await response.json().catch(() => ({}));
-  const providerStatus = String(data?.status || '').toLowerCase();
-  const providerMessage = String(data?.message || data?.remarks || '').trim();
-  const providerFailure = providerStatus === 'error'
-    || data?.success === false
-    || /unauthenticated|unauthorized|invalid token|authentication failed|insufficient balance|failed/i.test(providerMessage);
-  if (response.ok && !providerFailure) {
-    return {
-      success: true,
-      messageId: data?.message_id || data?.messageId || data?.data?.messageId || data?.data?.id,
-    };
+  try {
+    const response = await fetch(OLYMPUS_API_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OLYMPUS_API_TOKEN}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({
+        recipient,
+        sender_id: OLYMPUS_SENDER_ID,
+        type: "plain",
+        message: cleanSmsMessage(message),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    const providerStatus = String(data?.status || '').toLowerCase();
+    const providerMessage = String(data?.message || data?.remarks || '').trim();
+    const providerFailure = providerStatus === 'error'
+      || data?.success === false
+      || /unauthenticated|unauthorized|invalid token|authentication failed|insufficient balance|failed/i.test(providerMessage);
+    if (response.ok && !providerFailure) {
+      return {
+        success: true,
+        messageId: data?.message_id || data?.messageId || data?.data?.messageId || data?.data?.id,
+      };
+    }
+    const error = providerFailure && /unauthenticated|unauthorized|invalid token|authentication failed/i.test(providerMessage)
+      ? 'SMS provider authentication failed. Please configure a valid SMS API token.'
+      : providerMessage || `HTTP ${response.status}`;
+    return { success: false, error };
+  } catch (error) {
+    console.error("Olympus SMS request failed:", error);
+    return { success: false, error: "SMS provider could not be reached. Please try again." };
   }
-  const error = providerFailure && /unauthenticated|unauthorized|invalid token|authentication failed/i.test(providerMessage)
-    ? 'SMS provider authentication failed. Please configure a valid SMS API token.'
-    : providerMessage || `HTTP ${response.status}`;
-  return { success: false, error };
 }
 
 async function sendViaAfricasTalking(
@@ -331,38 +336,96 @@ Deno.serve(async (req) => {
     const { data: { user: callerUser } } = await callerClient.auth.getUser();
     if (!callerUser) return json({ error: "Your session has expired. Please sign in again." }, 401);
     const { data: callerProfile } = await callerClient.from("profiles").select("role, school_id").eq("id", callerUser.id).single();
-    if (!callerProfile?.school_id) return json({ error: "Your account profile could not be found." }, 403);
 
     const { phone, message, school_id } = body;
     if (!phone || !message) return json({ error: "Enter a phone number and message." }, 400);
-    const resolvedSchoolId = String(school_id || callerProfile.school_id).trim();
-    if (resolvedSchoolId !== String(callerProfile.school_id)) return json({ error: "You can only send SMS for your own school." }, 403);
+    const callerRole = String(callerProfile?.role || "");
+    let resolvedSchoolId = "";
+    if (callerRole === "reseller_super_admin") {
+      const requestedSchoolId = String(school_id || "").trim();
+      if (!requestedSchoolId) return json({ error: "Select a school before sending SMS." }, 400);
+      const { data: reseller } = await adminClient
+        .from("resellers")
+        .select("id")
+        .eq("user_id", callerUser.id)
+        .maybeSingle();
+      if (!reseller?.id) return json({ error: "Your reseller account could not be found." }, 403);
+      const { data: ownedSchool } = await adminClient
+        .from("schools")
+        .select("id")
+        .eq("id", requestedSchoolId)
+        .eq("reseller_id", reseller.id)
+        .maybeSingle();
+      if (!ownedSchool?.id) return json({ error: "You can only send SMS to an explicitly assigned school." }, 403);
+      resolvedSchoolId = String(ownedSchool.id);
+    } else {
+      if (!callerProfile?.school_id) return json({ error: "Your account profile could not be found." }, 403);
+      resolvedSchoolId = String(school_id || callerProfile.school_id).trim();
+      if (resolvedSchoolId !== String(callerProfile.school_id)) return json({ error: "You can only send SMS for your own school." }, 403);
+    }
 
     const cleanMessage = cleanSmsMessage(message);
     const smsSegments = countSmsSegments(cleanMessage);
     if (!smsSegments) return json({ error: "Message is empty." }, 400);
 
-    const { data: reservation, error: reservationError } = await adminClient.rpc("reserve_school_sms_credits", {
-      p_school_id: resolvedSchoolId,
-      p_sms_segments: smsSegments,
-      p_recipient_phone: normalizePhone(phone),
-      p_message: cleanMessage,
-      p_sent_by: callerUser.id,
-    });
-    if (reservationError) {
-      if (/INSUFFICIENT_SMS_CREDITS/i.test(reservationError.message || "")) {
-        return json({ error: `Insufficient SMS credits. This message needs ${smsSegments} SMS credit${smsSegments === 1 ? "" : "s"}.` }, 402);
+    // Reseller messages are a platform-sponsored service. They must never
+    // consume the selected school's wallet or require the reseller to buy a
+    // second in-app balance. The selected school is still ownership-checked
+    // above so the recipient scope remains tenant-safe.
+    const resellerSponsored = callerRole === "reseller_super_admin";
+    let reservation: any = null;
+    if (!resellerSponsored) {
+      const { data: schoolReservation, error: reservationError } = await adminClient.rpc("reserve_school_sms_credits", {
+        p_school_id: resolvedSchoolId,
+        p_sms_segments: smsSegments,
+        p_recipient_phone: normalizePhone(phone),
+        p_message: cleanMessage,
+        p_sent_by: callerUser.id,
+      });
+      if (reservationError) {
+        if (/INSUFFICIENT_SMS_CREDITS/i.test(reservationError.message || "")) {
+          return json({ error: "School has no SMS balance. Please ask the school admin to top up." }, 402);
+        }
+        console.error("SMS credit reservation failed:", reservationError.message);
+        return json({ error: "SMS credits could not be reserved. Please try again." }, 500);
       }
-      console.error("SMS credit reservation failed:", reservationError.message);
-      return json({ error: "SMS credits could not be reserved. Please try again." }, 500);
+      reservation = schoolReservation;
     }
 
-    const { data: schoolSettings } = await adminClient.from("school_settings").select("sms_provider, sms_sender_id, sms_api_key, sms_username").eq("school_id", resolvedSchoolId).maybeSingle();
-    const provider = schoolSettings?.sms_provider || "olympus";
-    const sms = provider === "africastalking" && schoolSettings?.sms_api_key && schoolSettings?.sms_username
-      ? await sendViaAfricasTalking(phone, cleanMessage, schoolSettings.sms_sender_id || "", schoolSettings.sms_api_key, schoolSettings.sms_username)
-      : await sendViaOlympus(phone, cleanMessage);
+    // Resellers use the platform's Olympus credential purchased by the
+    // reseller/platform owner. School-originated messages may use the school's
+    // configured provider, but reseller messages must not depend on it.
+    let sms: SmsResult;
+    if (resellerSponsored) {
+      sms = await sendViaOlympus(phone, cleanMessage);
+    } else {
+      const { data: schoolSettings } = await adminClient.from("school_settings").select("sms_provider, sms_sender_id, sms_api_key, sms_username").eq("school_id", resolvedSchoolId).maybeSingle();
+      const provider = schoolSettings?.sms_provider || "olympus";
+      sms = provider === "africastalking" && schoolSettings?.sms_api_key && schoolSettings?.sms_username
+        ? await sendViaAfricasTalking(phone, cleanMessage, schoolSettings.sms_sender_id || "", schoolSettings.sms_api_key, schoolSettings.sms_username)
+        : await sendViaOlympus(phone, cleanMessage);
+    }
 
+    if (resellerSponsored) {
+      // Record sponsored usage for audit/accounting, but do not debit a school wallet.
+      const { error: auditError } = await adminClient.from("school_sms_transactions").insert({
+        school_id: resolvedSchoolId,
+        transaction_type: "debit",
+        credits: -smsSegments,
+        amount_ksh: 0,
+        status: sms.success ? "success" : "failed",
+        recipient_phone: normalizePhone(phone),
+        message: cleanMessage,
+        sms_segments: smsSegments,
+        provider_message_id: sms.messageId || null,
+        error_message: sms.success ? null : (sms.error || "SMS delivery failed"),
+        sent_by: callerUser.id,
+        metadata: { sponsored_by: "reseller", wallet_charge: false },
+      });
+      if (auditError) console.error("Sponsored SMS audit failed:", auditError.message);
+      if (!sms.success) return json({ error: sms.error || "SMS delivery failed." }, 400);
+      return json({ success: true, messageId: sms.messageId, smsSegments, sponsored: true });
+    }
     const reservationId = reservation?.reservation_id;
     const { data: settlement, error: settlementError } = await adminClient.rpc("settle_school_sms_charge", {
       p_reservation_id: reservationId,

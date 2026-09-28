@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import ExamGenerator, {
   type CurriculumStrandOption,
   type CurriculumSubStrandOption,
-  type CurriculumTopicOption,
 } from '@/components/curriculum/ExamGenerator';
 import {
   juniorExamSubjects,
@@ -16,28 +15,29 @@ import { Link, useSearchParams } from 'react-router-dom';
 interface Grade { id: string; grade_number: number; grade_name: string; }
 interface Subject { id: string; subject_name: string; subject_code: string; }
 interface Strand { id: string; strand_name: string; strand_order: number; sub_strands?: SubStrand[]; }
-interface SubStrand { id: string; sub_strand_name: string; sub_strand_order: number; topics?: Topic[]; }
-interface Topic { id: string; topic_name: string; topic_description: string; learning_objectives: string[]; topic_order: number; }
+interface SubStrand { id: string; sub_strand_name: string; sub_strand_order: number; }
+function displaySubjectName(name: string): string {
+  return /agriculture\s+and\s+nutrition/i.test(name) ? 'Agriculture' : name;
+}
 
 export default function ExamGeneratorPage() {
-  const { user } = useAuth();
+  const { user, schoolData } = useAuth();
   const [searchParams] = useSearchParams();
   const requestedGrade = searchParams.get('grade') || '';
   const requestedSubject = searchParams.get('subject') || '';
-  const requestedTopic = searchParams.get('topic') || '';
   const [grades, setGrades] = useState<Grade[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedGrade, setSelectedGrade] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [strands, setStrands] = useState<CurriculumStrandOption[]>([]);
-  const [topics, setTopics] = useState<CurriculumTopicOption[]>([]);
   const [loadingGrades, setLoadingGrades] = useState(true);
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const [loadingTree, setLoadingTree] = useState(false);
 
   const gradeName = grades.find(g => g.id === selectedGrade)?.grade_name || '';
   const subjectName = subjects.find(s => s.id === selectedSubject)?.subject_name || '';
-  const schoolName = 'Kimatu Analytics School';
+  const schoolName = schoolData?.name?.trim() || '';
+  const backPath = user?.role === 'school_admin' ? '/school-admin' : '/teacher/curriculum';
 
   // Load grades on mount
   useEffect(() => {
@@ -50,8 +50,9 @@ export default function ExamGeneratorPage() {
       .from('curriculum_grades')
       .select('*')
       .order('grade_number');
-    const availableGrades = (data || []).length
-      ? [...(data || [])].sort((a: Grade, b: Grade) => a.grade_number - b.grade_number)
+    const juniorGrades = (data || []).filter((grade: Grade) => grade.grade_number >= 7 && grade.grade_number <= 9);
+    const availableGrades = juniorGrades.length
+      ? [...juniorGrades].sort((a: Grade, b: Grade) => a.grade_number - b.grade_number)
       : [
         { id: 'g7', grade_number: 7, grade_name: 'Grade 7' },
         { id: 'g8', grade_number: 8, grade_name: 'Grade 8' },
@@ -78,8 +79,12 @@ export default function ExamGeneratorPage() {
       .eq('grade_id', selectedGrade)
       .order('subject_name')
       .then(({ data }) => {
-        const availableSubjects: Subject[] = data && data.length
-          ? data as Subject[]
+        const juniorSubjectNames = new Set(juniorExamSubjects());
+        const databaseSubjects = (data || [])
+          .filter((subject: Subject) => juniorSubjectNames.has(subject.subject_name) || /agriculture\s+and\s+nutrition/i.test(subject.subject_name))
+          .map((subject: Subject) => ({ ...subject, subject_name: displaySubjectName(subject.subject_name) }));
+        const availableSubjects: Subject[] = databaseSubjects.length
+          ? databaseSubjects as Subject[]
           : juniorExamSubjects().map((name, idx) => ({
             id: `local-${selectedGrade}-${idx}`,
             subject_name: name,
@@ -97,7 +102,6 @@ export default function ExamGeneratorPage() {
       });
     setSelectedSubject('');
     setStrands([]);
-    setTopics([]);
   }, [selectedGrade]);
 
   // Load curriculum tree when subject changes
@@ -120,7 +124,7 @@ export default function ExamGeneratorPage() {
     const effectiveStrandsData = sourceVerifiedStrands.length > 0 ? sourceVerifiedStrands : (strandsData || []);
 
     if (effectiveStrandsData.length === 0) {
-      // Fallback to embedded KICD knowledge — build full strand+sub-strand+topic tree
+      // Fallback to embedded KICD knowledge — build the strand and sub-strand tree.
       const packs = getStrandPacks(subjectName);
       const localStrands: CurriculumStrandOption[] = packs.map((pack, si) => {
         const subStrands: CurriculumSubStrandOption[] = pack.subStrands.map((ss, ssi) => ({
@@ -133,31 +137,13 @@ export default function ExamGeneratorPage() {
           sub_strands: subStrands,
         };
       });
-      // Build flat topics list
-      const localTopics: CurriculumTopicOption[] = [];
-      let topicIdx = 0;
-      for (const pack of packs) {
-        for (const ss of pack.subStrands) {
-          for (const topicName of ss.topics) {
-            localTopics.push({
-              id: `local-topic-${topicIdx}`,
-              topic_name: topicName,
-              strand_id: `local-strand-${packs.indexOf(pack)}`,
-              sub_strand_id: `local-ss-${packs.indexOf(pack)}-${pack.subStrands.indexOf(ss)}`,
-            });
-            topicIdx++;
-          }
-        }
-      }
       setStrands(localStrands);
-      setTopics(localTopics);
       setLoadingTree(false);
       return;
     }
 
     // Load from database — fetch sub-strands for each strand and nest them
     const enriched: CurriculumStrandOption[] = [];
-    const allTopics: CurriculumTopicOption[] = [];
 
     for (const strand of effectiveStrandsData) {
       const { data: ssData } = await supabaseUntyped
@@ -177,65 +163,9 @@ export default function ExamGeneratorPage() {
         sub_strands: subStrands,
       });
 
-      for (const ss of ssData || []) {
-        const { data: topicsData } = await supabaseUntyped
-          .from('curriculum_topics')
-          .select('id, topic_name')
-          .eq('sub_strand_id', ss.id)
-          .order('topic_order');
-
-        for (const topic of topicsData || []) {
-          allTopics.push({
-            id: topic.id,
-            topic_name: topic.topic_name,
-            strand_id: strand.id,
-            sub_strand_id: ss.id,
-          });
-        }
-      }
     }
-
-    // Database imports are authoritative, but some schools have strand and
-    // sub-strand rows without topic rows. Supplement only missing children
-    // from the embedded curriculum pack so the dependency chain stays usable.
-    const packs = getStrandPacks(subjectName);
-    for (const strand of enriched) {
-      const matchingPack = packs.find((pack) => {
-        const databaseName = strand.strand_name.toLowerCase();
-        const packName = pack.strand.toLowerCase();
-        return databaseName.includes(packName) || packName.includes(databaseName);
-      });
-      if (!matchingPack) continue;
-
-      if (!strand.sub_strands?.length) {
-        strand.sub_strands = matchingPack.subStrands.map((subStrand, subStrandIndex) => ({
-          id: `kicd-ss-${strand.id}-${subStrandIndex}`,
-          sub_strand_name: subStrand.name,
-        }));
-      }
-
-      for (const [subStrandIndex, subStrand] of (strand.sub_strands || []).entries()) {
-        const matchingPackSubStrand = matchingPack.subStrands.find((packSubStrand) => {
-          const databaseName = subStrand.sub_strand_name.toLowerCase();
-          const packName = packSubStrand.name.toLowerCase();
-          return databaseName.includes(packName) || packName.includes(databaseName);
-        });
-        if (!matchingPackSubStrand || allTopics.some((topic) => topic.sub_strand_id === subStrand.id)) continue;
-
-        matchingPackSubStrand.topics.forEach((topicName, topicIndex) => {
-          allTopics.push({
-            id: `kicd-topic-${strand.id}-${subStrandIndex}-${topicIndex}`,
-            topic_name: topicName,
-            strand_id: strand.id,
-            sub_strand_id: subStrand.id,
-          });
-        });
-      }
-    }
-
 
     setStrands(enriched);
-    setTopics(allTopics);
     setLoadingTree(false);
   }, [selectedSubject, subjectName]);
 
@@ -252,7 +182,7 @@ export default function ExamGeneratorPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/teacher/curriculum" className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-red-600 transition">
+        <Link to={backPath} className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-red-600 transition">
           <ArrowLeft className="h-4 w-4" /> Back to Curriculum
         </Link>
         <h1 className="text-xl font-bold text-slate-900">Exam Generator</h1>
@@ -303,8 +233,6 @@ export default function ExamGeneratorPage() {
           schoolName={schoolName}
           schoolId={user?.schoolId || ''}
           strands={strands}
-          topics={topics}
-          initialTopic={requestedTopic}
         />
       )}
 

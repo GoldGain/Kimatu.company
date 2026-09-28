@@ -1,3 +1,5 @@
+import { formatClassStream } from './class-label';
+
 /**
  * Shared timetable generation logic
  *
@@ -12,7 +14,7 @@
  * | Lower Primary    | 6     | 0           |
  * | Primary 1-6      | 6     | 0           |
  * | Junior School    | 8     | 2           |
- * | Senior 10-12     | 7     | 1           |
+ * | Senior 10-12     | 8     | 2           |
  * | 8-4-4            | 7     | 1           |
  */
 
@@ -48,7 +50,7 @@ export interface LevelLessonConfig {
 }
 
 /** Built-in defaults — used only when DB does not supply counts.
- * Senior (Grade 10-12): 7 lessons/day, 1 after lunch.
+ * Senior (Grade 10-12): 8 lessons/day, 2 after lunch.
  * Form 3 & 4 (8-4-4): 7 lessons/day, 1 after lunch.
  */
 export const LEVEL_CONFIG: Record<string, LevelLessonConfig> = {
@@ -57,13 +59,13 @@ export const LEVEL_CONFIG: Record<string, LevelLessonConfig> = {
   'upper-primary': { totalLessons: 6, afterLunch: 0 },
   'combined-primary': { totalLessons: 6, afterLunch: 0 },
   junior: { totalLessons: 8, afterLunch: 2 },
-  senior: { totalLessons: 7, afterLunch: 1 },
+  senior: { totalLessons: 8, afterLunch: 2 },
   'form-3-4': { totalLessons: 7, afterLunch: 1 },
   // legacy aliases
   lower_primary: { totalLessons: 6, afterLunch: 0 },
   upper_primary: { totalLessons: 7, afterLunch: 1 },
   junior_school: { totalLessons: 8, afterLunch: 2 },
-  senior_school: { totalLessons: 7, afterLunch: 1 },
+  senior_school: { totalLessons: 8, afterLunch: 2 },
   '8-4-4': { totalLessons: 7, afterLunch: 1 },
 };
 
@@ -157,19 +159,25 @@ export function isFillerSubject(subjectName: string | null | undefined): boolean
 /**
  * Final subject placement gate from the timetable requirements.
  *
- * Mathematics and English prioritize Lessons 1–2 and may use Lessons 1–5, Integrated Science and
- * Pre-Technical Studies use Lessons 3–5, Kiswahili may use Lessons 1–7, and
- * other learning areas may use the later lesson periods.
+ * Mathematics may use Lessons 1-4 only (a Maths double must finish at Lesson 4).
+ * English may use Lessons 1-5, Integrated Science and Pre-Technical Studies
+ * may use Lessons 1-6, Kiswahili may use Lessons 1-7, and other learning areas
+ * may use any lesson.
  */
 export function strictSubjectAllowsLesson(
   subjectName: string | null | undefined,
   lessonNumber: number,
 ): boolean {
   const fam = classifySubject(subjectName);
-  if (fam === 'math' || fam === 'english') return lessonNumber >= 1 && lessonNumber <= 5;
-  if (fam === 'science' || fam === 'pretech') return lessonNumber >= 3 && lessonNumber <= 5;
+  // Mathematics is capped at Lesson 4, so a Maths double may only sit in
+  // Lessons 3-4. English keeps its wider fallback up to Lesson 5 and
+  // Integrated Science up to Lesson 6; no core subject reaches the afternoon.
+  if (fam === 'math') return lessonNumber >= 1 && lessonNumber <= 4;
+  if (fam === 'english') return lessonNumber >= 1 && lessonNumber <= 5;
+  if (fam === 'science') return lessonNumber >= 1 && lessonNumber <= 6;
+  if (fam === 'pretech') return lessonNumber >= 1 && lessonNumber <= 6;
   if (fam === 'kiswahili') return lessonNumber >= 1 && lessonNumber <= 7;
-  return lessonNumber >= 3;
+  return lessonNumber >= 1;
 }
 
 export interface LessonUnitSlot {
@@ -191,12 +199,10 @@ export function isValidDoubleLessonPair(
   if (!firstSlot || !secondSlot) return false;
   if (firstSlot.slot_type && firstSlot.slot_type !== 'lesson') return false;
   if (secondSlot.slot_type && secondSlot.slot_type !== 'lesson') return false;
-  if (secondSlot.slot_order !== firstSlot.slot_order + 1) return false;
   const firstLesson = Number(String(firstSlot.label || '').match(/lesson\s+(\d+)/i)?.[1]);
   const secondLesson = Number(String(secondSlot.label || '').match(/lesson\s+(\d+)/i)?.[1]);
   if (!Number.isFinite(firstLesson) || !Number.isFinite(secondLesson)) return false;
-  const family = classifySubject(subjectName);
-  if ((family === 'science' || family === 'pretech') && (firstLesson !== 3 || secondLesson !== 4)) return false;
+  if (secondLesson !== firstLesson + 1) return false;
   return strictSubjectAllowsLesson(subjectName, firstLesson)
     && strictSubjectAllowsLesson(subjectName, secondLesson);
 }
@@ -211,9 +217,8 @@ export function violatesMathScienceSequence(
   const adjacent = String(adjacentSubject || '').trim().toLowerCase();
   const currentIsMath = /mathemat/.test(current);
   const currentIsScience = /integrated\s*science|\bscience\b|environment/.test(current);
-  const adjacentIsMath = /mathemat/.test(adjacent);
   const adjacentIsScience = /integrated\s*science|\bscience\b|environment/.test(adjacent);
-  return (currentIsMath && adjacentIsScience) || (currentIsScience && adjacentIsMath);
+  return currentIsMath && adjacentIsScience;
 }
 
 /**
@@ -310,6 +315,108 @@ export function canUseAssignmentDay(
   // More than five weekly lessons cannot fit one per weekday, so reuse is
   // explicitly allowed once every valid weekday has been considered.
   return true;
+}
+
+export interface ExactGridAssignmentIssue {
+  classId: string;
+  className: string;
+  subjectName: string;
+  message: string;
+}
+
+/**
+ * Find assignment settings that make an exact weekly timetable impossible
+ * before the backtracking solver starts. A configured double consumes one
+ * weekday; remaining lessons still need another distinct weekday because a
+ * subject may occur only once per day.
+ */
+export function getExactGridAssignmentIssues(options: {
+  classes: Array<{ id: string; name?: string | null; stream?: string | null; stream_name?: string | null }>;
+  assignments: Array<{
+    class_id: string;
+    lessons_per_week?: number | null;
+    is_double_lesson?: boolean | null;
+    double_lesson_days?: unknown;
+    available_days?: unknown;
+    subjects?: { name?: string | null } | null;
+    subject_name?: string | null;
+  }>;
+  totalLessons: number;
+  days?: readonly string[];
+}): ExactGridAssignmentIssue[] {
+  const days = options.days?.length
+    ? [...options.days]
+    : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const normalizeDays = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value.map(String).map((day) => day.trim()).filter((day) => days.includes(day));
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.map(String).map((day) => day.trim()).filter((day) => days.includes(day));
+        }
+      } catch {
+        // Legacy rows may store a comma-separated weekday list.
+      }
+      return value.split(',').map((day) => day.trim()).filter((day) => days.includes(day));
+    }
+    return [];
+  };
+  const classIds = new Set(options.classes.map((item) => String(item.id)));
+  const issues: ExactGridAssignmentIssue[] = [];
+  const byClass = new Map<string, typeof options.assignments>();
+  options.assignments.forEach((assignment) => {
+    const classId = String(assignment.class_id);
+    if (!classIds.has(classId)) return;
+    byClass.set(classId, [...(byClass.get(classId) || []), assignment]);
+  });
+
+  for (const cls of options.classes) {
+    const classId = String(cls.id);
+    const classAssignments = byClass.get(classId) || [];
+    const configuredTotal = classAssignments.reduce(
+      (total, assignment) => total + Math.max(0, Number(assignment.lessons_per_week) || 0),
+      0,
+    );
+    if (configuredTotal !== options.totalLessons * days.length) {
+      issues.push({
+        classId,
+        className: formatClassStream(cls) || `Class ${classId}`,
+        subjectName: 'Weekly total',
+        message: `${formatClassStream(cls) || `Class ${classId}`} has ${configuredTotal} configured lesson periods but requires exactly ${options.totalLessons * days.length}.`,
+      });
+    }
+
+    for (const assignment of classAssignments) {
+      const lessons = Math.max(0, Number(assignment.lessons_per_week) || 0);
+      if (lessons === 0) continue;
+      const subjectName = String(assignment.subjects?.name || assignment.subject_name || 'Learning area');
+      const availableDays = normalizeDays(assignment.available_days);
+      const allowedDays = availableDays.length ? availableDays : days;
+      const requiredDistinctDays = assignment.is_double_lesson && lessons >= 2 ? lessons - 1 : lessons;
+      if (allowedDays.length < requiredDistinctDays) {
+        issues.push({
+          classId,
+          className: formatClassStream(cls) || `Class ${classId}`,
+          subjectName,
+          message: `${formatClassStream(cls) || `Class ${classId}`} — ${subjectName}: ${lessons} weekly lessons require at least ${requiredDistinctDays} available weekdays, but only ${allowedDays.length} are allowed (${allowedDays.join(', ') || 'none'}).`,
+        });
+      }
+
+      const configuredDoubleDays = normalizeDays(assignment.double_lesson_days);
+      if (assignment.is_double_lesson && configuredDoubleDays.length > 0 && !configuredDoubleDays.some((day) => allowedDays.includes(day))) {
+        issues.push({
+          classId,
+          className: formatClassStream(cls) || `Class ${classId}`,
+          subjectName,
+          message: `${formatClassStream(cls) || `Class ${classId}`} — ${subjectName}: the configured double-lesson weekday (${configuredDoubleDays.join(', ')}) is not in the assignment's available weekdays (${allowedDays.join(', ') || 'none'}).`,
+        });
+      }
+    }
+  }
+  return issues;
 }
 
 export function getAfterLunchCount(level: string, override?: number | null): number {

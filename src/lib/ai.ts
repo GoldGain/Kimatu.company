@@ -7,6 +7,7 @@
  */
 
 import { supabaseUntyped } from '@/lib/supabase/client';
+import { formatClassStream } from '@/lib/class-label';
 
 export type AiRole =
   | 'school_admin'
@@ -61,7 +62,7 @@ const PAGE_GUIDES: Record<string, string> = {
   '/school-admin/timetable/setup':
     'This is Timetable Setup. Choose a level group, then set School starts, First Break, Second Break, Lunch, Activities Start, and Activities End. Pick how many lessons come after lunch (0 to 3). Save Configuration before you open Generate. There is no School Ends field. Activities End is the end of the day window.',
   '/school-admin/timetable/generate':
-    'Generate timetables from saved Setup times. Select one or more level groups, confirm Activities Start/End and break/lunch times shown for each configured level, then generate. Lesson counts come from Setup (for example Pre-Primary 6/0, Lower/Upper 7/1, Junior 8/2, Senior 9/3).',
+    'Generate timetables from saved Setup times. Select one or more level groups, confirm Activities Start/End and break/lunch times shown for each configured level, then generate. Lesson counts come from Setup (for example Pre-Primary 6/0, Lower/Upper 7/1, Junior 8/2, Senior 8/2).',
   '/school-admin/timetable/view':
     'View and download the school timetable. Activities Start and Activities End appear with Break and Lunch so you can verify the full day structure. Select a class to see the correct columns for that level only.',
   '/school-admin/stream-dashboard':
@@ -196,7 +197,7 @@ function buildSystemPrompt(ctx: AiContext, liveNotes: string): string {
     '- Never invent credentials or delete production data.',
     '- Graduation: Grade 9 and Grade 12 / Form 4 graduate; Grades 1-8 and 10-11 promote to empty destination classes.',
     '- Timetable times are per school from Timetable Setup only. Never invent clock times. There is no School Ends field; use Activities Start/End when configured.',
-    '- Default lesson counts when Setup is empty: Pre-Primary 6 (0 after lunch), Lower/Upper Primary 7 (1), Junior 8 (2), Senior 9 (3), 8-4-4 8 (2).',
+    '- Default lesson counts when Setup is empty: Pre-Primary 6 (0 after lunch), Lower/Upper Primary 7 (1), Junior 8 (2), Senior 8 (2), 8-4-4 8 (2).',
     '- SMS: Publish and Notify uses Olympus SMS sender PROCALL.',
     '- Teachers may only upload assigned learning areas.',
   ]
@@ -282,7 +283,7 @@ export async function fetchRoleInsights(ctx: AiContext): Promise<AiInsight[]> {
       if (teacher?.id) {
         const { data: assigns } = await supabaseUntyped
           .from('teacher_subject_assignments')
-          .select('id, subjects(name), classes(name)')
+          .select('id, subjects(name), classes(name, stream, stream_name)')
           .eq('teacher_id', teacher.id)
           .eq('is_active', true);
         const n = assigns?.length || 0;
@@ -295,7 +296,7 @@ export async function fetchRoleInsights(ctx: AiContext): Promise<AiInsight[]> {
                 .slice(0, 6)
                 .map(
                   (a: any) =>
-                    `${a.subjects?.name || 'Subject'} · ${a.classes?.name || 'Class'}`
+                    `${a.subjects?.name || 'Subject'} · ${a.classes ? formatClassStream(a.classes) : 'Class'}`
                 )
                 .join('; ')
             : 'Ask school admin to assign learning areas before uploading results.',
@@ -495,7 +496,7 @@ async function offlineAnswer(question: string, ctx: AiContext): Promise<string> 
     return 'Promotion and Graduation\n\n1. School Admin → Promote Grade\n2. Select source class\n3. Grade 9 and Grade 12 / Form 4 → system switches to GRADUATE (status=graduated, year set)\n4. Other grades → choose an empty destination class\n5. Alumni appear under Graduated Students (filter by year).';
   }
   if (q.includes('timetable') || q.includes('after lunch') || q.includes('lesson')) {
-    return 'Timetable\n\n1. Setup → edit times + lessons after lunch (0–3) → Save (toast shows saved times)\n2. Generate → select levels → Generate (reloads Setup from DB)\n3. View → click a class for correct columns:\n   - Pre-Primary: 6 lessons, 0 after lunch\n   - Lower/Upper Primary: 7 / 1\n   - Junior: 8 / 2\n   - Senior: 9 / 3\n   - 8-4-4: 8 / 2';
+    return 'Timetable\n\n1. Setup → edit times + lessons after lunch (0–3) → Save (toast shows saved times)\n2. Generate → select levels → Generate (reloads Setup from DB)\n3. View → click a class for correct columns:\n   - Pre-Primary: 6 lessons, 0 after lunch\n   - Lower/Upper Primary: 7 / 1\n   - Junior: 8 / 2\n   - Senior: 8 / 2\n   - 8-4-4: 8 / 2';
   }
   if (q.includes('class list') || q.includes('add column')) {
     return 'Class List (Teachers)\n\n1. Teacher → Class List\n2. Select class\n3. Add Column → enter values per learner\n4. Download PDF';

@@ -5,7 +5,7 @@
  * and Parent Child Report Card.
  */
 
-import { calculateCompetencyGrade, getSchoolLevelBand } from './grading';
+import { calculateGradeForClass, getSchoolLevelBand, gradeLabelForClass } from './grading';
 import type { SchoolLevelBand } from './grading';
 
 export interface BestInSubject {
@@ -66,8 +66,8 @@ export function computeBestPerSubject(
         ? `${topRow.students.first_name || ''} ${topRow.students.last_name || ''}`.trim()
         : topRow.student_name || 'Unknown';
 
-    const g = calculateCompetencyGrade(topPct, isPrimary ? 'primary' : band);
-    const gradeLabel = g.subLevel;
+    const g = calculateGradeForClass(topPct, classData);
+    const gradeLabel = gradeLabelForClass(topPct, classData);
     const points = isPrimary ? null : g.points;
 
     best.push({

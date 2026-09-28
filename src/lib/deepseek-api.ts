@@ -4,9 +4,21 @@ import {
   type ExamGenerationRequest,
   type ExamPaper,
   type GeneratedExamQuestion,
+  type GeneratedExamSubPart,
   type QuestionType,
 } from './exam-schema.js';
 import { hasCompleteTableVisual, hasUsableVisualSpec } from './exam-visuals.js';
+import {
+  answerCompletenessLaw,
+  buildCoveragePlanFromRequest,
+  coverageInstruction,
+  kjseaFormatLaw,
+  mapWorkLaw,
+  mathNotationLaw,
+  normalizeMathNotation,
+  paperVariantLaw,
+} from './exam-construction.js';
+import { kjseaFormatInstruction } from './kjsea-paper-formats.js';
 
 interface DeepSeekChoice {
   message?: { content?: unknown; reasoning_content?: string | null };
@@ -57,6 +69,24 @@ function toSafeArray(value: unknown): string[] {
     : [];
 }
 
+function normalizeSubParts(value: unknown): GeneratedExamSubPart[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const item = entry as Record<string, unknown>;
+    const prompt = toSafeString(item.prompt).slice(0, 900);
+    const marksValue = Number(item.marks);
+    if (!prompt || !Number.isFinite(marksValue) || marksValue < 1 || marksValue > 30) return [];
+    return [{
+      label: toSafeString(item.label, `(${String.fromCharCode(97 + index)})`).slice(0, 12),
+      prompt,
+      marks: Math.round(marksValue),
+      correct_answer: toSafeString(item.correct_answer).slice(0, 700),
+      marking_scheme: toSafeString(item.marking_scheme, toSafeString(item.correct_answer)).slice(0, 900),
+    }];
+  });
+}
+
 function normalizeQuestionType(value: unknown, fallback: QuestionType): QuestionType {
   const allowed = new Set<QuestionType>([
     'multiple_choice', 'multiple_response', 'modified_true_false', 'completion',
@@ -78,11 +108,12 @@ export function normalizeQuestion(raw: unknown, fallbackType: QuestionType, fall
   const marks = Number.isFinite(marksValue) && marksValue > 0 && marksValue <= 30 ? Math.round(marksValue) : 1;
   return {
     question_type: normalizeQuestionType(item.question_type, fallbackType),
-    question_text: questionText.slice(0, 1800),
+    question_text: normalizeMathNotation(questionText).slice(0, 1800),
     options: toSafeArray(item.options).slice(0, 8),
     correct_answer: toSafeString(item.correct_answer, 'Teacher to assess according to the marking guidance.').slice(0, 1200),
     marking_scheme: toSafeString(item.marking_scheme, toSafeString(item.correct_answer, 'Teacher to assess according to the marking guidance.')).slice(0, 1800),
     marks,
+    sub_parts: normalizeSubParts(item.sub_parts),
     difficulty: normalizeDifficulty(item.difficulty, fallbackDifficulty),
     strand: toSafeString(item.strand).slice(0, 180),
     sub_strand: toSafeString(item.sub_strand).slice(0, 180),
@@ -103,8 +134,11 @@ export function fallbackDifficulty(request: ExamGenerationRequest): 'easy' | 'me
 }
 
 export function outputTokenBudget(request: ExamGenerationRequest, compact = false): number {
+  const largeKjseaPaper = request.format === 'kjsea' && request.totalMarks >= 50;
   const scaled = request.totalMarks * (compact ? 110 : 160);
-  return Math.min(compact ? 10000 : 14000, Math.max(compact ? 5500 : 7000, scaled));
+  const maximum = compact ? (largeKjseaPaper ? 16000 : 10000) : (largeKjseaPaper ? 20000 : 14000);
+  const minimum = compact ? (largeKjseaPaper ? 10000 : 5500) : (largeKjseaPaper ? 12000 : 7000);
+  return Math.min(maximum, Math.max(minimum, scaled));
 }
 
 export function alignQuestionsToBlueprint(request: ExamGenerationRequest, questions: GeneratedExamQuestion[]): GeneratedExamQuestion[] {
@@ -189,16 +223,26 @@ export function buildExamPrompt(request: ExamGenerationRequest, knowledgeContext
     : 'Do not require any images, but preserve a visual_spec only when the question stem explicitly requires a visual to answer the question. If a visual_spec is present, do not repeat its table or bracketed diagram placeholder in question_text.';
   const outcomes = request.learningOutcomes?.length ? request.learningOutcomes.join('; ') : 'Not separately constrained.';
   const competencies = request.competencies?.length ? request.competencies.join('; ') : 'Use suitable CBC core competencies.';
-  const formatDirection = request.format === 'kpsea'
+  const formatDirection = request.format === 'standard30'
+    ? 'STANDARD 30-MARK REQUIREMENTS: Produce exactly 10 Section A multiple-choice questions worth 1 mark each, followed by exactly 4 Section B structured questions worth 5 marks each. The structured questions may use lettered sub-parts when useful, and every main question must total its blueprint marks.'
+    : request.format === 'kpsea'
     ? 'KPSEA-STYLE REQUIREMENTS: Prefer a clean objective assessment structure. When the blueprint uses multiple_choice, each such item must have exactly four plausible options labelled A, B, C and D, one correct answer, and concise age-appropriate wording. Include answer-sheet guidance in the instructions. Use visual stimuli only when they are genuinely required by the question.'
     : request.format === 'kjsea'
-      ? 'KJSEA-STYLE REQUIREMENTS: Prefer structured, scenario-based tasks. Use large numbered questions with lettered sub-parts and roman-numbered sub-items where the blueprint allows. Integrate practical procedures, labelled diagrams, tables, data interpretation, calculations, and extended responses when they fit the selected curriculum. Give marks that add up exactly to each main question and use concise line breaks between sub-parts.'
+      ? kjseaFormatInstruction(request.subject, request.paperVariant || 'single')
       : 'Use a clear school-based CBC assessment structure with labelled sections and marks.';
   const blueprintText = request.blueprint?.sections.length
     ? JSON.stringify(request.blueprint.sections.map((section) => ({ type: section.question_type, count: section.count, marks_per_question: section.marks_per_question, difficulty: section.difficulty, strand: section.strand, sub_strand: section.sub_strand, topic: section.topic, competency: section.competency })))
     : blueprint.map((entry) => `${entry.count} ${entry.type} items totaling about ${entry.marks} marks`).join('; ');
+  const coverageText = coverageInstruction(buildCoveragePlanFromRequest(request));
+  const notationLaw = mathNotationLaw();
+  const answerLaw = answerCompletenessLaw();
+  const variantLaw = paperVariantLaw(request);
+  const kjseaLaw = request.format === 'kjsea'
+    ? kjseaFormatInstruction(request.subject, request.paperVariant || 'single')
+    : kjseaFormatLaw(request);
+  const mapLaw = mapWorkLaw(request);
 
-  return `You are a senior Kenyan CBE/CBC assessment specialist. Create an original, age-appropriate, classroom-ready assessment. Do not reproduce copyrighted questions, proprietary marking schemes, or web text. Align questions to the stated grade, subject, strand, sub-strand, and topics. Use inclusive language, realistic Kenyan classroom contexts where suitable, clear command words, and internally consistent marks.\n\nOriginality and variation requirements:\n- ${variationInstruction}\n- Change the contexts, names, numbers, data, command words, cognitive demand, and question order where appropriate. Do not copy or lightly paraphrase any avoided stem.\n- Avoid repeated stock openings and avoid using the same examples across questions unless the blueprint deliberately requests a shared case study.\n\nStrict curriculum ancestry law:\n- Treat the curriculum as a hierarchy: strand -> child sub-strand -> child topic.\n- Every question must use a strand from the selected strand set, a sub-strand that belongs to that strand, and a topic that belongs to that sub-strand.\n- If selected topics are provided, every question topic must be one of those selected topics. Never attach a correct-looking label from a different strand or sub-strand.\n- Curriculum scope map: ${curriculumScope}\n\nAvoided question stems from recent papers:\n${avoidedStems}\n\nAssessment context:\n- Grade: ${request.gradeLevel}\n- Subject: ${request.subject}\n- Strand(s): ${selectedStrands}\n- Sub-strand(s): ${selectedSubStrands}\n- Topic(s): ${selectedTopics}\n- Format: ${request.format.toUpperCase()}\n- Format guidance: ${formatDirection}\n- Difficulty: ${request.difficulty}\n- Total marks target: ${request.totalMarks}\n- Duration: ${request.durationMinutes} minutes\n- Required question blueprint: ${blueprintText}\n- Learning outcomes: ${outcomes}\n- Competencies: ${competencies}\n- ${imageDirection}\n\nVetted internal curriculum context (use only as high-level guidance; do not quote it verbatim):\n${knowledgeContext || 'No additional knowledge records were supplied. Use established CBE assessment practice and the selected curriculum context.'}\n\nReturn json only. Use exactly this object shape:\n{\n  "title": "string",\n  "instructions": ["string"],\n  "questions": [\n    {\n      "question_type": "multiple_choice | multiple_response | modified_true_false | completion | matching | short_answer | numeric_response | case_study | essay",\n      "question_text": "string",\n      "options": ["string"],\n      "correct_answer": "string",\n      "marking_scheme": "string",\n      "marks": 1,\n      "difficulty": "easy | medium | hard",\n      "strand": "string",\n      "sub_strand": "string",\n      "topic": "string",\n      "learning_outcome": "string or empty",\n      "competency": "string or empty",\n      "cognitive_level": "remember | understand | apply | analyse | evaluate | create",\n            "visual_spec": {"asset_type":"diagram | map | chart | graph | shape | flowchart | illustration | table | number_line", "title":"string", "prompt":"string", "caption":"string", "labels":["string"], "x_labels":["string"], "values":[number], "table_headers":["string"], "table_rows":[["string or number"]], "map_regions":["string"]} or null
+  return `You are a senior Kenyan CBE/CBC assessment specialist. Create an original, age-appropriate, classroom-ready assessment. Do not reproduce copyrighted questions, proprietary marking schemes, or web text. Align questions to the stated grade, subject, strand, sub-strand, and topics. Use inclusive language, realistic Kenyan classroom contexts where suitable, clear command words, and internally consistent marks.\n\nOriginality and variation requirements:\n- ${variationInstruction}\n- Change the contexts, names, numbers, data, command words, cognitive demand, and question order where appropriate. Do not copy or lightly paraphrase any avoided stem.\n- Avoid repeated stock openings and avoid using the same examples across questions unless the blueprint deliberately requests a shared case study.\n\nStrict curriculum ancestry law:\n- Treat the curriculum as a hierarchy: strand -> child sub-strand -> child topic.\n- Every question must use a strand from the selected strand set, a sub-strand that belongs to that strand, and a topic that belongs to that sub-strand.\n- If selected topics are provided, every question topic must be one of those selected topics. Never attach a correct-looking label from a different strand or sub-strand.\n- Curriculum scope map: ${curriculumScope}\n\nAvoided question stems from recent papers:\n${avoidedStems}\n\nAssessment context:\n- Grade: ${request.gradeLevel}\n- Subject: ${request.subject}\n- Strand(s): ${selectedStrands}\n- Sub-strand(s): ${selectedSubStrands}\n- Topic(s): ${selectedTopics}\n- Format: ${request.format.toUpperCase()}\n- Format guidance: ${formatDirection}\n- Difficulty: ${request.difficulty}\n- Total marks target: ${request.totalMarks}\n- Duration: ${request.durationMinutes} minutes\n- Required question blueprint: ${blueprintText}\n- Learning outcomes: ${outcomes}\n- Competencies: ${competencies}\n- ${imageDirection}\n\nCoverage requirement: ${coverageText}\n\nExam construction laws:\n- ${notationLaw}\n- ${answerLaw}\n- ${variantLaw}\n- ${kjseaLaw}\n- ${mapLaw}\n\nVetted internal curriculum context (use only as high-level guidance; do not quote it verbatim):\n${knowledgeContext || 'No additional knowledge records were supplied. Use established CBE assessment practice and the selected curriculum context.'}\n\nReturn json only. Use exactly this object shape:\n{\n  "title": "string",\n  "instructions": ["string"],\n  "questions": [\n    {\n      "question_type": "multiple_choice | multiple_response | modified_true_false | completion | matching | short_answer | numeric_response | case_study | essay",\n      "question_text": "string",\n      "options": ["string"],\n      "correct_answer": "string",\n      "marking_scheme": "string",\n      "marks": 1,\n      "sub_parts": [{"label":"(a)","prompt":"string","marks":1,"correct_answer":"string","marking_scheme":"string"}],\n      "difficulty": "easy | medium | hard",\n      "strand": "string",\n      "sub_strand": "string",\n      "topic": "string",\n      "learning_outcome": "string or empty",\n      "competency": "string or empty",\n      "cognitive_level": "remember | understand | apply | analyse | evaluate | create",\n            "visual_spec": {"asset_type":"diagram | map | chart | graph | shape | flowchart | illustration | table | number_line", "title":"string", "prompt":"string", "caption":"string", "labels":["string"], "x_labels":["string"], "values":[number], "table_headers":["string"], "table_rows":[["string or number"]], "map_regions":["string"]} or null
 \n    }\n  ]\n}\nFor every question that does not explicitly require a visual, use null for visual_spec. Keep every field concise, do not repeat the instructions, and do not add commentary outside the JSON object. The word json is intentionally included to enable structured JSON output.`;
 }
 
@@ -363,11 +407,14 @@ export async function generateExamWithDeepSeek(request: ExamGenerationRequest, k
         ? candidate.questions.map((entry) => normalizeQuestion(entry, request.questionTypes[0] || 'multiple_choice', fallbackDifficulty(request))).filter((entry): entry is GeneratedExamQuestion => Boolean(entry))
         : [];
       if (!candidateQuestions.length) throw new DeepSeekResponseError('The AI service did not provide any valid questions.');
-      if (candidateQuestions.some((question) => !hasCompleteTableVisual(question))) {
-        throw new DeepSeekResponseError('The AI response included an incomplete table visual. Retry with table_headers and every table_rows cell required by the question.');
-      }
-      if (candidateQuestions.some((question) => question.visual_spec && !hasUsableVisualSpec(question))) {
-        throw new DeepSeekResponseError('The AI response included an incomplete visual specification. Retry with readable labels or complete data for every required diagram, map, graph, chart, flowchart, table, or number line.');
+      // An incomplete visual no longer discards the whole paper: the repair pass
+      // completes it or removes just that visual from that one question.
+      const incompleteVisuals = candidateQuestions.filter(
+        (question) => !hasCompleteTableVisual(question)
+          || (question.visual_spec && !hasUsableVisualSpec(question)),
+      ).length;
+      if (incompleteVisuals) {
+        console.warn(`[exam-gen] ${incompleteVisuals} question(s) returned an incomplete visual; the repair pass will handle them.`);
       }
       parsed = candidate;
     } catch (error) {
@@ -403,7 +450,9 @@ export async function generateExamWithDeepSeek(request: ExamGenerationRequest, k
   const computedMarks = questions.reduce((sum, question) => sum + question.marks, 0);
 
   return {
-    title: toSafeString(parsed.title, makeExamTitle(request)).slice(0, 255),
+    // The title is an authoring choice made by the teacher/admin. The provider
+    // may suggest one only when the requester left the field blank.
+    title: makeExamTitle(request).slice(0, 255),
     school_name: request.schoolName || undefined,
     grade_level: request.gradeLevel,
     subject: request.subject,
@@ -416,4 +465,76 @@ export async function generateExamWithDeepSeek(request: ExamGenerationRequest, k
     format: request.format,
     generated_at: new Date().toISOString(),
   };
+}
+
+/** Shared so both providers read a single repaired question the same way. */
+export function parseRepairedQuestion(
+  request: ExamGenerationRequest,
+  payload: unknown,
+): GeneratedExamQuestion | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const candidate = 'question' in record ? record.question : record;
+  return normalizeQuestion(candidate, request.questionTypes[0] || 'multiple_choice', fallbackDifficulty(request));
+}
+
+function repairEndpoint(useDeepSeek: boolean, apiKey: string): string {
+  return useDeepSeek
+    ? `${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`
+    : `${(process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/$/, '')}/chat/completions`;
+}
+
+function repairModel(useDeepSeek: boolean): string {
+  const configured = process.env.AI_EXAM_MODEL || process.env.DEEPSEEK_MODEL || '';
+  return useDeepSeek ? (configured || 'deepseek-chat') : (configured || 'gpt-5-mini');
+}
+
+/**
+ * Ask the model to rewrite exactly one question (or one visual) from an explicit
+ * instruction. Returns null on any provider problem: a repair that cannot be
+ * attempted must degrade to a drop, never to a failed paper.
+ */
+export async function rewriteQuestionWithDeepSeek(prompt: string): Promise<Record<string, unknown> | null> {
+  const deepSeekKey = process.env.DEEPSEEK_API_KEY;
+  const apiKey = deepSeekKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  const useDeepSeek = Boolean(deepSeekKey);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(repairEndpoint(useDeepSeek, apiKey), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: repairModel(useDeepSeek),
+        messages: [
+          { role: 'system', content: 'You are a strict JSON API. Return ONLY a JSON object with no markdown, no code fences, no explanation text, no preamble.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 1600,
+        stream: false,
+        response_format: { type: 'json_object' },
+      }),
+      signal: controller.signal,
+    });
+    const rawText = await response.text().catch(() => '');
+    if (!rawText.trim()) return null;
+    let payload: DeepSeekResponse;
+    try {
+      payload = JSON.parse(rawText) as DeepSeekResponse;
+    } catch {
+      return null;
+    }
+    if (!response.ok) {
+      console.warn('[exam-repair] provider rejected the rewrite:', payload.error?.message || response.status);
+      return null;
+    }
+    return extractJsonFromContent(readMessageContent(payload));
+  } catch (error) {
+    console.warn('[exam-repair] rewrite request failed:', error instanceof Error ? error.message.slice(0, 200) : 'unknown failure');
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

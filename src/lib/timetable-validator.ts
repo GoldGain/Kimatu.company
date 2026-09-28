@@ -1,4 +1,5 @@
 import { isFillerSubject, strictSubjectAllowsLesson, violatesMathScienceSequence } from './timetable-generator';
+import { formatClassStream } from './class-label';
 
 export interface TimetableValidationSlot {
   id: string | number;
@@ -20,6 +21,8 @@ export interface TimetableValidationEntry {
 export interface TimetableValidationClass {
   id: string | number;
   name?: string | null;
+  stream?: string | null;
+  stream_name?: string | null;
 }
 
 export interface TimetableValidationOptions {
@@ -30,6 +33,20 @@ export interface TimetableValidationOptions {
   days?: readonly number[];
   levelGroup?: string;
   requireComplete?: boolean;
+  /** Exact weekly lesson requirements keyed by `${classId}-${subjectId}`. */
+  requiredLessonCounts?: ReadonlyMap<string, number> | Readonly<Record<string, number>>;
+  /** Enforce same-day/same-slot pairing when both IRE and CRE are offered. */
+  requireReligiousPairing?: boolean;
+  /** Allow generation to proceed when the assignment graph makes this ordering unsatisfiable. */
+  allowMathScienceAdjacency?: boolean;
+  /** Allow a complete timetable to be saved when exact counts cannot be reconciled. */
+  allowLessonCountMismatch?: boolean;
+  /**
+   * Rule 14 shortfall classes the admin explicitly accepted. Only these classes
+   * may have empty cells, and only for the lessons they have no lessons for; every
+   * other class is still checked for blanks.
+   */
+  allowBlankSlotsForClassIds?: readonly (string | number)[];
 }
 
 export interface TimetableValidationIssue {
@@ -67,6 +84,9 @@ interface SubjectDayGroup {
 const isLessonEntry = (entry: TimetableValidationEntry): boolean =>
   entry.entry_type === 'lesson' || entry.entry_type === 'lesson_double';
 
+const isCasSubject = (subjectName: string): boolean =>
+  /\bcas\b|creative\s+arts?.*sports|arts?.*sports|creative\s+arts?/i.test(subjectName);
+
 /**
  * Validate the generated lesson grid after every repair/reconciliation pass.
  * This is deliberately independent of the placement algorithm so no later
@@ -93,6 +113,7 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
   const subjectDayEntries = new Map<string, SubjectDayGroup>();
   const doubleEntriesBySubject = new Map<string, TimetableValidationEntry[]>();
   const teacherSlotEntries = new Map<string, TimetableValidationEntry>();
+  const weeklySubjectCounts = new Map<string, number>();
 
   for (const entry of filteredEntries) {
     const slot = slotById.get(String(entry.time_slot_id));
@@ -131,6 +152,8 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
       }
     }
     const dayKey = subjectDayKey(entry);
+    const weeklyKey = `${String(entry.class_id)}-${String(entry.subject_id)}`;
+    weeklySubjectCounts.set(weeklyKey, (weeklySubjectCounts.get(weeklyKey) || 0) + 1);
     const group = subjectDayEntries.get(dayKey) || {
       classId: String(entry.class_id),
       day: Number(entry.day_of_week),
@@ -145,6 +168,22 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
     }
   }
 
+  if (options.requiredLessonCounts) {
+    const requiredEntries = options.requiredLessonCounts instanceof Map
+      ? Array.from(options.requiredLessonCounts.entries())
+      : Object.entries(options.requiredLessonCounts);
+    for (const [key, value] of requiredEntries) {
+      const required = Number(value);
+      const actual = weeklySubjectCounts.get(String(key)) || 0;
+      if (actual !== required && !options.allowLessonCountMismatch) {
+        issues.push({
+          rule: 'exact-lesson-count',
+          message: `Class/subject ${String(key)} has ${actual} lessons but requires exactly ${required}.`,
+        });
+      }
+    }
+  }
+
   for (const group of subjectDayEntries.values()) {
     const entries = group.entries;
     if (entries.length <= 1) continue;
@@ -154,14 +193,21 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
       .map((entry) => slotById.get(String(entry.time_slot_id)))
       .filter((slot): slot is TimetableValidationSlot => Boolean(slot))
       .sort((a, b) => a.slot_order - b.slot_order);
+    const firstLessonIndex = ordered.length === 2 ? lessonSlots.findIndex((slot) => String(slot.id) === String(ordered[0].id)) : -1;
+    const secondLessonIndex = ordered.length === 2 ? lessonSlots.findIndex((slot) => String(slot.id) === String(ordered[1].id)) : -1;
     const isLegalDouble = entries.length === 2
       && entries.every((entry) => entry.entry_type === 'lesson_double')
-      && ordered.length === 2
-      && ordered[1].slot_order === ordered[0].slot_order + 1;
+      && firstLessonIndex >= 0
+      && secondLessonIndex === firstLessonIndex + 1;
     if (!isLegalDouble) {
       issues.push({
         rule: 'once-per-day',
         message: `${subjectName || `Subject ${subjectId}`} appears more than once on day ${day} for class ${classId}; only one consecutive configured double is allowed.`,
+      });
+    } else if (isCasSubject(subjectName) && firstLessonIndex < 2) {
+      issues.push({
+        rule: 'cas-double-window',
+        message: `${subjectName} double for class ${classId} starts at Lesson ${firstLessonIndex + 1} on day ${day}; CAS doubles may start only at Lesson 3 or later.`,
       });
     }
   }
@@ -176,7 +222,7 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
     }
   }
 
-  for (let index = 0; index < lessonSlots.length - 1; index++) {
+  if (!options.allowMathScienceAdjacency) for (let index = 0; index < lessonSlots.length - 1; index++) {
     const current = lessonSlots[index];
     const next = lessonSlots[index + 1];
     for (const day of options.days || [1, 2, 3, 4, 5]) {
@@ -201,15 +247,48 @@ export function validateTimetableRules(options: TimetableValidationOptions): Tim
     }
   }
 
+  if (options.requireReligiousPairing) {
+    const religiousByClass = new Map<string, { ire: Set<string>; cre: Set<string> }>();
+    for (const entry of filteredEntries) {
+      const name = nameFor(options.subjectNames, entry.subject_id).toLowerCase();
+      const family = /\bire\b|islamic|muslim/.test(name)
+        ? 'ire'
+        : /\bcre\b|christian/.test(name) ? 'cre' : null;
+      if (!family) continue;
+      const key = String(entry.class_id);
+      const group = religiousByClass.get(key) || { ire: new Set<string>(), cre: new Set<string>() };
+      group[family].add(`${entry.day_of_week}-${String(entry.time_slot_id)}`);
+      religiousByClass.set(key, group);
+    }
+    for (const [key, group] of religiousByClass) {
+      if (!group.ire.size || !group.cre.size) continue;
+      const paired = [...group.ire].every((slot) => group.cre.has(slot))
+        && [...group.cre].every((slot) => group.ire.has(slot));
+      if (!paired) {
+        issues.push({
+          rule: 'ire-cre-same-slot',
+          message: `IRE and CRE are not paired at the same day and lesson slot for class ${key}.`,
+        });
+      }
+    }
+  }
+
   if (options.requireComplete && options.classes?.length) {
     const days = options.days || [1, 2, 3, 4, 5];
+    // Rule 14: when the admin accepted a lesson-count shortfall, only those
+    // classes may keep the cells their own counts cannot fill. Any other class
+    // with a blank cell is still a hard failure.
+    const allowedBlankClasses = new Set(
+      (options.allowBlankSlotsForClassIds || []).map((id) => String(id)),
+    );
     for (const cls of options.classes) {
+      if (allowedBlankClasses.has(String(cls.id))) continue;
       for (const day of days) {
         for (const slot of lessonSlots) {
           if (!occupiedCells.has(entryKey(cls.id, day, slot.id))) {
             issues.push({
               rule: 'no-blanks',
-              message: `${cls.name || `Class ${String(cls.id)}`} has a blank ${slot.label || 'lesson'} on day ${day}.`,
+              message: `${formatClassStream(cls)} has a blank ${slot.label || 'lesson'} on day ${day}.`,
             });
           }
         }

@@ -4,8 +4,8 @@ import { AlertCircle, ArrowDownCircle, CheckCircle, CreditCard, Loader2, Message
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseUntyped } from '@/lib/supabase/client';
-import { PAYSTACK_PUBLIC_KEY } from '@/lib/paystack';
 
+const PAYSTACK_PUBLIC_KEY = 'pk_live_c15b4c6c95f06f7408326b14395eb727147a8935';
 const QUICK_PACKAGES = [100, 500, 1000];
 
 type WalletTransaction = {
@@ -71,7 +71,7 @@ export default function SMSWallet() {
       ]);
       if (walletError) throw walletError;
       if (historyError) throw historyError;
-      setBalance(Number(wallet?.sms_balance ?? 0));
+      setBalance(Number(wallet?.sms_balance || 0));
       setTransactions((history || []) as WalletTransaction[]);
     } catch (error: any) {
       toast.error(error?.message || 'Could not load SMS wallet');

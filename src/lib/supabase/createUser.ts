@@ -9,6 +9,9 @@ interface CreateUserInput {
   role: UserRole;
   school_id?: string | null;
   metadata?: Record<string, unknown>;
+  admission_number?: string;
+  assessment_number?: string;
+  class_id?: string;
 }
 
 interface CreateUserResult {
@@ -20,6 +23,16 @@ interface CreateUserResult {
 }
 
 export async function createScopedUser(input: CreateUserInput): Promise<CreateUserResult> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+  if (!session) {
+    throw new Error('Your school-admin session has expired. Please sign in again before importing learners.');
+  }
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError || !refreshed.session) {
+    throw new Error('Your school-admin session could not be refreshed. Please sign in again before importing learners.');
+  }
+
   const { data, error } = await supabase.functions.invoke<CreateUserResult>('create-user', {
     body: {
       email: input.email.trim().toLowerCase(),
@@ -28,12 +41,38 @@ export async function createScopedUser(input: CreateUserInput): Promise<CreateUs
       last_name: input.last_name || '',
       role: input.role,
       school_id: input.school_id || null,
+      admission_number: input.admission_number || null,
+      assessment_number: input.assessment_number || null,
+      class_id: input.class_id || null,
       metadata: input.metadata || {},
     },
   });
 
   if (error) {
-    throw new Error(error.message || 'Unable to create user account.');
+    let detail = error.message || 'Unable to create user account.';
+    try {
+      const response = (error as any).context;
+      if (response && typeof response.text === 'function') {
+        const raw = await response.text();
+        if (raw) {
+          try {
+            const payload = JSON.parse(raw);
+            detail = payload.error || payload.message || raw;
+          } catch {
+            detail = raw;
+          }
+        }
+      }
+    } catch {
+      // Keep the SDK message when the Edge Function response cannot be read.
+    }
+    const normalizedDetail = detail.toLowerCase();
+    if (normalizedDetail.includes('already exists') || normalizedDetail.includes('already registered') || normalizedDetail.includes('duplicate') || normalizedDetail.includes('already captured')) {
+      detail = 'The details are already captured. Please use a different admission number or email.';
+    } else if (normalizedDetail.includes('non-2xx') || normalizedDetail.includes('invalid token') || normalizedDetail.includes('jwt')) {
+      detail = 'Your session has expired. Refresh the page and sign in again before trying again.';
+    }
+    throw new Error(detail);
   }
 
   if (!data?.user?.id) {

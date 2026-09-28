@@ -1,26 +1,45 @@
 import { createClient } from '@supabase/supabase-js';
 import {
   generateExamWithDeepSeek,
+  parseRepairedQuestion,
+  rewriteQuestionWithDeepSeek,
   DeepSeekConfigurationError,
   DeepSeekResponseError,
 } from '../src/lib/deepseek-api.js';
 import {
   generateExamWithGemini,
+  rewriteQuestionWithGemini,
   GeminiConfigurationError,
   GeminiResponseError,
 } from '../src/lib/gemini-api.js';
 import {
   validateExamRequest,
   type ExamGenerationRequest,
+  type GeneratedExamQuestion,
   type CurriculumScopeNode,
   type ExamBlueprint,
   type QuestionType,
   makeBalancedBlueprint,
   makeFormatBlueprint,
+  makePaperVariantBlueprint,
+  ExamBlueprintSection,
 } from '../src/lib/exam-schema.js';
 import { filterUnnecessaryExamVisual, withRenderedExamVisual } from '../src/lib/exam-visuals.js';
-import { validateGeneratedExam } from '../src/lib/exam-validation.js';
 import { getStrandPacks } from '../src/lib/kicd-knowledge.js';
+import {
+  isMathsLikeSubject,
+  normalizePaperVariant,
+  normalizeQuestionNotation,
+  repairQuestionAnswers,
+  supportsTwoPapers,
+} from '../src/lib/exam-construction.js';
+import { getKjseaPaperSpec, makeKjseaBlueprint } from '../src/lib/kjsea-paper-formats.js';
+import { applyCuratedVisualFallback } from '../src/lib/exam-visual-library.js';
+import {
+  buildQuestionRewritePrompt,
+  buildVisualRewritePrompt,
+  repairGeneratedExam,
+} from '../src/lib/exam-repair.js';
 
 const allowedQuestionTypes = new Set<QuestionType>([
   'multiple_choice', 'multiple_response', 'modified_true_false', 'completion',
@@ -95,18 +114,20 @@ function parseBlueprint(value: unknown): ExamBlueprint | undefined {
     const count = Number(section.count);
     const marks = Number(section.marks_per_question);
     if (!type || !Number.isFinite(count) || !Number.isFinite(marks) || count < 1 || marks < 1) return [];
-    return [{
+    const base: ExamBlueprintSection = {
       id: typeof section.id === 'string' ? section.id.slice(0, 80) : `section-${index + 1}`,
-      title: typeof section.title === 'string' ? section.title.slice(0, 160) : undefined,
       question_type: type,
       count: Math.min(60, Math.round(count)),
       marks_per_question: Math.min(30, Math.round(marks)),
-      difficulty: section.difficulty === 'easy' || section.difficulty === 'medium' || section.difficulty === 'hard' || section.difficulty === 'mixed' ? section.difficulty : 'mixed',
-      strand: typeof section.strand === 'string' ? section.strand.slice(0, 180) : undefined,
-      sub_strand: typeof section.sub_strand === 'string' ? section.sub_strand.slice(0, 180) : undefined,
-      topic: typeof section.topic === 'string' ? section.topic.slice(0, 180) : undefined,
-      competency: typeof section.competency === 'string' ? section.competency.slice(0, 180) : undefined,
-    }];
+      difficulty: (['easy','medium','hard','mixed'].includes(String(section.difficulty)) ? section.difficulty : 'mixed') as ExamBlueprintSection['difficulty'],
+    };
+    const optional: Partial<ExamBlueprintSection> = {};
+    if (typeof section.title === 'string') optional.title = section.title.slice(0, 160);
+    if (typeof section.strand === 'string') optional.strand = section.strand.slice(0, 180);
+    if (typeof section.sub_strand === 'string') optional.sub_strand = section.sub_strand.slice(0, 180);
+    if (typeof section.topic === 'string') optional.topic = section.topic.slice(0, 180);
+    if (typeof section.competency === 'string') optional.competency = section.competency.slice(0, 180);
+    return [{ ...base, ...optional }];
   });
   if (!sections.length) return undefined;
   const totalMarks = Number(raw.total_marks);
@@ -126,7 +147,7 @@ function parseExamRequest(raw: unknown): ExamGenerationRequest | null {
   const durationMinutes = Number(body.durationMinutes);
   const difficulty = body.difficulty === 'easy' || body.difficulty === 'medium' || body.difficulty === 'hard' || body.difficulty === 'mixed'
     ? body.difficulty : 'mixed';
-  const format = body.format === 'cbe' || body.format === 'kpsea' || body.format === 'kjsea' || body.format === 'custom'
+  const format = body.format === 'standard30' || body.format === 'cbe' || body.format === 'kpsea' || body.format === 'kjsea' || body.format === 'custom'
     ? body.format : 'cbe';
   return {
     title: typeof body.title === 'string' ? body.title.trim().slice(0, 255) : undefined,
@@ -150,6 +171,7 @@ function parseExamRequest(raw: unknown): ExamGenerationRequest | null {
     learningOutcomes: stringArray(body.learningOutcomes, 30),
     competencies: stringArray(body.competencies, 20),
     blueprint: parseBlueprint(body.blueprint),
+    paperVariant: normalizePaperVariant(body.paperVariant),
     preset: typeof body.preset === 'string' ? body.preset.trim().slice(0, 80) : undefined,
     variationKey: typeof body.variationKey === 'string' ? body.variationKey.trim().slice(0, 120) : undefined,
     avoidQuestionStems: stringArray(body.avoidQuestionStems, 40),
@@ -258,7 +280,8 @@ async function loadVettedContext(
     .select('content_summary, subject, grade_level, strand, sub_strand, source_name')
     .eq('is_approved', true)
     .eq('subject', request.subject)
-    .limit(24);
+    .eq('grade_level', request.gradeLevel)
+    .limit(100);
 
   const requestedGrade = normalizeContextKey(request.gradeLevel);
   const requestedStrands = new Set(request.strands.map(normalizeContextKey));
@@ -312,19 +335,56 @@ async function handleExamGeneration(
     jsonError(response, 400, 'Invalid exam-generation request.');
     return;
   }
-  const parsedRequest: ExamGenerationRequest = rawParsedRequest.blueprint
+  const paperVariant = supportsTwoPapers(rawParsedRequest.subject)
+    ? normalizePaperVariant(rawParsedRequest.paperVariant)
+    : 'single';
+  const kjseaSpec = rawParsedRequest.format === 'kjsea'
+    ? getKjseaPaperSpec(rawParsedRequest.subject, paperVariant)
+    : null;
+  let parsedRequest: ExamGenerationRequest = rawParsedRequest.format === 'kjsea'
+    ? {
+        ...rawParsedRequest,
+        totalMarks: kjseaSpec?.marks ?? rawParsedRequest.totalMarks,
+        durationMinutes: kjseaSpec?.duration_minutes ?? rawParsedRequest.durationMinutes,
+        blueprint: makeKjseaBlueprint(rawParsedRequest.subject, paperVariant, rawParsedRequest.difficulty)
+          || makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty),
+      }
+    : ['standard30', 'kpsea'].includes(rawParsedRequest.format)
+    ? { ...rawParsedRequest, blueprint: makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty) }
+    : rawParsedRequest.blueprint
     ? rawParsedRequest
     : {
         ...rawParsedRequest,
-        blueprint: ['kpsea', 'kjsea'].includes(rawParsedRequest.format)
-          ? makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty)
-          : makeBalancedBlueprint(rawParsedRequest.questionTypes, rawParsedRequest.totalMarks, rawParsedRequest.difficulty),
+        blueprint: makeBalancedBlueprint(rawParsedRequest.questionTypes, rawParsedRequest.totalMarks, rawParsedRequest.difficulty),
       };
+  if (parsedRequest.format === 'standard30') {
+    parsedRequest = { ...parsedRequest, durationMinutes: 45 };
+  }
+  if (paperVariant !== 'single' && parsedRequest.format !== 'kjsea') {
+    parsedRequest = {
+      ...parsedRequest,
+      paperVariant,
+      blueprint: makePaperVariantBlueprint(parsedRequest.blueprint, paperVariant, parsedRequest.format),
+    };
+  }
   const accessError = assertGenerationAccess(profile);
   if (accessError) {
     jsonError(response, 403, accessError);
     return;
   }
+  // Never trust a client-supplied school name for a persisted paper. Resolve it
+  // from the authenticated school so PDFs and saved papers cannot fall back to
+  // product branding or be renamed by a stale client bundle.
+  const { data: school, error: schoolError } = await supabase
+    .from('schools')
+    .select('name')
+    .eq('id', profile.school_id)
+    .maybeSingle();
+  if (schoolError || !school?.name?.trim()) {
+    jsonError(response, 503, 'Your school name could not be loaded. Refresh the page and try again.');
+    return;
+  }
+  parsedRequest = { ...parsedRequest, schoolName: school.name.trim().slice(0, 255) };
   const rateKey = `${user.id}:${request.socket?.remoteAddress || 'unknown'}`;
   if (!checkRateLimit(rateKey)) {
     jsonError(response, 429, 'Generation limit reached. Please wait a few minutes before trying again.');
@@ -365,27 +425,77 @@ async function handleExamGeneration(
         ? await generateExamWithGemini(generationRequest, vetted.context)
         : await generateExamWithDeepSeek(generationRequest, vetted.context);
     } catch (error) {
-      // Gemini is the preferred provider when configured, but a transient
-      // quota, model, or structured-output failure must not break the already
-      // verified DeepSeek route. Explicit Gemini configuration failures remain
-      // actionable instead of being silently masked.
-      if (!useGemini || error instanceof GeminiConfigurationError) throw error;
-      console.warn('[exam-gen] Gemini primary failed; using DeepSeek fallback:', error instanceof Error ? error.message.slice(0, 240) : 'unknown failure');
-      actualProvider = 'deepseek';
-      actualModel = process.env.AI_EXAM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-      draftPaper = await generateExamWithDeepSeek(generationRequest, vetted.context);
+      // Either provider may fail transiently (quota, timeout, malformed JSON,
+      // or a provider-side model error). Try the other configured route before
+      // returning a failure to the author.
+      const canFallback = useGemini
+        ? Boolean(process.env.DEEPSEEK_API_KEY)
+        : Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+      if (!canFallback || error instanceof GeminiConfigurationError || error instanceof DeepSeekConfigurationError) throw error;
+      console.warn(`[exam-gen] ${primaryProvider} primary failed; using fallback provider:`, error instanceof Error ? error.message.slice(0, 240) : 'unknown failure');
+      actualProvider = useGemini ? 'deepseek' : 'gemini';
+      actualModel = useGemini
+        ? (process.env.AI_EXAM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat')
+        : (process.env.GEMINI_MODEL || 'gemini-3.7-flash');
+      draftPaper = useGemini
+        ? await generateExamWithDeepSeek(generationRequest, vetted.context)
+        : await generateExamWithGemini(generationRequest, vetted.context);
       if (generationJobId) {
         await supabase.from('exam_generation_jobs').update({ provider: actualProvider, model: actualModel }).eq('id', generationJobId);
       }
     }
-    const renderedQuestions = draftPaper.questions
-      .map(filterUnnecessaryExamVisual)
-      .map(withRenderedExamVisual);
-    const validation = validateGeneratedExam(generationRequest, renderedQuestions, { previousStems: recentQuestionStems });
-    if (!validation.passed) {
-      throw new DeepSeekResponseError(`The generated paper needs repair before it can be saved: ${validation.issues.filter((issue) => issue.severity === 'critical').map((issue) => issue.message).slice(0, 3).join(' ')}`);
+    const mathsLike = isMathsLikeSubject(parsedRequest.subject);
+    const postProcess = (question: GeneratedExamQuestion): GeneratedExamQuestion => applyCuratedVisualFallback(
+      repairQuestionAnswers(
+        normalizeQuestionNotation(
+          withRenderedExamVisual(filterUnnecessaryExamVisual(question)),
+          { division: mathsLike },
+        ),
+      ),
+      parsedRequest.subject,
+    );
+    let renderedQuestions = draftPaper.questions.map(postProcess);
+
+    // A single bad question used to fail the entire paper here. Now each broken
+    // question gets its own retry budget and is asked to fix only what was wrong;
+    // only if that still cannot produce usable content is the question removed.
+    // A repair that cannot even be attempted degrades to a drop, never to a lost paper.
+    const repairWithProvider = async (prompt: string): Promise<Record<string, unknown> | null> => {
+      try {
+        return actualProvider === 'gemini'
+          ? await rewriteQuestionWithGemini(prompt)
+          : await rewriteQuestionWithDeepSeek(prompt);
+      } catch {
+        return null;
+      }
+    };
+    const repair = await repairGeneratedExam(generationRequest, renderedQuestions, {
+      rewriteQuestion: async ({ request: scopedRequest, question, issues, attempt }) => {
+        const payload = await repairWithProvider(
+          buildQuestionRewritePrompt(scopedRequest, question, issues, attempt),
+        );
+        const repaired = parseRepairedQuestion(scopedRequest, payload);
+        return repaired ? postProcess(repaired) : null;
+      },
+      rewriteVisual: async ({ request: scopedRequest, question, issues, attempt }) => {
+        const payload = await repairWithProvider(
+          buildVisualRewritePrompt(scopedRequest, question, issues, attempt),
+        );
+        const repaired = parseRepairedQuestion(scopedRequest, payload);
+        if (!repaired) return null;
+        // Adopt only the visual; the question the teacher already has is kept as is.
+        return postProcess({ ...question, visual_spec: repaired.visual_spec ?? null });
+      },
+    }, { previousStems: recentQuestionStems });
+    if (repair.status === 'failed') {
+      throw new DeepSeekResponseError(repair.failureMessage || 'The generated paper could not be repaired.');
     }
-    const paper = { ...draftPaper, questions: renderedQuestions, total_marks: renderedQuestions.reduce((sum, question) => sum + question.marks, 0) };
+    renderedQuestions = repair.questions;
+    const validation = repair.validation;
+    if (repair.status === 'repaired') {
+      console.log('[exam-gen] repair pass:', repair.teacherMessage, JSON.stringify(repair.actions.map((action) => action.kind)));
+    }
+    const paper = { ...draftPaper, paper_variant: parsedRequest.paperVariant || 'single', questions: renderedQuestions, total_marks: renderedQuestions.reduce((sum, question) => sum + question.marks, 0) };
     const { data: storedQuestions, error: questionError } = await supabase
       .from('exam_questions')
       .insert(paper.questions.map((question) => ({
@@ -413,6 +523,7 @@ async function handleExamGeneration(
         metadata: {
           generated_at: paper.generated_at,
           format: paper.format,
+          sub_parts: question.sub_parts || [],
           visual_spec: question.visual_spec
             ? { ...question.visual_spec, rendered_data_url: question.image_url || null }
             : null,
@@ -438,7 +549,9 @@ async function handleExamGeneration(
         term: paper.term || null,
         year: paper.year,
         questions: questionIds,
-        marking_scheme: paper.questions.map((question, index) => `Q${index + 1}: ${question.marking_scheme}`).join('\n'),
+        marking_scheme: paper.questions.map((question, index) => `Q${index + 1}: ${question.sub_parts?.length
+          ? question.sub_parts.map((part) => `${part.label} ${part.marking_scheme || part.correct_answer || 'Award for a correct response.'} [${part.marks} mark${part.marks === 1 ? '' : 's'}]`).join(' | ')
+          : question.marking_scheme}`).join('\n'),
         instructions: paper.instructions.join('\n'),
         duration_minutes: paper.duration_minutes,
         total_marks: paper.total_marks,
@@ -446,7 +559,10 @@ async function handleExamGeneration(
         source_summary: vetted.sourceSummary,
         status: 'draft',
         version_number: 1,
-        blueprint: parsedRequest.blueprint || { sections: [], total_marks: parsedRequest.totalMarks },
+        blueprint: {
+          ...(parsedRequest.blueprint || { sections: [], total_marks: parsedRequest.totalMarks }),
+          paper_variant: parsedRequest.paperVariant || 'single',
+        },
         validation_results: validation.issues,
       })
       .select('id')
@@ -474,6 +590,17 @@ async function handleExamGeneration(
     response.status(200).json({
       paper: { ...paper, id: paperId, status: 'draft', version_number: 1, validation_results: validation.issues, questions: persistedQuestions },
       sourceSummary: vetted.sourceSummary,
+      // What the repair pass had to do, so the author can be told without a red error.
+      repair: {
+        status: repair.status,
+        message: repair.teacherMessage,
+        rewrittenQuestions: repair.rewrittenQuestions,
+        repairedVisuals: repair.repairedVisuals,
+        droppedVisuals: repair.droppedVisuals,
+        droppedQuestions: repair.droppedQuestions,
+        blueprintReconciled: repair.blueprintReconciled,
+        actions: repair.actions,
+      },
     });
   } catch (error) {
     if (generationJobId) {

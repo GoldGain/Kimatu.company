@@ -1,7 +1,8 @@
-import { Routes, Route, Navigate, Outlet } from 'react-router';
+import { Routes, Route, Navigate } from 'react-router';
 import { Toaster } from '@/components/ui/sonner';
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { supabaseUntyped } from '@/lib/supabase/client';
 import MainLayout from '@/components/layout/MainLayout';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -22,6 +23,7 @@ import MasterAdminSchools from '@/pages/dashboard/master-admin/Schools';
 import MasterAdminStudents from '@/pages/dashboard/master-admin/Students';
 import MasterAdminPayments from '@/pages/dashboard/master-admin/Payments';
 import MasterAdminSettings from '@/pages/dashboard/master-admin/Settings';
+import MasterAdminImpersonation from '@/pages/dashboard/master-admin/Impersonation';
 // Reseller Admin pages
 import ResellerDashboard from '@/pages/dashboard/reseller-admin/Dashboard';
 import ResellerSchools from '@/pages/dashboard/reseller-admin/Schools';
@@ -30,6 +32,7 @@ import ResellerPayments from '@/pages/dashboard/reseller-admin/Payments';
 import ResellerChangePassword from '@/pages/dashboard/reseller-admin/ChangePassword';
 import ResellerAccessControl from '@/pages/dashboard/reseller-admin/AccessControl';
 import ResellerStudents from '@/pages/dashboard/reseller-admin/Students';
+import ResellerCommunicate from '@/pages/dashboard/reseller-admin/Communicate';
 import SchoolPortalLockGate from '@/components/SchoolPortalLockGate';
 // Dashboard pages
 import SuperAdminDashboard from '@/pages/dashboard/super-admin/Dashboard';
@@ -59,6 +62,7 @@ import SchoolAdminMarksOverview from '@/pages/dashboard/school-admin/MarksOvervi
 import SchoolAdminCommunicate from '@/pages/dashboard/school-admin/Communicate';
 import SchoolAdminPromoteClass from '@/pages/dashboard/school-admin/PromoteClass';
 import SchoolAdminAssessmentProgress from '@/pages/dashboard/school-admin/AssessmentProgress';
+import SchoolAdminActivityHistory from '@/pages/dashboard/school-admin/ActivityHistory';
 import SchoolAdminClassList from '@/pages/dashboard/school-admin/ClassList';
 import SchoolAdminRecycleBin from '@/pages/dashboard/school-admin/RecycleBin';
 import CombineExams from '@/pages/dashboard/CombineExams';
@@ -136,6 +140,41 @@ function ProtectedRoute({
   lockTarget?: 'school_admin' | 'dean_of_studies';
 }) {
   const { user, loading } = useAuth();
+  const [dosAuthorization, setDosAuthorization] = useState<'checking' | 'authorized' | 'denied'>(() => (
+    lockTarget === 'dean_of_studies' && user?.role === 'teacher' ? 'checking' : 'authorized'
+  ));
+  const [dosCheckedUserId, setDosCheckedUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (lockTarget !== 'dean_of_studies' || user?.role !== 'teacher' || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data: teacher } = await supabaseUntyped
+        .from('teachers')
+        .select('id, school_id, is_dean_of_studies')
+        .eq('profile_id', user.id)
+        .maybeSingle();
+      let authorized = Boolean(teacher?.is_dean_of_studies);
+      if (!authorized && teacher?.school_id) {
+        const { data: school } = await supabaseUntyped
+          .from('schools')
+          .select('dean_of_studies_id')
+          .eq('id', teacher.school_id)
+          .maybeSingle();
+        authorized = school?.dean_of_studies_id === teacher.id;
+      }
+      if (!cancelled) {
+        setDosAuthorization(authorized ? 'authorized' : 'denied');
+        setDosCheckedUserId(user.id);
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setDosAuthorization('denied');
+        setDosCheckedUserId(user.id);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [lockTarget, user?.id, user?.role]);
 
   if (loading) {
     return <LoadingSpinner />;
@@ -143,6 +182,8 @@ function ProtectedRoute({
 
   if (!user) return <Navigate to="/auth/login" replace />;
   if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />;
+  if (lockTarget === 'dean_of_studies' && user.role === 'teacher' && (dosAuthorization === 'checking' || dosCheckedUserId !== user.id)) return <LoadingSpinner />;
+  if (lockTarget === 'dean_of_studies' && dosAuthorization === 'denied') return <Navigate to="/teacher" replace />;
 
   const body = lockTarget ? (
     <SchoolPortalLockGate target={lockTarget}>{children}</SchoolPortalLockGate>
@@ -189,6 +230,7 @@ function AppRoutes() {
       <Route path="/master-admin/students" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminStudents /></ProtectedRoute>} />
       <Route path="/master-admin/payments" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminPayments /></ProtectedRoute>} />
       <Route path="/master-admin/settings" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminSettings /></ProtectedRoute>} />
+      <Route path="/master-admin/impersonation" element={<ProtectedRoute allowedRoles={['master_super_admin']}><MasterAdminImpersonation /></ProtectedRoute>} />
       {/* Reseller Super Admin routes */}
       <Route path="/reseller-admin" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerDashboard /></ProtectedRoute>} />
       <Route path="/reseller-admin/schools" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerSchools /></ProtectedRoute>} />
@@ -196,6 +238,7 @@ function AppRoutes() {
       <Route path="/reseller-admin/payments" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerPayments /></ProtectedRoute>} />
       <Route path="/reseller-admin/access-control" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerAccessControl /></ProtectedRoute>} />
       <Route path="/reseller-admin/students" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerStudents /></ProtectedRoute>} />
+      <Route path="/reseller-admin/communicate" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerCommunicate /></ProtectedRoute>} />
       <Route path="/reseller-admin/change-password" element={<ProtectedRoute allowedRoles={['reseller_super_admin']}><ResellerChangePassword /></ProtectedRoute>} />
       {/* Super Admin routes */}
       <Route path="/super-admin" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminDashboard /></ProtectedRoute>} />
@@ -214,7 +257,8 @@ function AppRoutes() {
       <Route path="/school-admin/classes" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminClasses /></ProtectedRoute>} />
       <Route path="/school-admin/fees" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminFees /></ProtectedRoute>} />
       <Route path="/school-admin/results" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminResults /></ProtectedRoute>} />
-      <Route path="/school-admin/upload-results" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminResults /></ProtectedRoute>} />
+      <Route path="/school-admin/exam-generator" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><ExamGeneratorPage /></ProtectedRoute>} />
+      <Route path="/school-admin/upload-results" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><TeacherResultsUpload privileged /></ProtectedRoute>} />
       <Route path="/school-admin/announcements" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminAnnouncements /></ProtectedRoute>} />
       <Route path="/school-admin/subjects" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminSubjects /></ProtectedRoute>} />
       <Route path="/school-admin/branding" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminBranding /></ProtectedRoute>} />
@@ -227,6 +271,7 @@ function AppRoutes() {
       <Route path="/school-admin/profile" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminProfile /></ProtectedRoute>} />
       <Route path="/school-admin/assessments" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminAssessments /></ProtectedRoute>} />
       <Route path="/school-admin/assessment-progress" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminAssessmentProgress /></ProtectedRoute>} />
+      <Route path="/school-admin/activity" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminActivityHistory /></ProtectedRoute>} />
       <Route path="/school-admin/class-list" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminClassList /></ProtectedRoute>} />
       <Route path="/school-admin/recycle-bin" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminRecycleBin /></ProtectedRoute>} />
       <Route path="/school-admin/combine-exams" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><CombineExams /></ProtectedRoute>} />
@@ -270,6 +315,8 @@ function AppRoutes() {
       {/* Dean of Studies routes - accessible to teachers who are DoS */}
       <Route path="/dean-of-studies" element={<ProtectedRoute allowedRoles={['teacher']} lockTarget="dean_of_studies"><DeanOfStudiesDashboard /></ProtectedRoute>} />
       <Route path="/dean-of-studies/results" element={<ProtectedRoute allowedRoles={['teacher']} lockTarget="dean_of_studies"><DoSResults /></ProtectedRoute>} />
+      <Route path="/dean-of-studies/stream-dashboard" element={<ProtectedRoute allowedRoles={['teacher']} lockTarget="dean_of_studies"><StreamDashboard /></ProtectedRoute>} />
+      <Route path="/dean-of-studies/combine-exams" element={<ProtectedRoute allowedRoles={['teacher']} lockTarget="dean_of_studies"><CombineExams /></ProtectedRoute>} />
 
       {/* Student routes */}
       <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><StudentDashboard /></ProtectedRoute>} />

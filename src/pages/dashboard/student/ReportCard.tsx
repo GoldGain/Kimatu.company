@@ -30,9 +30,13 @@ import {
   DEFAULT_PDF_FONT_SIZE,
   type PdfFontSize,
 } from '@/lib/pdfFontSize';
-import { getSchoolLevelBand } from '@/lib/grading';
+import { calculateGradeForClass, getSchoolLevelBand, gradeLabelForClass, gradePointsForClass, is844Curriculum } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
+import { formatClassStream } from '@/lib/class-label';
+import { rankByUnifiedRule } from '@/lib/ranking';
+import { fetchAllRows } from '@/lib/paginatedQuery';
+import { aggregateLearnerTotals } from '@/lib/learnerTotals';
 
 export default function StudentReportCard() {
   const { user } = useAuth();
@@ -46,6 +50,7 @@ export default function StudentReportCard() {
   const [generating, setGenerating] = useState(false);
   const [previousAvg, setPreviousAvg] = useState<number | null>(null);
   const [totalStudents, setTotalStudents] = useState(0);
+  const [classPosition, setClassPosition] = useState<number | null>(null);
   const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: '' });
   const [signatures, setSignatures] = useState<SignatureInfo>({});
   const [classBestList, setClassBestList] = useState<BestInSubject[]>([]);
@@ -59,8 +64,9 @@ export default function StudentReportCard() {
     try {
       const { data: studentData } = await supabaseUntyped
         .from('students')
-        .select('*, classes(name, level, grade_level, curriculum, class_teacher_id)')
+        .select('*, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum, class_teacher_id)')
         .eq('profile_id', user?.id)
+        .eq('school_id', user?.schoolId)
         .single();
       setStudent(studentData);
       setPhotoLoadError(false);
@@ -190,19 +196,39 @@ export default function StudentReportCard() {
       .from('results')
       .select('*, subjects(name), terms(name, academic_year), school_exams(name, type)')
       .eq('student_id', student.id)
+      .eq('school_id', student.school_id)
       .eq('term_id', selectedTerm)
       .order('subjects(name)');
     setResults(data || []);
     await fetchPreviousAvg();
-    const { data: classResults } = await supabaseUntyped
+    // Paged: PostgREST returns at most 1000 rows, and a class-sized result set
+    // exceeds that, so an unpaged read would truncate the ranking cohort.
+    const classResults = await fetchAllRows((from, to) => supabaseUntyped
       .from('results')
       .select('*, students(id, first_name, last_name), subjects(name)')
       .eq('class_id', student.class_id)
-      .eq('term_id', selectedTerm);
+      .eq('school_id', student.school_id)
+      .eq('term_id', selectedTerm)
+      .order('created_at')
+      .order('id')
+      .range(from, to));
     if (classResults && classResults.length > 0) {
       setClassBestList(computeBestPerSubject(classResults, student?.classes || {}));
     } else {
       setClassBestList([]);
+    }
+    // Unified ranking: the report card position must match the Student Portal
+    // and the Class Summary for the same learner, term and assessment.
+    if (classResults && classResults.length > 0) {
+      // Same aggregation as the class summary, so both report the same total.
+      const ranked = rankByUnifiedRule(
+        aggregateLearnerTotals(classResults, student?.classes || {}),
+        getSchoolLevelBand(student?.classes || {}),
+      );
+      const entry = ranked.find((row) => row.studentId === student.id);
+      setClassPosition(entry ? entry.position : null);
+    } else {
+      setClassPosition(null);
     }
   };
 
@@ -211,7 +237,8 @@ export default function StudentReportCard() {
     const { data: allResults } = await supabaseUntyped
       .from('results')
         .select('percentage, marks, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
-      .eq('student_id', student.id)
+        .eq('student_id', student.id)
+        .eq('school_id', student.school_id)
       .order('terms(academic_year)', { ascending: true })
       .order('terms(name)', { ascending: true });
     if (!allResults) {
@@ -236,6 +263,7 @@ export default function StudentReportCard() {
       .from('results')
       .select('marks, out_of, percentage')
       .eq('student_id', student.id)
+      .eq('school_id', student.school_id)
       .eq('term_id', prevTerm.id);
     if (!prevResults || prevResults.length === 0) { setPreviousAvg(null); return; }
     const totalPct = prevResults.reduce((s: number, r: any) => s + (r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
@@ -243,7 +271,7 @@ export default function StudentReportCard() {
   };
 
   const classDataForGrading = student?.classes || {};
-  const is = (classDataForGrading?.curriculum || 'CBE') === '';
+  const is = is844Curriculum(classDataForGrading);
   const band = getSchoolLevelBand(classDataForGrading);
   const isPrimary = band === 'primary';
 
@@ -259,26 +287,15 @@ export default function StudentReportCard() {
       const avgPercentage = results.length
         ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
         : 0;
-      const totalPoints = is
-        ? results.reduce((s, r) => {
-            const pct = getPercentage(r);
-            if (pct >= 80) return s + 12; if (pct >= 75) return s + 11; if (pct >= 70) return s + 10;
-            if (pct >= 65) return s + 9; if (pct >= 60) return s + 8; if (pct >= 55) return s + 7;
-            if (pct >= 50) return s + 6; if (pct >= 45) return s + 5; if (pct >= 40) return s + 4;
-            if (pct >= 35) return s + 3; if (pct >= 30) return s + 2; return s + 1;
-          }, 0)
-        : isPrimary
-          ? null
-          : results.reduce((s, r) => {
-              const pct = getPercentage(r);
-              if (pct >= 90) return s + 8; if (pct >= 75) return s + 7; if (pct >= 58) return s + 6;
-              if (pct >= 41) return s + 5; if (pct >= 31) return s + 4; if (pct >= 21) return s + 3;
-              if (pct >= 11) return s + 2; return s + 1;
-            }, 0);
+      const totalPoints = isPrimary
+        ? null
+        : results.reduce((sum, result) => sum + gradePointsForClass(getPercentage(result), classDataForGrading), 0);
 
       const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
       const isNew = deviation === null;
-      const position = results[0]?.class_position || results[0]?.position || null;
+      // Prefer the unified ranking position so the report card cannot disagree
+      // with the portal and class summary; fall back to the stored value.
+      const position = classPosition ?? results[0]?.class_position ?? results[0]?.position ?? null;
       const positionStr = formatPosition(position, totalStudents || 0);
 
       const subjectScores = results.map(r => ({
@@ -304,7 +321,7 @@ export default function StudentReportCard() {
         doc,
         studentFullName,
         student.admission_number || 'N/A',
-        classDataForGrading.name || 'N/A',
+        formatClassStream(classDataForGrading),
         term?.name || '',
         term?.academic_year || '',
         positionStr,
@@ -362,7 +379,7 @@ export default function StudentReportCard() {
             <div>
               <h2 className="text-lg font-bold text-[#111111]">{student.first_name} {student.last_name}</h2>
               <p className="text-sm text-[#666666]">Assessment #: {student.admission_number}</p>
-              <p className="text-sm text-[#666666]">Class: {student.classes?.name}</p>
+              <p className="text-sm text-[#666666]">Class: {formatClassStream(student.classes)}</p>
               {results[0]?.school_exams?.name && (
                 <p className="text-sm font-semibold text-[#6A1B9A] mt-1">Assessment: {results[0].school_exams.name}</p>
               )}
@@ -459,7 +476,7 @@ export default function StudentReportCard() {
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is ? ' Grade' : 'CBE Grade'}</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is ? '844 Grade' : 'CBE Grade'}</th>
                   {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                 </tr>
@@ -467,40 +484,12 @@ export default function StudentReportCard() {
               <tbody>
                 {results.map((r, i) => {
                   const percentage = getPercentage(r);
-                  const grading = (() => {
-                    if (is) {
-                      if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent' };
-                      if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good' };
-                      if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good' };
-                      if (percentage >= 65) return { grade: 'B', points: 9, descriptor: 'Good' };
-                      if (percentage >= 60) return { grade: 'B-', points: 8, descriptor: 'Good' };
-                      if (percentage >= 55) return { grade: 'C+', points: 7, descriptor: 'Average' };
-                      if (percentage >= 50) return { grade: 'C', points: 6, descriptor: 'Average' };
-                      if (percentage >= 45) return { grade: 'C-', points: 5, descriptor: 'Average' };
-                      if (percentage >= 40) return { grade: 'D+', points: 4, descriptor: 'Below Average' };
-                      if (percentage >= 35) return { grade: 'D', points: 3, descriptor: 'Below Average' };
-                      if (percentage >= 30) return { grade: 'D-', points: 2, descriptor: 'Below Average' };
-                      return { grade: 'E', points: 1, descriptor: 'Poor' };
-                    }
-                    const band = getSchoolLevelBand(classDataForGrading);
-                    const g = (() => {
-                      if (band === 'junior' || band === 'senior') {
-                        if (percentage >= 90) return { subLevel: 'EE1', grade: 'EE', points: 8 };
-                        if (percentage >= 75) return { subLevel: 'EE2', grade: 'EE', points: 7 };
-                        if (percentage >= 58) return { subLevel: 'ME1', grade: 'ME', points: 6 };
-                        if (percentage >= 41) return { subLevel: 'ME2', grade: 'ME', points: 5 };
-                        if (percentage >= 31) return { subLevel: 'AE1', grade: 'AE', points: 4 };
-                        if (percentage >= 21) return { subLevel: 'AE2', grade: 'AE', points: 3 };
-                        if (percentage >= 11) return { subLevel: 'BE1', grade: 'BE', points: 2 };
-                        return { subLevel: 'BE2', grade: 'BE', points: 1 };
-                      }
-                      if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0 };
-                      if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0 };
-                      if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0 };
-                      return { subLevel: 'BE', grade: 'BE', points: 0 };
-                    })();
-                    return { grade: g.subLevel, points: g.points, descriptor: g.grade === 'EE' ? 'Exceeding Expectation' : g.grade === 'ME' ? 'Meeting Expectation' : g.grade === 'AE' ? 'Approaching Expectation' : 'Below Expectation' };
-                  })();
+                  const gradeInfo = calculateGradeForClass(percentage, classDataForGrading);
+                  const grading = {
+                    grade: gradeLabelForClass(percentage, classDataForGrading),
+                    points: gradeInfo.points,
+                    descriptor: gradeInfo.descriptor,
+                  };
                   return (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2 px-3 font-medium">{r.subjects?.name === 'Creative Arts' ? 'C-Arts' : r.subjects?.name}</td>

@@ -4,11 +4,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Send, Loader2, Users, UserCheck, Bell, CheckCircle, Search, CheckSquare, Square, UserRound, WalletCards, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { sendBulkSMS } from '@/lib/sms';
+import { sendBulkSMS, formatSmsDeliverySummary, summarizeSmsAttempts, type SmsDeliverySummary } from '@/lib/sms';
+import { formatClassStream } from '@/lib/class-label';
 
 type RecipientType = 'class' | 'teachers' | 'parents';
 type Teacher = { id: string; first_name: string; last_name: string; phone?: string | null };
-type SchoolClass = { id: string; name: string };
+type SchoolClass = { id: string; name: string; stream?: string | null; stream_name?: string | null };
 type StudentParentRow = {
   key: string;
   studentId: string;
@@ -35,6 +36,7 @@ export default function Communicate() {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [smsBalance, setSmsBalance] = useState<number | null>(null);
+  const [lastSmsReport, setLastSmsReport] = useState<SmsDeliverySummary | null>(null);
 
   useEffect(() => { fetchData(); }, [user?.schoolId]);
 
@@ -42,16 +44,16 @@ export default function Communicate() {
     const schoolId = user?.schoolId;
     if (!schoolId) return;
     const [{ data: classRows }, { data: teacherRows }, { data: studentRows }, { data: wallet }] = await Promise.all([
-      supabaseUntyped.from('classes').select('id, name').eq('school_id', schoolId).eq('is_active', true).order('name'),
+      supabaseUntyped.from('classes').select('id, name, stream, stream_name').eq('school_id', schoolId).eq('is_active', true).order('name'),
       supabaseUntyped.from('teachers').select('id, first_name, last_name, phone').eq('school_id', schoolId).eq('is_active', true).order('first_name'),
-      supabaseUntyped.from('students').select('id, first_name, last_name, class_id, parent_name, parent_phone, parent2_name, parent2_phone, classes(name)').eq('school_id', schoolId).eq('is_active', true).order('admission_number'),
+      supabaseUntyped.from('students').select('id, first_name, last_name, class_id, parent_name, parent_phone, parent2_name, parent2_phone, classes!students_class_id_fkey(name, stream, stream_name)').eq('school_id', schoolId).eq('is_active', true).order('admission_number'),
       supabaseUntyped.from('school_sms_wallets').select('sms_balance').eq('school_id', schoolId).maybeSingle(),
     ]);
-    const classMap = new Map((classRows || []).map((item: SchoolClass) => [item.id, item.name]));
+    const classMap = new Map((classRows || []).map((item: SchoolClass) => [item.id, formatClassStream(item)]));
     const rows: StudentParentRow[] = [];
     (studentRows || []).forEach((student: any) => {
       const studentName = `${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Unnamed student';
-      const className = classMap.get(student.class_id) || student.classes?.name || 'No class';
+      const className = classMap.get(student.class_id) || formatClassStream(student.classes);
       [[student.parent_phone, student.parent_name], [student.parent2_phone, student.parent2_name]].forEach(([phone, name], index) => {
         const normalizedPhone = String(phone || '').trim();
         if (normalizedPhone.length < 9) return;
@@ -132,19 +134,22 @@ export default function Communicate() {
     if (recipients.length === 0) { toast.error('Select at least one recipient with a valid phone number'); return; }
     setSending(true);
     let successCount = 0;
-    let firstError = '';
+    const attempts: any[] = [];
     for (const recipient of recipients) {
       const result = await sendBulkSMS([recipient.phone], `${recipient.prefix || ''}${message}`, undefined, user?.schoolId || undefined);
+      attempts.push(result);
       if (result.success) successCount += 1;
-      else if (!firstError) firstError = result.data?.[0]?.error || result.error || 'SMS delivery failed';
     }
     setSending(false);
+    const report = summarizeSmsAttempts(attempts, recipients.length);
+    setLastSmsReport(report);
+    if (report.balanceRemaining !== null) setSmsBalance(report.balanceRemaining);
     if (successCount === 0) {
-      toast.error(`No SMS was sent. ${firstError}`);
+      toast.error(formatSmsDeliverySummary(report));
     } else if (successCount < recipients.length) {
-      toast.warning(`SMS sent to ${successCount} of ${recipients.length}. ${firstError ? `First failure: ${firstError}` : ''}`);
+      toast.warning(formatSmsDeliverySummary(report));
     } else {
-      toast.success(`SMS sent to all ${successCount} selected recipient(s)`);
+      toast.success(formatSmsDeliverySummary(report));
     }
     if (successCount > 0) setMessage('');
   };
@@ -170,13 +175,13 @@ export default function Communicate() {
         </div>
       </div>
 
-      {recipientType === 'class' && <div className="bg-white rounded-2xl p-5 border border-gray-100"><label className="block text-sm font-medium text-gray-700 mb-2">Choose class first</label><select value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); setSelectedParentKeys([]); }} className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"><option value="">Select a class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>}
+      {recipientType === 'class' && <div className="bg-white rounded-2xl p-5 border border-gray-100"><label className="block text-sm font-medium text-gray-700 mb-2">Choose class first</label><select value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); setSelectedParentKeys([]); }} className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm"><option value="">Select a class</option>{classes.map((item) => <option key={item.id} value={item.id}>{formatClassStream(item)}</option>)}</select></div>}
 
       {recipientType === 'teachers' && <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden"><div className="p-5 border-b"><div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between"><div><h2 className="font-semibold">Choose teachers</h2><p className="text-xs text-gray-500">Tick as many teachers as you need.</p></div><button type="button" onClick={selectAllTeachers} className="inline-flex items-center gap-2 text-sm text-blue-700 font-medium"><CheckSquare className="w-4 h-4" /> {selectedTeacherIds.length === visibleTeachers.filter((t) => t.phone).length ? 'Unmark all' : 'Mark all'}</button></div><div className="relative mt-3"><Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" /><input value={teacherSearch} onChange={(e) => setTeacherSearch(e.target.value)} placeholder="Search teacher name or phone" className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 text-sm" /></div></div><div className="max-h-72 overflow-y-auto divide-y">{visibleTeachers.map((teacher) => <label key={teacher.id} className="flex items-center gap-3 px-5 py-3 hover:bg-blue-50 cursor-pointer"><input type="checkbox" checked={selectedTeacherIds.includes(teacher.id)} disabled={!teacher.phone} onChange={() => toggleTeacher(teacher.id)} className="h-4 w-4 accent-blue-600" /><UserRound className="w-4 h-4 text-gray-400" /><span className="text-sm">{teacher.first_name} {teacher.last_name}<small className="block text-xs text-gray-500">{teacher.phone || 'No phone number'}</small></span></label>)}</div></div>}
 
       {(recipientType === 'parents' || (recipientType === 'class' && selectedClass)) && <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden"><div className="p-5 border-b"><div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between"><div><h2 className="font-semibold">{parentSelectionTitle}</h2><p className="text-xs text-gray-500">Each row shows the student name and the parent name, so you can identify the correct family.</p></div><button type="button" onClick={selectAllParents} className="inline-flex items-center gap-2 text-sm text-blue-700 font-medium"><CheckSquare className="w-4 h-4" /> Mark all visible</button></div><div className="relative mt-3"><Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" /><input value={parentSearch} onChange={(e) => setParentSearch(e.target.value)} placeholder="Search student name, parent name, class, or phone" className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 text-sm" /></div><label className="flex items-center gap-2 mt-3 text-sm text-gray-700"><input type="checkbox" checked={includeStudentName} onChange={(e) => setIncludeStudentName(e.target.checked)} className="h-4 w-4 accent-blue-600" /> Include student and parent names in the SMS message</label></div><div className="max-h-80 overflow-y-auto divide-y">{activeParentRows.map((row) => <label key={row.key} className="flex items-center gap-3 px-5 py-3 hover:bg-blue-50 cursor-pointer"><input type="checkbox" checked={selectedParentKeys.includes(row.key)} onChange={() => toggleParent(row.key)} className="h-4 w-4 accent-blue-600" />{selectedParentKeys.includes(row.key) ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4 text-gray-300" />}<span className="text-sm"><strong className="text-gray-900">{row.studentName}</strong><span className="text-gray-400"> — Parent: </span><strong className="text-gray-700">{row.parentName}</strong><small className="block text-xs text-gray-500">{row.className} · {row.phone}</small></span></label>)}{activeParentRows.length === 0 && <p className="p-8 text-center text-sm text-gray-500">No parent phone records match your search.</p>}</div></div>}
 
-      <div className="bg-white rounded-2xl p-6 border border-gray-100"><div className="flex items-center gap-2 mb-4"><CheckCircle className="w-4 h-4 text-green-600" /><span className="text-sm text-gray-600">{recipientCount} recipient(s) selected</span></div><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={recipientType === 'teachers' ? 'Write a message to the selected teachers...' : includeStudentName ? 'Write a message to the selected parents. The student and parent name can be included...' : 'Write a message to the selected parents...'} rows={5} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" /><div className="flex items-center justify-between mt-2"><p className="text-xs text-gray-400">{message.length} characters</p><p className="text-xs text-gray-400">Sender: PROCALL</p></div><button type="button" onClick={handleSend} disabled={sending || !message.trim() || recipientCount === 0} className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <><Send className="w-4 h-4" /> Send SMS to {recipientCount} selected</>}</button></div>
+      <div className="bg-white rounded-2xl p-6 border border-gray-100"><div className="flex items-center gap-2 mb-4"><CheckCircle className="w-4 h-4 text-green-600" /><span className="text-sm text-gray-600">{recipientCount} recipient(s) selected</span></div><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={recipientType === 'teachers' ? 'Write a message to the selected teachers...' : includeStudentName ? 'Write a message to the selected parents. The student and parent name can be included...' : 'Write a message to the selected parents...'} rows={5} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" /><div className="flex items-center justify-between mt-2"><p className="text-xs text-gray-400">{message.length} characters</p><p className="text-xs text-gray-400">Sender: PROCALL</p></div><button type="button" onClick={handleSend} disabled={sending || !message.trim() || recipientCount === 0} className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <><Send className="w-4 h-4" /> Send SMS to {recipientCount} selected</>}</button>{lastSmsReport && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900"><strong>Last delivery report</strong><p className="mt-1">{formatSmsDeliverySummary(lastSmsReport)}</p><p className="mt-1 text-blue-700">Completed: {new Date(lastSmsReport.timestamp).toLocaleString()}</p></div>}</div>
     </div>
   );
 }

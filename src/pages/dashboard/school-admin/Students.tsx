@@ -13,6 +13,7 @@ import PromoteStudentModal from '@/components/PromoteStudentModal';
 import PhotoUpload from '@/components/PhotoUpload';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatClassStream } from '@/lib/class-label';
 
 type SortField = 'name' | 'admission_number' | 'assessment_number' | 'class' | 'gender';
 type SortDir = 'asc' | 'desc';
@@ -105,7 +106,7 @@ export default function SchoolAdminStudents() {
       if (!user?.schoolId) return;
       const { data } = await supabase
         .from('classes')
-        .select('id, name, stream')
+        .select('id, name, stream, stream_name')
         .eq('school_id', user.schoolId)
         .order('name', { ascending: true });
       setClasses(data || []);
@@ -113,25 +114,38 @@ export default function SchoolAdminStudents() {
     fetchClasses();
   }, [user?.schoolId]);
 
+  const studentClassData = (student: any) => {
+    const classRow = classes.find((item: any) => item.id === student.stream_id)
+      || classes.find((item: any) => item.id === student.class_id)
+      || student.classes;
+    if (!classRow) return null;
+    return {
+      ...classRow,
+      stream_name: classRow.stream_name || student.stream || null,
+      stream: student.stream || classRow.stream || null,
+    };
+  };
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdding(true);
     try {
       const admissionNumber = formData.admission_number.trim();
       const assessmentNumber = formData.assessment_number.trim();
-      if (!admissionNumber && !assessmentNumber) throw new Error('Provide an admission number or assessment number.');
-      const { data: existingStudent } = await supabaseUntyped
+      if (!assessmentNumber) throw new Error('Assessment number is required for every new learner account.');
+      const { data: existingAssessment } = await supabaseUntyped
         .from('students')
         .select('id')
         .eq('school_id', user?.schoolId)
-        .or(`admission_number.ilike.${admissionNumber || '__none__'},assessment_number.ilike.${assessmentNumber || '__none__'}`)
+        .ilike('assessment_number', assessmentNumber)
         .maybeSingle();
-      if (existingStudent) throw new Error('Admission or assessment number already exists in this school.');
+      if (existingAssessment) throw new Error('Assessment number already exists in this school.');
       
       // Check for duplicate email
       const { data: emailExists } = await supabaseUntyped
         .from('students')
         .select('id')
+        .eq('school_id', user?.schoolId)
         .eq('student_email', formData.student_email)
         .maybeSingle();
       
@@ -141,9 +155,9 @@ export default function SchoolAdminStudents() {
       
       // Make student email unique to this school to avoid cross-school conflicts
       const schoolPrefix = user?.schoolId ? user.schoolId.split('-')[0] : 'student';
-      const loginIdentifier = admissionNumber || assessmentNumber;
+      const loginIdentifier = assessmentNumber.toUpperCase();
       const studentEmail = formData.student_email || `${loginIdentifier.toLowerCase().replace(/\s+/g, '')}.${schoolPrefix}@student.edu`;
-      const studentPassword = `${loginIdentifier}@2025`;
+      const studentPassword = loginIdentifier;
       
       const authData = await createScopedUser({
         email: studentEmail,
@@ -152,7 +166,9 @@ export default function SchoolAdminStudents() {
         last_name: formData.last_name,
         role: 'student',
         school_id: user?.schoolId || null,
-          metadata: { admission_number: admissionNumber || null, assessment_number: assessmentNumber || null, class_id: formData.class_id },
+        admission_number: admissionNumber || undefined,
+        assessment_number: assessmentNumber,
+        metadata: { admission_number: admissionNumber || null, assessment_number: assessmentNumber, class_id: formData.class_id },
       });
       const studentUserId = authData.user.id;
       const { data: studentData, error: studentError } = await supabaseUntyped
@@ -280,9 +296,19 @@ export default function SchoolAdminStudents() {
     if (!editingStudent) return;
     setSaving(true);
     try {
+      const assessmentNumber = editForm.assessment_number.trim();
+      if (!assessmentNumber) throw new Error('Assessment number is required for every learner account.');
+      const { data: duplicateAssessment } = await supabaseUntyped
+        .from('students')
+        .select('id')
+        .eq('school_id', user?.schoolId)
+        .ilike('assessment_number', assessmentNumber)
+        .neq('id', editingStudent.id)
+        .limit(1);
+      if (duplicateAssessment?.length) throw new Error('Assessment number already exists in this school.');
       const { error } = await supabaseUntyped.from('students').update({
         admission_number: editForm.admission_number.trim() || null,
-        assessment_number: editForm.assessment_number.trim() || null,
+        assessment_number: assessmentNumber,
         first_name: editForm.first_name.trim(),
         middle_name: editForm.middle_name.trim() || null,
         last_name: editForm.last_name.trim(),
@@ -296,7 +322,7 @@ export default function SchoolAdminStudents() {
         disability_status: editForm.disability_status.trim() || null,
         emergency_contact_name: editForm.emergency_contact_name.trim() || null,
         emergency_contact_phone: editForm.emergency_contact_phone.trim() || null,
-      }).eq('id', editingStudent.id);
+      }).eq('id', editingStudent.id).eq('school_id', user?.schoolId);
       if (error) throw new Error(error.message);
       await syncParentAccounts({
         student_id: editingStudent.id,
@@ -388,7 +414,7 @@ export default function SchoolAdminStudents() {
       let aVal = '', bVal = '';
       if (sortField === 'name') { aVal = `${a.first_name} ${a.last_name}`; bVal = `${b.first_name} ${b.last_name}`; }
       if (sortField === 'assessment_number') { aVal = a.assessment_number || ''; bVal = b.assessment_number || ''; }
-      if (sortField === 'class') { aVal = a.classes?.name || ''; bVal = b.classes?.name || ''; }
+      if (sortField === 'class') { aVal = formatClassStream(studentClassData(a)); bVal = formatClassStream(studentClassData(b)); }
       if (sortField === 'gender') { aVal = a.gender || ''; bVal = b.gender || ''; }
       const comparison = aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' });
       return sortDir === 'asc' ? comparison : -comparison;
@@ -406,12 +432,12 @@ export default function SchoolAdminStudents() {
   }
 
   const classGroups: ClassGroup[] = classes.map((cls: any) => {
-    const classStudents = filteredStudents.filter((s: any) => s.class_id === cls.id);
+    const classStudents = filteredStudents.filter((s: any) => s.stream_id === cls.id || (!s.stream_id && s.class_id === cls.id));
     const totalBoys = classStudents.filter((s: any) => s.gender?.toLowerCase() === 'male').length;
     const totalGirls = classStudents.filter((s: any) => s.gender?.toLowerCase() === 'female').length;
     return {
       classId: cls.id,
-      className: cls.name,
+      className: formatClassStream(cls),
       level: cls.level ?? cls.grade_level,
       stream: cls.stream,
       students: classStudents,
@@ -440,7 +466,7 @@ export default function SchoolAdminStudents() {
     const rows = students.filter((student: any) => student.class_id === filterClassId);
     if (!selectedClass || rows.length === 0) { toast.info('No learners found in the selected class.'); return; }
     const doc = new jsPDF();
-    doc.setFontSize(16); doc.text(`${selectedClass.name} - Learner List`, 14, 16);
+    doc.setFontSize(16); doc.text(`${formatClassStream(selectedClass)} - Learner List`, 14, 16);
     doc.setFontSize(11); doc.text(`Generated ${new Date().toLocaleDateString()}`, 14, 24);
     autoTable(doc, {
       startY: 32,
@@ -448,8 +474,8 @@ export default function SchoolAdminStudents() {
       body: rows.map((student: any, index: number) => [index + 1, student.admission_number || '-', student.assessment_number || '-', `${student.first_name} ${student.middle_name || ''} ${student.last_name}`.replace(/\s+/g, ' ').trim(), student.gender || '-', student.parent_name || '-', student.parent_phone || '-']),
       styles: { fontSize: 8 }, headStyles: { fillColor: [37, 99, 235] },
     });
-    doc.save(`learner_list_${String(selectedClass.name).replace(/[^a-z0-9]+/gi, '_')}.pdf`);
-    toast.success(`Downloaded all ${rows.length} learners in ${selectedClass.name}.`);
+    doc.save(`learner_list_${classLabelFilename(selectedClass)}.pdf`);
+    toast.success(`Downloaded all ${rows.length} learners in ${formatClassStream(selectedClass)}.`);
   };
 
   const inputCls = "w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]";
@@ -494,7 +520,7 @@ export default function SchoolAdminStudents() {
           <select value={filterClassId} onChange={e => setFilterClassId(e.target.value)} className="w-full pl-11 pr-10 py-3 bg-white rounded-2xl text-sm border focus:outline-none focus:ring-2 focus:ring-[#2563EB] appearance-none">
             <option value="">All Classes</option>
             {classes.map((cls) => (
-              <option key={cls.id} value={cls.id}>{cls.name}{cls.stream ? ` (${cls.stream})` : ''}</option>
+              <option key={cls.id} value={cls.id}>{formatClassStream(cls)}</option>
             ))}
           </select>
         </div>
@@ -506,14 +532,14 @@ export default function SchoolAdminStudents() {
       {showAdd && (
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
           <h3 className="text-lg font-semibold mb-2">Add New Learner</h3>
-          <p className="text-xs text-blue-600 mb-1">Learner password: <strong>[Admission Number or Assessment Number]@2025</strong></p>
+          <p className="text-xs text-blue-600 mb-1">Learner login: <strong>Assessment Number</strong> · initial password: <strong>capitalized Assessment Number</strong></p>
           <p className="text-xs text-green-600 mb-4">Parent account auto-created with password: <strong>Parent@2025</strong></p>
           <form onSubmit={handleAdd}>
             {/* Section: Basic Info */}
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Basic Information</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <input placeholder="Admission Number (optional)" value={formData.admission_number} onChange={e => setFormData({...formData, admission_number: e.target.value})} className={inputCls} />
-              <input placeholder="Assessment Number (optional)" value={formData.assessment_number} onChange={e => setFormData({...formData, assessment_number: e.target.value})} className={inputCls} />
+              <input placeholder="Assessment Number *" value={formData.assessment_number} onChange={e => setFormData({...formData, assessment_number: e.target.value})} className={inputCls} required />
               <input placeholder="First Name *" value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className={inputCls} required />
               <input placeholder="Middle Name (optional)" value={formData.middle_name} onChange={e => setFormData({...formData, middle_name: e.target.value})} className={inputCls} />
               <input placeholder="Last Name / Surname *" value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className={inputCls} required />
@@ -532,7 +558,7 @@ export default function SchoolAdminStudents() {
               <select value={formData.class_id} onChange={e => setFormData({...formData, class_id: e.target.value})} className={inputCls + " bg-white"} required>
                 <option value="">Select Class *</option>
                 {classes.map((cls) => (
-                  <option key={cls.id} value={cls.id}>{cls.name}{cls.stream ? ` (${cls.stream})` : ''}</option>
+                  <option key={cls.id} value={cls.id}>{formatClassStream(cls)}</option>
                 ))}
               </select>
               <select value={formData.boarding_status} onChange={e => setFormData({...formData, boarding_status: e.target.value})} className={inputCls + " bg-white"}>
@@ -617,7 +643,8 @@ export default function SchoolAdminStudents() {
                 ) : (
                   (() => {
                     const grouped = filteredStudents.reduce((acc: Record<string, any[]>, s: any) => {
-                      const className = s.classes?.name || 'No Class';
+                      const formattedClass = formatClassStream(studentClassData(s));
+                      const className = formattedClass === 'Unknown Class' ? 'Unassigned' : formattedClass;
                       if (!acc[className]) acc[className] = [];
                       acc[className].push(s);
                       return acc;
@@ -652,7 +679,7 @@ export default function SchoolAdminStudents() {
                                 <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">{s.boarding_status === 'boarding' ? 'Boarder' : 'Day & Boarding'}</span>
                               )}
                             </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">{s.classes?.name || '-'}</td>
+                            <td className="px-4 py-4 text-sm text-gray-600">{formatClassStream(studentClassData(s)) === 'Unknown Class' ? 'Unassigned' : formatClassStream(studentClassData(s))}</td>
                             <td className="px-4 py-4 text-sm text-gray-600 capitalize">{s.gender || '-'}</td>
                             <td className="px-4 py-4">
                               <div className="text-sm">{s.parent_name || '-'}</div>
@@ -763,7 +790,7 @@ export default function SchoolAdminStudents() {
                           <Users className="w-5 h-5 text-blue-600" />
                         </div>
                         <div className="text-left">
-                          <h3 className="font-semibold text-gray-900">{group.className} {group.stream && `(${group.stream})`}</h3>
+                          <h3 className="font-semibold text-gray-900">{group.className}</h3>
                           <p className="text-xs text-gray-500">
                             {group.level !== null ? `Grade ${group.level}` : 'Level -'} • {group.students.length} learners
                             {group.totalBoys > 0 && ` • ${group.totalBoys} boys`}
@@ -882,7 +909,7 @@ export default function SchoolAdminStudents() {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Basic Information</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div><label className={labelCls}>Admission Number</label><input value={editForm.admission_number} onChange={e => setEditForm({...editForm, admission_number: e.target.value})} className={inputCls} /></div>
-                <div><label className={labelCls}>Assessment Number</label><input value={editForm.assessment_number} onChange={e => setEditForm({...editForm, assessment_number: e.target.value})} className={inputCls} /></div>
+                <div><label className={labelCls}>Assessment Number *</label><input value={editForm.assessment_number} onChange={e => setEditForm({...editForm, assessment_number: e.target.value})} className={inputCls} required /></div>
                 <div><label className={labelCls}>First Name *</label><input value={editForm.first_name} onChange={e => setEditForm({...editForm, first_name: e.target.value})} className={inputCls} required /></div>
                 <div><label className={labelCls}>Middle Name</label><input value={editForm.middle_name} onChange={e => setEditForm({...editForm, middle_name: e.target.value})} className={inputCls} /></div>
                 <div><label className={labelCls}>Last Name *</label><input value={editForm.last_name} onChange={e => setEditForm({...editForm, last_name: e.target.value})} className={inputCls} required /></div>
@@ -901,7 +928,7 @@ export default function SchoolAdminStudents() {
                 <div><label className={labelCls}>Class</label>
                   <select value={editForm.class_id} onChange={e => setEditForm({...editForm, class_id: e.target.value})} className={inputCls + " bg-white"}>
                     <option value="">No Class</option>
-                    {classes.map((cls) => (<option key={cls.id} value={cls.id}>{cls.name} {cls.stream}</option>))}
+                    {classes.map((cls) => (<option key={cls.id} value={cls.id}>{formatClassStream(cls)}</option>))}
                   </select>
                 </div>
                 <div><label className={labelCls}>Boarding Status</label>

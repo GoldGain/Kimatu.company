@@ -4,6 +4,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Search, Loader2, Pencil, Save, X, Eye, BookOpen, Filter, Send, Users, ChevronDown, ChevronUp, CheckCircle, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { AddMarksModal, type AddMarksTarget } from '@/components/AddMarksModal';
+import { formatClassStream } from '@/lib/class-label';
+import { gradeLabelForClass } from '@/lib/grading';
+import { deleteResults } from '@/lib/resultActions';
 
 interface MarkEntry {
   id: string;
@@ -20,9 +23,9 @@ interface MarkEntry {
   cbc_points: number | null;
   status: 'draft' | 'submitted';
   submitted_at: string;
-  students: { first_name: string; last_name: string; admission_number: string } | null;
+  students: { first_name: string; last_name: string; admission_number: string; assessment_number?: string | null } | null;
   subjects: { name: string } | null;
-  classes: { name: string } | null;
+  classes: { name: string; stream?: string | null; stream_name?: string | null } | null;
   terms: { name: string; academic_year: string } | null;
 }
 
@@ -42,6 +45,23 @@ interface GroupedMarks {
     missing: MissingStudent[];
   }[];
 }
+
+const markScopeKey = (mark: Pick<MarkEntry, 'student_id' | 'class_id' | 'subject_id' | 'term_id' | 'exam_id'>): string =>
+  [mark.student_id, mark.class_id, mark.subject_id, mark.term_id, mark.exam_id || '__no_exam__'].map(String).join('|');
+
+/** Keep the newest row for one exact assessment scope so one entry is never
+ * counted as both submitted and draft. Different exams and terms remain distinct. */
+const canonicalizeMarks = (rows: MarkEntry[]): MarkEntry[] => {
+  const unique = new Map<string, MarkEntry>();
+  rows.forEach((row) => {
+    const key = markScopeKey(row);
+    if (!unique.has(key)) unique.set(key, row);
+  });
+  return [...unique.values()];
+};
+
+const compareAdmissionNumber = (a: { students?: { admission_number?: string | null } | null }, b: { students?: { admission_number?: string | null } | null }): number =>
+  String(a.students?.admission_number || '').localeCompare(String(b.students?.admission_number || ''), undefined, { numeric: true, sensitivity: 'base' });
 
 export default function ViewMarks() {
   const { user } = useAuth();
@@ -65,6 +85,7 @@ export default function ViewMarks() {
   const [terms, setTerms] = useState<any[]>([]);
   const [filterTerm, setFilterTerm] = useState('');
   const [addingMarks, setAddingMarks] = useState<AddMarksTarget | null>(null);
+  const [selectedMarkIds, setSelectedMarkIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchMarks();
@@ -75,9 +96,8 @@ export default function ViewMarks() {
     try {
       const { data } = await supabaseUntyped
         .from('school_exams')
-        .select('id, name, type')
+        .select('id, name, type, is_active')
         .eq('school_id', user?.schoolId)
-        .eq('is_active', true)
         .order('created_at', { ascending: false });
       setExams(data || []);
     } catch (err) {
@@ -94,14 +114,24 @@ export default function ViewMarks() {
     }
   };
 
+  // Assessments that are NOT active are view-only: their historical marks stay
+  // saved and visible but are locked from editing, submitting, or deleting.
+  const inactiveExamIds = new Set((exams || []).filter((e: any) => !e.is_active).map((e: any) => e.id));
+  const isMarkLocked = (m: MarkEntry) => !!m.exam_id && inactiveExamIds.has(m.exam_id);
+
   const fetchMarks = async () => {
     setLoading(true);
+    if (!user?.id || !user?.schoolId) {
+      setLoading(false);
+      return;
+    }
     try {
       // Get teacher record
       const { data: teacherData } = await supabaseUntyped
         .from('teachers')
         .select('id')
         .eq('profile_id', user?.id)
+        .eq('school_id', user?.schoolId)
         .single();
 
       const teacherId = teacherData?.id;
@@ -117,16 +147,17 @@ export default function ViewMarks() {
           *,
           students(first_name, last_name, admission_number),
           subjects(name),
-          classes(name),
+          classes(name, stream, stream_name, level, grade_level, curriculum),
           terms(name, academic_year)
         `)
         .eq('teacher_id', teacherId)
+        .eq('school_id', user?.schoolId)
         .order('submitted_at', { ascending: false });
 
       if (error) throw error;
 
       // Ensure all marks have valid data - no blank spaces
-      const loadedMarks = (marksData || []).map((m: MarkEntry) => ({
+      const loadedMarks = canonicalizeMarks((marksData || []) as MarkEntry[]).map((m: MarkEntry) => ({
         ...m,
         marks: m.marks ?? 0,
         out_of: m.out_of ?? 0,
@@ -136,14 +167,16 @@ export default function ViewMarks() {
       }));
       
       setMarks(loadedMarks);
+      setSelectedMarkIds([]);
 
       // Load the teacher's class/subject assignments so subjects with no marks
       // still render, and load the full class roster so unmarked learners show
       // a "Missing" status instead of being omitted entirely.
       const { data: assignmentsData } = await supabaseUntyped
         .from('teacher_subject_assignments')
-        .select('class_id, subject_id, subjects(name), classes(name)')
+        .select('class_id, subject_id, subjects(name), classes(name, stream, stream_name, level, grade_level, curriculum)')
         .eq('teacher_id', teacherId)
+        .eq('school_id', user?.schoolId)
         .eq('is_active', true);
       setTeacherAssignments(assignmentsData || []);
 
@@ -151,8 +184,9 @@ export default function ViewMarks() {
       if (classIds.length > 0) {
         const { data: studentsData } = await supabaseUntyped
           .from('students')
-          .select('id, class_id, first_name, last_name, admission_number')
+          .select('id, class_id, first_name, last_name, admission_number, assessment_number')
           .in('class_id', classIds)
+          .eq('school_id', user?.schoolId)
           .eq('is_active', true)
           .order('admission_number');
         const roster: Record<string, any[]> = {};
@@ -168,7 +202,11 @@ export default function ViewMarks() {
     setLoading(false);
   };
 
-  const handleSaveEdit = async (markId: string) => {
+  const handleSaveEdit = async (mark: MarkEntry) => {
+    if (isMarkLocked(mark)) {
+      toast.error('This assessment is inactive. Marks cannot be entered. Ask the admin to activate it.');
+      return;
+    }
     if (!editMarks || !editOutOf) {
       toast.error('Please enter marks and out of');
       return;
@@ -192,7 +230,8 @@ export default function ViewMarks() {
           status: 'draft',
           submitted_at: new Date().toISOString(),
         })
-        .eq('id', markId);
+        .eq('id', mark.id)
+        .eq('school_id', user.schoolId);
 
       if (error) throw error;
       toast.success('Marks updated successfully');
@@ -204,12 +243,17 @@ export default function ViewMarks() {
     setSaving(false);
   };
 
-  const handleSubmitDraft = async (markId: string) => {
+  const handleSubmitDraft = async (mark: MarkEntry) => {
+    if (isMarkLocked(mark)) {
+      toast.error('This assessment is inactive. Marks cannot be entered. Ask the admin to activate it.');
+      return;
+    }
     try {
       const { error } = await supabaseUntyped
         .from('results')
         .update({ status: 'submitted', submitted_at: new Date().toISOString() })
-        .eq('id', markId);
+        .eq('id', mark.id)
+        .eq('school_id', user?.schoolId);
 
       if (error) throw error;
       toast.success('Marks submitted successfully');
@@ -223,12 +267,18 @@ export default function ViewMarks() {
     if (!subjectMarks.length) return;
     
     const draftMarks = subjectMarks.filter(m => m.status === 'draft');
-    if (draftMarks.length === 0) {
+    const lockedMarks = draftMarks.filter(isMarkLocked);
+    const editableMarks = draftMarks.filter(m => !isMarkLocked(m));
+    if (lockedMarks.length > 0) {
+      toast.error('Some marks belong to an inactive assessment and are locked from editing. Ask the admin to activate it to submit them.');
+      if (editableMarks.length === 0) return;
+    }
+    if (editableMarks.length === 0) {
       toast.info('All marks are already submitted');
       return;
     }
 
-    if (!confirm(`Submit all ${draftMarks.length} draft mark(s) for ${subjectMarks[0].subjects?.name || 'this subject'}?`)) {
+    if (!confirm(`Submit all ${editableMarks.length} draft mark(s) for ${subjectMarks[0].subjects?.name || 'this subject'}?`)) {
       return;
     }
 
@@ -237,10 +287,11 @@ export default function ViewMarks() {
       const { error } = await supabaseUntyped
         .from('results')
         .update({ status: 'submitted', submitted_at: new Date().toISOString() })
-        .in('id', draftMarks.map(m => m.id));
+        .in('id', editableMarks.map(m => m.id))
+        .eq('school_id', user?.schoolId);
 
       if (error) throw error;
-      toast.success(`Submitted ${draftMarks.length} mark(s) successfully`);
+      toast.success(`Submitted ${editableMarks.length} mark(s) successfully`);
       fetchMarks();
     } catch (err: any) {
       toast.error('Failed to submit: ' + err.message);
@@ -254,18 +305,37 @@ export default function ViewMarks() {
     setEditOutOf(String(mark.out_of));
   };
 
-  const handleDeleteMark = async (markId: string) => {
+  const handleDeleteMark = async (mark: MarkEntry) => {
+    if (isMarkLocked(mark)) {
+      toast.error('This assessment is inactive and its marks are locked. Ask the admin to activate it to edit them.');
+      return;
+    }
     if (!confirm('Delete this mark? This cannot be undone.')) return;
     try {
-      const { error } = await supabaseUntyped.from('results').delete().eq('id', markId);
-      if (error) throw error;
+      await deleteResults({ schoolId: user?.schoolId || '', recordId: mark.id });
       toast.success('Mark deleted');
       fetchMarks();
     } catch (err: any) { toast.error('Failed to delete mark: ' + err.message); }
   };
 
+  const handleDeleteSelectedMarks = async () => {
+    const selected = filteredMarks.filter((mark) => selectedMarkIds.includes(mark.id) && !isMarkLocked(mark));
+    if (!selected.length) {
+      toast.error('Select at least one active mark to delete.');
+      return;
+    }
+    if (!confirm(`Delete marks for ${selected.length} learner(s)? This cannot be undone.`)) return;
+    try {
+      const deleted = await deleteResults({ schoolId: user?.schoolId || '', recordIds: selected.map((mark) => mark.id) });
+      setSelectedMarkIds([]);
+      toast.success(`Deleted ${deleted} selected mark(s).`);
+      fetchMarks();
+    } catch (err: any) { toast.error('Failed to delete selected marks: ' + err.message); }
+  };
+
   const openAddMarks = (missing: MissingStudent, group: GroupedMarks, subject: GroupedMarks['subjects'][number]) => {
     if (!filterTerm) { toast.error('Select a term to add marks'); return; }
+    if (filterExam && inactiveExamIds.has(filterExam)) { toast.error('This assessment is inactive and read-only.'); return; }
     setAddingMarks({
       schoolId: user?.schoolId || '',
       classId: group.classId,
@@ -290,11 +360,17 @@ export default function ViewMarks() {
     const matchesSubject = filterSubject ? m.subject_id === filterSubject : true;
     const matchesStatus = filterStatus === 'all' ? true : m.status === filterStatus;
     const matchesExam = filterExam ? m.exam_id === filterExam : true;
-    return matchesSearch && matchesClass && matchesSubject && matchesStatus && matchesExam;
+    const matchesTerm = filterTerm ? m.term_id === filterTerm : true;
+    return matchesSearch && matchesClass && matchesSubject && matchesStatus && matchesExam && matchesTerm;
   });
 
-  // Scope missing-learner detection to the selected term (if any)
-  const marksForTerm = filterTerm ? marks.filter((m) => m.term_id === filterTerm) : marks;
+  // Scope missing-learner detection to the selected term and assessment.
+  // Either draft or submitted counts as entered; status is intentionally not
+  // part of this set.
+  const marksForScope = marks.filter((m) =>
+    (!filterTerm || m.term_id === filterTerm) &&
+    (!filterExam || m.exam_id === filterExam),
+  );
 
   // Group marks by class and subject
   const groupedMarks: GroupedMarks[] = [];
@@ -307,13 +383,13 @@ export default function ViewMarks() {
       ? teacherAssignments.map((a: any) => ({
           class_id: a.class_id,
           subject_id: a.subject_id,
-          className: a.classes?.name || 'Unknown Class',
+          className: formatClassStream(a.classes),
           subjectName: a.subjects?.name || 'Unknown Subject',
         }))
       : marks.map((m) => ({
           class_id: m.class_id,
           subject_id: m.subject_id,
-          className: m.classes?.name || 'Unknown Class',
+          className: formatClassStream(m.classes),
           subjectName: m.subjects?.name || 'Unknown Subject',
         }));
 
@@ -336,7 +412,7 @@ export default function ViewMarks() {
   classMap.forEach((classData, classId) => {
     const roster = classRoster[classId] || [];
     const enteredBySubject = new Map<string, Set<string>>();
-    marksForTerm.forEach((m) => {
+    marksForScope.forEach((m) => {
       if (m.class_id !== classId || !m.student_id) return;
       if (!enteredBySubject.has(m.subject_id)) enteredBySubject.set(m.subject_id, new Set());
       enteredBySubject.get(m.subject_id)!.add(String(m.student_id));
@@ -349,7 +425,7 @@ export default function ViewMarks() {
         .map((stu) => ({
           student_id: stu.id,
           name: `${stu.first_name || ''} ${stu.last_name || ''}`.trim() || 'Unknown',
-          admission_number: stu.admission_number || '-',
+          admission_number: stu.admission_number || stu.assessment_number || '-',
         }));
     });
 
@@ -361,8 +437,14 @@ export default function ViewMarks() {
   });
 
   // Get unique classes and subjects for filters
-  const uniqueClasses = [...new Map(marks.map((m: MarkEntry) => [m.class_id, m.classes]).filter(Boolean)).values()];
-  const uniqueSubjects = [...new Map(marks.map((m: MarkEntry) => [m.subject_id, m.subjects]).filter(Boolean)).values()];
+  const uniqueClasses = [...new Map([
+    ...teacherAssignments.map((a: any) => [a.class_id, { id: a.class_id, name: formatClassStream(a.classes) }] as const),
+    ...marks.map((m: MarkEntry) => [m.class_id, { id: m.class_id, name: formatClassStream(m.classes) }] as const),
+  ]).values()];
+  const uniqueSubjects = [...new Map([
+    ...teacherAssignments.map((a: any) => [a.subject_id, { id: a.subject_id, name: a.subjects?.name || 'Unknown Subject' }] as const),
+    ...marks.map((m: MarkEntry) => [m.subject_id, { id: m.subject_id, name: m.subjects?.name || 'Unknown Subject' }] as const),
+  ]).values()];
 
   const gradeColor = (grade: string) => {
     if (!grade) return 'bg-gray-100 text-gray-600';
@@ -418,7 +500,7 @@ export default function ViewMarks() {
         >
           <option value="">All Classes</option>
           {uniqueClasses.map((c: any) => (
-            <option key={c.name} value={c.name === 'Unknown Class' ? '' : c.name}>{c.name}</option>
+            <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
         <select
@@ -428,7 +510,7 @@ export default function ViewMarks() {
         >
           <option value="">All Subjects</option>
           {uniqueSubjects.map((s: any) => (
-            <option key={s.name} value={s.name}>{s.name}</option>
+            <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
         <select
@@ -460,7 +542,7 @@ export default function ViewMarks() {
           >
             <option value="">All Assessments</option>
             {exams.map((ex: any) => (
-              <option key={ex.id} value={ex.id}>{ex.name}{ex.type ? ` (${ex.type})` : ''}</option>
+              <option key={ex.id} value={ex.id}>{ex.name}{ex.type ? ` (${ex.type})` : ''}{!ex.is_active ? ' — Inactive (view only)' : ''}</option>
             ))}
           </select>
         )}
@@ -476,6 +558,7 @@ export default function ViewMarks() {
         </div>
       ) : (
         <div className="space-y-4">
+          {selectedMarkIds.length > 0 && <div className="flex items-center justify-between rounded-xl border border-red-100 bg-red-50 px-4 py-3"><span className="text-sm text-red-800">{selectedMarkIds.length} mark(s) selected. Inactive assessment rows remain read-only.</span><button type="button" onClick={handleDeleteSelectedMarks} className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"><Trash2 className="w-3 h-3" /> Delete selected marks</button></div>}
           {groupedMarks.map((group) => {
             const isClassExpanded = expandedClass === group.classId;
             const totalMarks = group.subjects.reduce((sum, s) => sum + s.marks.length, 0);
@@ -514,8 +597,16 @@ export default function ViewMarks() {
                   <div className="border-t border-gray-100">
                     {group.subjects.map((subject) => {
                       const isSubjectExpanded = expandedSubject === `${group.classId}-${subject.subjectId}`;
-                      const subjectDrafts = subject.marks.filter(m => m.status === 'draft');
-                      const subjectSubmitted = subject.marks.filter(m => m.status === 'submitted');
+                      const sortedMarks = [...subject.marks].sort(compareAdmissionNumber);
+                      const sortedMissing = [...subject.missing].sort((a, b) => String(a.admission_number).localeCompare(String(b.admission_number), undefined, { numeric: true, sensitivity: 'base' }));
+                      const subjectDrafts = sortedMarks.filter(m => m.status === 'draft');
+                      const subjectSubmitted = sortedMarks.filter(m => m.status === 'submitted');
+                      const editableMarks = sortedMarks.filter((mark) => !isMarkLocked(mark));
+                      const allEditableSelected = editableMarks.length > 0 && editableMarks.every((mark) => selectedMarkIds.includes(mark.id));
+                      const meanMarks = sortedMarks.length
+                        ? sortedMarks.reduce((sum, mark) => sum + Number(mark.percentage ?? (mark.out_of ? (mark.marks / mark.out_of) * 100 : 0)), 0) / sortedMarks.length
+                        : null;
+                      const meanGrade = meanMarks === null ? '-' : gradeLabelForClass(meanMarks, sortedMarks[0]?.classes || {});
                       
                       return (
                         <div key={subject.subjectId} className="border-b border-gray-50 last:border-0">
@@ -527,7 +618,9 @@ export default function ViewMarks() {
                             <div className="flex items-center gap-2">
                               <BookOpen className="w-4 h-4 text-blue-500" />
                               <span className="font-medium text-sm text-gray-900">{subject.subjectName}</span>
-                              <span className="text-xs text-gray-400">({subject.marks.length} entries)</span>
+                              <span className="text-xs text-gray-400">({sortedMarks.length} entries)</span>
+                              <span className="ml-2 text-xs font-semibold text-slate-600">Mean Marks: {meanMarks === null ? '-' : `${meanMarks.toFixed(1)} / 100`}</span>
+                              <span className="text-xs font-semibold text-blue-700">Mean Grade: {meanGrade}</span>
                               {subject.missing.length > 0 && (
                                 <span className="text-xs font-semibold text-red-500">· {subject.missing.length} missing</span>
                               )}
@@ -553,6 +646,7 @@ export default function ViewMarks() {
                               <table className="w-full text-left text-sm">
                                 <thead>
                                   <tr className="border-b bg-gray-50">
+                                    <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase"><input type="checkbox" aria-label={`Select all active marks for ${subject.subjectName}`} checked={allEditableSelected} onChange={(event) => setSelectedMarkIds((current) => event.target.checked ? [...new Set([...current, ...editableMarks.map((mark) => mark.id)])] : current.filter((id) => !editableMarks.some((mark) => mark.id === id)))} /></th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Learner</th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Admission #</th>
                                     <th className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Marks</th>
@@ -563,12 +657,13 @@ export default function ViewMarks() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {subject.marks.map((m) => (
+                                  {sortedMarks.map((m) => (
                                     <tr key={m.id} className="border-b hover:bg-gray-50">
+                                      <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${m.students?.first_name || 'learner'} mark`} checked={selectedMarkIds.includes(m.id)} disabled={isMarkLocked(m)} onChange={(event) => setSelectedMarkIds((current) => event.target.checked ? [...new Set([...current, m.id])] : current.filter((id) => id !== m.id))} /></td>
                                       <td className="px-3 py-2 font-medium">
                                         {m.students?.first_name || 'Unknown'} {m.students?.last_name || ''}
                                       </td>
-                                      <td className="px-3 py-2 text-gray-500 text-xs">{m.students?.admission_number || '-'}</td>
+                                      <td className="px-3 py-2 text-gray-500 text-xs">{m.students?.admission_number || m.students?.assessment_number || '-'}</td>
                                       <td className="px-3 py-2">
                                         {editingMark === m.id ? (
                                           <div className="flex items-center gap-2">
@@ -612,7 +707,7 @@ export default function ViewMarks() {
                                           {editingMark === m.id ? (
                                             <>
                                               <button
-                                                onClick={() => handleSaveEdit(m.id)}
+                                                onClick={() => handleSaveEdit(m)}
                                                 disabled={saving}
                                                 className="flex items-center gap-1 text-xs px-2 py-1 bg-green-50 text-green-600 rounded-lg hover:bg-green-100"
                                               >
@@ -625,11 +720,13 @@ export default function ViewMarks() {
                                                 <X className="w-3 h-3" /> Cancel
                                               </button>
                                             </>
+                                          ) : isMarkLocked(m) ? (
+                                            <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 bg-gray-100 text-gray-500 rounded-lg">View only</span>
                                           ) : (
                                             <>
                                               {m.status === 'draft' && (
                                                 <button
-                                                  onClick={() => handleSubmitDraft(m.id)}
+                                                  onClick={() => handleSubmitDraft(m)}
                                                   className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
                                                 >
                                                   Submit
@@ -642,7 +739,7 @@ export default function ViewMarks() {
                                                 <Pencil className="w-3 h-3" /> Edit
                                               </button>
                                               <button
-                                                onClick={() => handleDeleteMark(m.id)}
+                                                onClick={() => handleDeleteMark(m)}
                                                 className="flex items-center gap-1 text-xs px-2 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100"
                                               >
                                                 <Trash2 className="w-3 h-3" /> Delete
@@ -653,8 +750,9 @@ export default function ViewMarks() {
                                       </td>
                                     </tr>
                                   ))}
-                                  {subject.missing.map((missing) => (
+                                  {sortedMissing.map((missing) => (
                                     <tr key={`missing-${missing.student_id}`} className="border-b bg-red-50/40">
+                                      <td className="px-3 py-2"><input type="checkbox" disabled aria-label={`Select missing ${missing.name} mark`} /></td>
                                       <td className="px-3 py-2 font-medium text-gray-700">{missing.name}</td>
                                       <td className="px-3 py-2 text-gray-500 text-xs">{missing.admission_number}</td>
                                       <td className="px-3 py-2">

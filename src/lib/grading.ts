@@ -1,9 +1,32 @@
 export type Curriculum = 'CBE' | '844';
 export type SchoolLevelBand = 'primary' | 'junior' | 'senior';
 
-/** Returns true if the class uses the 8-4-4 curriculum */
-export function is844Curriculum(classData?: { curriculum?: string | null }): boolean {
-  return String(classData?.curriculum || '').toUpperCase() === '844';
+/**
+ * Returns true only for 8-4-4 Form 3/Form 4 classes.
+ *
+ * A school may have both CBE senior classes and legacy 8-4-4 classes. The
+ * curriculum flag alone is therefore not enough: 8-4-4 grading must not leak
+ * into ordinary CBE Grade 7-12 results or into 8-4-4 Forms 1-2.
+ */
+export function is844Curriculum(classData?: {
+  curriculum?: string | null;
+  grade_level?: number | string | null;
+  level?: number | string | null;
+  name?: string | null;
+}): boolean {
+  if (String(classData?.curriculum || '').toUpperCase() !== '844') return false;
+
+  const name = String(classData?.name || '').toLowerCase();
+  if (/\bform\s*[34]\b/.test(name)) return true;
+
+  const rawLevel = classData?.grade_level ?? classData?.level;
+  const parsedLevel = typeof rawLevel === 'number'
+    ? rawLevel
+    : parseInt(String(rawLevel ?? '').replace(/[^0-9-]/g, ''), 10);
+
+  // Kimatu's 8-4-4 setup maps Form 3/Form 4 to grade levels 11/12, while
+  // older school records may store the form number directly as 3/4.
+  return parsedLevel === 3 || parsedLevel === 4 || parsedLevel === 11 || parsedLevel === 12;
 }
 
 export interface NumericGrade844 {
@@ -27,7 +50,7 @@ function normalizePercentage(value: number): number {
 }
 
 export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }): SchoolLevelBand {
-  // 8-4-4 curriculum: treat Form 1-4 as senior band for CBE display
+  // Form 3/Form 4 8-4-4 results use the senior display band for shared UI.
   if (is844Curriculum(classData)) return 'senior';
   // Use grade_level first (new column), fall back to level (legacy)
   const rawLevel = classData?.grade_level ?? classData?.level;
@@ -112,6 +135,35 @@ export function calculate844Grade(score: number): NumericGrade844 {
   return { grade: 'E', points: 1, descriptor: 'Poor', band: '844' };
 }
 
+export type DisplayGrade = NumericGrade844 | CompetencyGrade;
+
+/** Calculate the grade used by a result surface for this exact class. */
+export function calculateGradeForClass(
+  score: number,
+  classData?: Parameters<typeof getSchoolLevelBand>[0],
+): DisplayGrade {
+  return is844Curriculum(classData)
+    ? calculate844Grade(score)
+    : calculateCompetencyGrade(score, getSchoolLevelBand(classData));
+}
+
+/** Display label for either the Form 3/Form 4 8-4-4 scale or CBE. */
+export function gradeLabelForClass(
+  score: number,
+  classData?: Parameters<typeof getSchoolLevelBand>[0],
+): string {
+  const grade = calculateGradeForClass(score, classData);
+  return is844Curriculum(classData) ? grade.grade : grade.subLevel;
+}
+
+/** Points for ranking/tie-breaks on the class's active grading system. */
+export function gradePointsForClass(
+  score: number,
+  classData?: Parameters<typeof getSchoolLevelBand>[0],
+): number {
+  return calculateGradeForClass(score, classData).points;
+}
+
 export function gradeDisplayLabel(band: SchoolLevelBand): string {
   if (band === 'senior') return 'Senior CBE Grade';
   if (band === 'junior') return 'Junior CBE Grade';
@@ -143,9 +195,8 @@ function getSubjectAdvice(subjectName: string, band: SchoolLevelBand): string {
   return 'review class notes, complete all assignments, and seek extra help from your teacher';
 }
 
-function getGradeLabel(pct: number, band: SchoolLevelBand): string {
-  const g = calculateCompetencyGrade(pct, band);
-  return g.subLevel;
+function getGradeLabel(pct: number, band: SchoolLevelBand, classData?: any): string {
+  return classData ? gradeLabelForClass(pct, classData) : calculateCompetencyGrade(pct, band).subLevel;
 }
 
 /**
@@ -199,12 +250,12 @@ export function generateSubjectSpecificComment(
       subjectName.toLowerCase().includes(s.name.toLowerCase())
     );
     if (subjectResult) {
-      return getGradeLabel(subjectResult.percentage, band);
+      return getGradeLabel(subjectResult.percentage, band, classData);
     }
-    return getGradeLabel(avgPct, band);
+    return getGradeLabel(avgPct, band, classData);
   };
 
-  const bestGrade = getGradeLabel(best.percentage, band);
+  const bestGrade = getGradeLabel(best.percentage, band, classData);
   let comment = '';
   const firstName = studentName.split(' ')[0] || studentName;
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { deactivateSameScopeActives } from '@/lib/assessment-active';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'react-router';
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MarksProgress } from '@/components/MarksProgress';
+import { formatClassStream } from '@/lib/class-label';
 
 interface ClassInfo {
   id: string;
@@ -108,7 +110,7 @@ export default function DeanOfStudiesDashboard() {
       const [{ data: classesData }, { data: termsData }, { data: examsData }] = await Promise.all([
         (supabase as any)
           .from('classes')
-          .select('id, name, level')
+          .select('id, name, level, grade_level, stream, stream_name')
           .eq('school_id', sid)
           .eq('is_active', true)
           .order('level'),
@@ -185,7 +187,7 @@ export default function DeanOfStudiesDashboard() {
         start_date: examForm.start_date || null,
         end_date: examForm.end_date || null,
         weightage: examForm.weightage ? parseFloat(examForm.weightage) : null,
-        is_active: true,
+        is_active: editingExam ? editingExam.is_active : true,
         created_by: user?.id,
       };
 
@@ -197,6 +199,16 @@ export default function DeanOfStudiesDashboard() {
         }
         toast.success('Assessment updated');
       } else {
+        // Creating a new assessment auto-deactivates any other ACTIVE assessment in the same scope
+        const deactResult = await deactivateSameScopeActives({
+          schoolId,
+          termId: examForm.term_id || null,
+          targetType: 'school',
+          targetClassId: null,
+          targetGradeLevel: null,
+          actingUserId: user?.id,
+        });
+        if (deactResult.error) throw deactResult.error;
         const { data: newData, error } = await (supabase as any).from('school_exams').insert(payload).select('*, terms(name)');
         if (error) throw error;
         // Optimistic update — add to list immediately
@@ -357,7 +369,7 @@ export default function DeanOfStudiesDashboard() {
                       <BarChart3 className="w-5 h-5 text-blue-600" />
                     </div>
                     <div className="text-left">
-                      <p className="font-semibold text-gray-900">{cls.name}</p>
+                      <p className="font-semibold text-gray-900">{formatClassStream(cls)}</p>
                       <p className="text-xs text-gray-500">{cls.student_count} learners</p>
                     </div>
                   </div>
@@ -371,7 +383,7 @@ export default function DeanOfStudiesDashboard() {
                   <div className="px-5 pb-5 border-t border-gray-100 pt-4">
                     <MarksProgress
                       classId={cls.id}
-                      className={cls.name}
+                      className={formatClassStream(cls)}
                       termId={selectedTerm}
                       schoolId={schoolId}
                     />
@@ -628,7 +640,7 @@ function ClassListExpander({ cls, schoolId, isExpanded, onToggle }: { cls: Class
             <Users className="w-5 h-5 text-blue-600" />
           </div>
           <div className="text-left">
-            <p className="font-semibold text-gray-900">{cls.name}</p>
+            <p className="font-semibold text-gray-900">{formatClassStream(cls)}</p>
             <p className="text-xs text-gray-500">{cls.student_count || 0} learners</p>
           </div>
         </div>
