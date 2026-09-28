@@ -64,6 +64,26 @@ type ResponseLike = {
   end: () => void;
 };
 
+// This API writes to several tables that are not represented in the browser's
+// generated Database type. Keep those table names dynamic while retaining
+// typed row/insert/update records for the serverless handler.
+type DynamicTable = {
+  Row: Record<string, unknown>;
+  Insert: Record<string, unknown>;
+  Update: Record<string, unknown>;
+  Relationships: [];
+};
+type DynamicDatabase = {
+  public: {
+    Tables: Record<string, DynamicTable>;
+    Views: Record<string, DynamicTable>;
+    Functions: Record<string, never>;
+    Enums: Record<string, string>;
+    CompositeTypes: Record<string, never>;
+  };
+};
+type ExamSupabaseClient = ReturnType<typeof createClient<DynamicDatabase>>;
+
 function jsonError(response: ResponseLike, status: number, message: string): void {
   response.status(status).json({ error: message });
 }
@@ -235,7 +255,7 @@ function embeddedCurriculumContext(request: ExamGenerationRequest): { context: s
 }
 
 async function loadRecentQuestionStems(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ExamSupabaseClient,
   profile: ExamProfile,
   request: ExamGenerationRequest,
 ): Promise<string[]> {
@@ -272,7 +292,7 @@ function makeVariationKey(): string {
 }
 
 async function loadVettedContext(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ExamSupabaseClient,
   request: ExamGenerationRequest,
 ): Promise<{ context: string; sourceSummary: string[] }> {
   const { data, error } = await supabase
@@ -325,7 +345,7 @@ function assertGenerationAccess(profile: ExamProfile): string | null {
 
 async function handleExamGeneration(
   response: ResponseLike,
-  supabase: ReturnType<typeof createClient>,
+  supabase: ExamSupabaseClient,
   profile: ExamProfile,
   user: { id: string; email?: string; user_metadata?: Record<string, unknown> },
   request: RequestLike,
@@ -380,11 +400,12 @@ async function handleExamGeneration(
     .select('name')
     .eq('id', profile.school_id)
     .maybeSingle();
-  if (schoolError || !school?.name?.trim()) {
+  const schoolName = typeof school?.name === 'string' ? school.name.trim() : '';
+  if (schoolError || !schoolName) {
     jsonError(response, 503, 'Your school name could not be loaded. Refresh the page and try again.');
     return;
   }
-  parsedRequest = { ...parsedRequest, schoolName: school.name.trim().slice(0, 255) };
+  parsedRequest = { ...parsedRequest, schoolName: schoolName.slice(0, 255) };
   const rateKey = `${user.id}:${request.socket?.remoteAddress || 'unknown'}`;
   if (!checkRateLimit(rateKey)) {
     jsonError(response, 429, 'Generation limit reached. Please wait a few minutes before trying again.');
@@ -411,7 +432,7 @@ async function handleExamGeneration(
       .select('id')
       .single();
     if (generationJobError) throw new Error(`Could not start the generation job: ${generationJobError.message}`);
-    generationJobId = generationJob?.id || null;
+    generationJobId = typeof generationJob?.id === 'string' ? generationJob.id : null;
     const recentQuestionStems = await loadRecentQuestionStems(supabase, profile, parsedRequest);
     const generationRequest: ExamGenerationRequest = {
       ...parsedRequest,
@@ -569,7 +590,7 @@ async function handleExamGeneration(
       .single();
 
     if (paperError) throw new Error(`Could not save the exam paper: ${paperError.message}`);
-    const paperId = storedPaper?.id;
+    const paperId = typeof storedPaper?.id === 'string' ? storedPaper.id : null;
     const { error: snapshotError } = await supabase.from('exam_paper_question_snapshots').insert(persistedQuestions.map((question, index) => ({
       paper_id: paperId, question_id: question.id, question_order: index + 1, payload: question,
     })));
@@ -641,7 +662,7 @@ export default async function handler(request: RequestLike, response: ResponseLi
     return;
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const supabase = createClient<DynamicDatabase>(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: { user }, error: userError } = await (supabase.auth as any).getUser(accessToken);
   if (userError || !user) {
     jsonError(response, 401, 'Your session could not be verified. Please sign in again.');
@@ -649,11 +670,12 @@ export default async function handler(request: RequestLike, response: ResponseLi
   }
 
   // Get the authoritative profile. Do not create or infer a profile in a paid/content-generation path.
-  const { data: profile, error: profileError } = await supabase
+  const { data: profileRow, error: profileError } = await supabase
     .from('profiles')
     .select('id, school_id, role, first_name, last_name, email')
     .eq('id', user.id)
     .maybeSingle();
+  const profile = profileRow as ExamProfile | null;
   if (profileError || !profile) {
     jsonError(response, 403, 'Your school profile could not be verified for Exam Generator access.');
     return;
@@ -662,5 +684,5 @@ export default async function handler(request: RequestLike, response: ResponseLi
     jsonError(response, 403, 'Only school teachers and school administrators with an active school profile can generate exams.');
     return;
   }
-  await handleExamGeneration(response, supabase as any, profile as ExamProfile, user, request);
+  await handleExamGeneration(response, supabase, profile, user, request);
 }
