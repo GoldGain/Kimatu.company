@@ -261,7 +261,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     navItems = navItems.filter(item => {
       if (item.path === '/teacher/class-dashboard' && !isClassTeacher) return false;
       if (item.path === '/teacher/subject-dashboard' && !hasSubjectAssignments) return false;
-      if ((item.path === '/dean-of-studies' || item.path === '/dean-of-studies/results' || item.path === '/dean-of-studies/stream-dashboard') && !isDoS) return false;
+      if ((item.path === '/dean-of-studies' || item.path === '/dean-of-studies/results' || item.path === '/dean-of-studies/combine-exams' || item.path === '/dean-of-studies/stream-dashboard') && !isDoS) return false;
       if (item.path === '/teacher/results' && !isClassTeacher) return false;
       return true;
     });
