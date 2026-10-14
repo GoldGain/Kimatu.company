@@ -53,6 +53,8 @@ import DoSResults from '@/pages/dashboard/dean-of-studies/Results';
 import ClassTeacherResults from '@/pages/dashboard/class-teacher/Results';
 import SchoolAdminAnnouncements from '@/pages/dashboard/school-admin/Announcements';
 import SchoolAdminSubjects from '@/pages/dashboard/school-admin/Subjects';
+import SchoolAdminLibrary from '@/pages/dashboard/school-admin/Library';
+import SchoolAdminInventory from '@/pages/dashboard/school-admin/Inventory';
 import SchoolAdminBranding from '@/pages/dashboard/school-admin/Branding';
 import SchoolAdminTimetableSetup from '@/pages/dashboard/school-admin/TimetableSetup';
 import SchoolAdminTimetableGenerate from '@/pages/dashboard/school-admin/TimetableGenerate';
@@ -266,6 +268,8 @@ function AppRoutes() {
       <Route path="/school-admin/upload-results" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><TeacherResultsUpload privileged /></ProtectedRoute>} />
       <Route path="/school-admin/announcements" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminAnnouncements /></ProtectedRoute>} />
       <Route path="/school-admin/subjects" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminSubjects /></ProtectedRoute>} />
+      <Route path="/school-admin/library" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminLibrary /></ProtectedRoute>} />
+      <Route path="/school-admin/inventory" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminInventory /></ProtectedRoute>} />
       <Route path="/school-admin/branding" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminBranding /></ProtectedRoute>} />
 	      <Route path="/school-admin/attendance" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminAttendance /></ProtectedRoute>} />
       <Route path="/school-admin/timetable/setup" element={<ProtectedRoute allowedRoles={['school_admin']} lockTarget="school_admin"><SchoolAdminTimetableSetup /></ProtectedRoute>} />
