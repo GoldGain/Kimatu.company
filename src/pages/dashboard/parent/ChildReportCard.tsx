@@ -16,6 +16,8 @@ import {
   drawDeviation,
   drawAchievements,
   drawAIComment,
+  canFitReportCardOptionalSection,
+  getReportCardCommentBottomY,
   getPercentage,
   formatPosition,
   buildPerformanceTrend,
@@ -29,13 +31,14 @@ import {
   DEFAULT_PDF_FONT_SIZE,
   type PdfFontSize,
 } from '@/lib/pdfFontSize';
-import { getSchoolLevelBand } from '@/lib/grading';
+import { calculateGradeForClass, gradePointsForClass, getSchoolLevelBand, is844Curriculum } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
 import { formatClassStream } from '@/lib/class-label';
-import { rankByUnifiedRule } from '@/lib/ranking';
+import { rankByPathway, rankByUnifiedRule } from '@/lib/ranking';
 import { fetchAllRows } from '@/lib/paginatedQuery';
-import { aggregateLearnerTotals } from '@/lib/learnerTotals';
+import { aggregateLearnerTotals, excludedResultCode, isExcludedResult, usesSevenSubjectRanking } from '@/lib/learnerTotals';
+import { isSeniorCbeClass } from '@/lib/seniorPathways';
 
 declare global {
   interface Window {
@@ -97,7 +100,7 @@ export default function ParentChildReportCard() {
       const ids = links.map((l: any) => l.student_id);
       const { data: students } = await supabaseUntyped
         .from('students')
-        .select('*, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum, class_teacher_id)')
+        .select('*, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum, class_teacher_id)').or('is_active.eq.true,is_active.is.null')
         .in('id', ids);
       setChildren(students || []);
       if (students && students.length > 0) {
@@ -117,7 +120,7 @@ export default function ParentChildReportCard() {
   const fetchTotalStudents = async (classId: string, schoolId: string) => {
     const { count } = await supabaseUntyped
       .from('students')
-      .select('id', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true }).or('is_active.eq.true,is_active.is.null')
       .eq('class_id', classId)
       .eq('school_id', schoolId);
     setTotalStudents(count || 0);
@@ -280,7 +283,7 @@ export default function ParentChildReportCard() {
     // exceeds that, so an unpaged read would truncate the ranking cohort.
     const classResults = await fetchAllRows((from, to) => supabaseUntyped
       .from('results')
-      .select('*, students(id, first_name, last_name), subjects(name)')
+      .select('*, students!inner(is_active, id, first_name, last_name), subjects(name)').or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
       .eq('class_id', selectedChild.class_id)
       .eq('term_id', selectedTerm)
       .order('created_at')
@@ -295,10 +298,10 @@ export default function ParentChildReportCard() {
     // Student Portal, Class Summary and report card for the same learner.
     if (classResults && classResults.length > 0) {
       // Same aggregation as the class summary, so both report the same total.
-      const ranked = rankByUnifiedRule(
-        aggregateLearnerTotals(classResults, selectedChild?.classes || {}),
-        getSchoolLevelBand(selectedChild?.classes || {}),
-      );
+      const totals = aggregateLearnerTotals(classResults, selectedChild?.classes || {});
+      const ranked = isSeniorCbeClass(selectedChild?.classes || {})
+        ? rankByPathway(totals, getSchoolLevelBand(selectedChild?.classes || {}))
+        : rankByUnifiedRule(totals, getSchoolLevelBand(selectedChild?.classes || {}));
       const entry = ranked.find((row) => row.studentId === selectedChild.id);
       setClassPosition(entry ? entry.position : null);
     } else {
@@ -310,7 +313,7 @@ export default function ParentChildReportCard() {
     if (!selectedChild) return;
     const { data: allResults } = await supabaseUntyped
       .from('results')
-      .select('percentage, marks, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
+      .select('percentage, marks, mark_code, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
       .eq('student_id', selectedChild.id)
       .order('terms(academic_year)', { ascending: true })
       .order('terms(name)', { ascending: true });
@@ -333,16 +336,21 @@ export default function ParentChildReportCard() {
     const prevTerm = sortedTerms[currentIdx - 1];
     const { data: prevResults } = await supabaseUntyped
       .from('results')
-      .select('marks, out_of, percentage')
+      .select('marks, out_of, percentage, mark_code')
       .eq('student_id', selectedChild.id)
       .eq('term_id', prevTerm.id);
-    if (!prevResults || prevResults.length === 0) { setPreviousAvg(null); return; }
-    const totalPct = prevResults.reduce((s: number, r: any) => s + (r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
-    setPreviousAvg(totalPct / prevResults.length);
+    const numericPrevResults = (prevResults || []).filter((row: any) => !isExcludedResult(row));
+    if (numericPrevResults.length === 0) { setPreviousAvg(null); return; }
+    const totalPct = numericPrevResults.reduce((s: number, r: any) => s + (r.percentage ?? (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
+    setPreviousAvg(totalPct / numericPrevResults.length);
   };
 
   const classDataForGrading = selectedChild?.classes || {};
   const isPrimary = getSchoolLevelBand(classDataForGrading) === 'primary';
+  const numericResults = results.filter((row: any) => !isExcludedResult(row));
+  const currentAverage = numericResults.length
+    ? numericResults.reduce((sum: number, row: any) => sum + getPercentage(row), 0) / numericResults.length
+    : null;
 
   const doGeneratePDF = async (fontSize: PdfFontSize = DEFAULT_PDF_FONT_SIZE) => {
     if (!results.length) { toast.error('No results found for this term'); return; }
@@ -352,16 +360,11 @@ export default function ParentChildReportCard() {
       const doc = new jsPDF();
       configurePdfFontSize(doc, fontSize);
       const term = terms.find(t => t.id === selectedTerm);
-      const avgPercentage = results.length
-        ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
-        : 0;
-      const totalPoints = isPrimary ? null : results.reduce((s, r) => {
-            const pct = getPercentage(r);
-            if (pct >= 90) return s + 8; if (pct >= 75) return s + 7; if (pct >= 58) return s + 6;
-            if (pct >= 41) return s + 5; if (pct >= 31) return s + 4; if (pct >= 21) return s + 3;
-            if (pct >= 11) return s + 2; return s + 1;
-          }, 0);
-      const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
+      const learnerMetrics = aggregateLearnerTotals(results.map((row: any) => ({ ...row, students: selectedChild })), classDataForGrading)[0];
+      const rankingDetails = learnerMetrics?.rankingSubjects?.length ? { subjects: learnerMetrics.rankingSubjects, totalMarks: learnerMetrics.rankingTotalMarks || 0, totalPoints: learnerMetrics.rankingTotalPoints || 0 } : undefined;
+      const avgPercentage = learnerMetrics?.count ? learnerMetrics.avgPct : 0;
+      const totalPoints = isPrimary ? null : (rankingDetails?.totalPoints ?? learnerMetrics?.totalPoints ?? 0);
+      const deviation = learnerMetrics?.count && previousAvg !== null ? avgPercentage - previousAvg : null;
       const isNew = deviation === null;
       // Prefer the unified ranking position so the parent sees the same rank as
       // the school's class summary and the learner's own portal.
@@ -370,10 +373,13 @@ export default function ParentChildReportCard() {
       // Build subjectScores with `percentage` key (matching SubjectResult interface for pathway logic)
       const subjectScores = results.map(r => ({
         name: r.subjects?.name || 'Unknown',
-        percentage: getPercentage(r),
+        marks: r.marks,
+        out_of: r.out_of,
+        mark_code: r.mark_code,
+        percentage: isExcludedResult(r) ? 0 : getPercentage(r),
         previousPercentage: null,
       }));
-      const sortedBest = [...subjectScores].sort((a, b) => b.percentage - a.percentage);
+      const sortedBest = subjectScores.filter((result) => !isExcludedResult(result)).sort((a, b) => b.percentage - a.percentage);
       const bestSubject = sortedBest[0]?.name || 'all subjects';
       const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
       const studentFullName = `${selectedChild.first_name} ${selectedChild.last_name}`;
@@ -387,26 +393,28 @@ export default function ParentChildReportCard() {
         name: studentFullName,
         photoUrl: selectedChild.photo_url || null,
       });
-      drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', formatClassStream(classDataForGrading), term?.name || '', term?.academic_year || '', positionStr, 48, results[0]?.school_exams?.name || undefined, selectedChild.assessment_number || undefined);
-      let currentY = drawResultsTable(doc, results, classDataForGrading, 62) + 6;
+      const overallGrade = learnerMetrics?.count ? calculateGradeForClass(avgPercentage, classDataForGrading) : null;
+      drawStudentInfo(doc, studentFullName, selectedChild.admission_number || 'N/A', formatClassStream(classDataForGrading), term?.name || '', term?.academic_year || '', positionStr, 48, results[0]?.school_exams?.name || undefined, selectedChild.assessment_number || undefined, { totalMarks: rankingDetails ? `${Math.round(rankingDetails.totalMarks)} marks out of 700` : undefined, totalPoints: rankingDetails ? `${rankingDetails.totalPoints} points out of 84` : undefined, pathway: selectedChild.pathway, track: selectedChild.track, overallGrade: overallGrade ? ('subLevel' in overallGrade ? overallGrade.subLevel : overallGrade.grade) : 'N/A', showPathway: usesSevenSubjectRanking(classDataForGrading), is844: is844Curriculum(classDataForGrading) });
+      const qrOptions = { assessmentNumber: selectedChild.assessment_number };
+      const commentBottomY = getReportCardCommentBottomY(doc, schoolInfo, qrOptions);
+      let currentY = drawResultsTable(doc, results, classDataForGrading, usesSevenSubjectRanking(classDataForGrading) ? 69 : 62, { showDeviation: previousAvg !== null, rankingDetails }) + 6;
       
       // RESTRICTED Pathway Performance: Only for Junior (Grade 6-9)
-      const gradeLevelNum = Number(classDataForGrading?.grade_level || classDataForGrading?.level || 0);
-      if (gradeLevelNum >= 6 && gradeLevelNum <= 9) {
+      if (getSchoolLevelBand(classDataForGrading) === 'junior') {
         currentY = drawPathwayPerformance(doc, results, currentY) + 6;
       }
       
-      currentY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, currentY);
+      currentY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, currentY, undefined, rankingDetails);
       currentY = drawDeviation(doc, deviation, previousAvg, position, currentY + 6);
-      if (trendData.length >= 2) {
+      if (trendData.length >= 2 && canFitReportCardOptionalSection(doc, currentY, 38, aiComment, schoolInfo, qrOptions)) {
         currentY = drawTrendGraph(doc, trendData, 14, currentY, 182, 34, getSchoolLevelBand(classDataForGrading)) + 2;
       }
       const studentBests = classBestList.filter(b => b.studentId === selectedChild.id);
-      if (studentBests.length > 0) {
+      if (studentBests.length > 0 && canFitReportCardOptionalSection(doc, currentY, 20, aiComment, schoolInfo, qrOptions)) {
         currentY = drawAchievements(doc, studentBests, currentY);
       }
-      currentY = drawAIComment(doc, aiComment, currentY);
-      await addSignaturesToPDF(doc, signatures, currentY, schoolInfo);
+      currentY = drawAIComment(doc, aiComment, currentY, { bottomY: commentBottomY });
+      await addSignaturesToPDF(doc, signatures, currentY, schoolInfo, qrOptions);
       drawReportFooter(doc);
       doc.save(`Report_Card_${selectedChild.first_name}_${selectedChild.last_name}.pdf`);
     } catch (err: any) {
@@ -553,14 +561,14 @@ export default function ParentChildReportCard() {
                   <p className="text-xs font-bold text-[#666666] uppercase mb-1">Average Score</p>
                   <div className="flex items-baseline gap-2">
                     <span className="text-2xl font-black text-[#111111]">
-                      {(results.reduce((s, r) => s + getPercentage(r), 0) / results.length).toFixed(1)}%
+                      {currentAverage === null ? '—' : `${currentAverage.toFixed(1)}%`}
                     </span>
-                    {previousAvg !== null && (
+                    {previousAvg !== null && currentAverage !== null && (
                       <span className={`text-xs font-bold flex items-center ${
-                        (results.reduce((s, r) => s + getPercentage(r), 0) / results.length) >= previousAvg ? 'text-green-600' : 'text-red-600'
+                        currentAverage >= previousAvg ? 'text-green-600' : 'text-red-600'
                       }`}>
-                        {(results.reduce((s, r) => s + getPercentage(r), 0) / results.length) >= previousAvg ? <TrendingUp className="w-3 h-3 mr-0.5" /> : <TrendingDown className="w-3 h-3 mr-0.5" />}
-                        {Math.abs((results.reduce((s, r) => s + getPercentage(r), 0) / results.length) - previousAvg).toFixed(1)}%
+                        {currentAverage >= previousAvg ? <TrendingUp className="w-3 h-3 mr-0.5" /> : <TrendingDown className="w-3 h-3 mr-0.5" />}
+                        {Math.abs(currentAverage - previousAvg).toFixed(1)}%
                       </span>
                     )}
                   </div>
@@ -569,8 +577,10 @@ export default function ParentChildReportCard() {
                   <p className="text-xs font-bold text-[#666666] uppercase mb-1">Overall Grade</p>
                   <span className="text-2xl font-black text-purple-600 uppercase">
                     {(() => {
-                      const avg = results.reduce((s, r) => s + getPercentage(r), 0) / results.length;
-                      if (avg >= 75) return 'EE'; if (avg >= 41) return 'ME'; if (avg >= 21) return 'AE'; return 'BE';
+                      const avg = currentAverage;
+                      if (avg === null) return '—';
+                      const activeGrade = calculateGradeForClass(avg, classDataForGrading);
+                      return 'subLevel' in activeGrade ? activeGrade.subLevel : activeGrade.grade;
                     })()}
                   </span>
                 </div>
@@ -601,26 +611,32 @@ export default function ParentChildReportCard() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {results.map(r => {
-                        const pct = getPercentage(r);
-                        let g = 'BE'; if (pct >= 75) g = 'EE'; else if (pct >= 41) g = 'ME'; else if (pct >= 21) g = 'AE';
+                        const exceptionalCode = excludedResultCode(r);
+                        const pct = exceptionalCode ? 0 : getPercentage(r);
+                        const activeGrade = calculateGradeForClass(pct, classDataForGrading);
+                        const g = exceptionalCode || ('subLevel' in activeGrade ? activeGrade.subLevel : activeGrade.grade);
+                        const is844 = is844Curriculum(classDataForGrading);
+                        const strong = !exceptionalCode && (is844 ? activeGrade.points >= 7 : activeGrade.grade === 'EE');
+                        const meeting = !exceptionalCode && (is844 ? activeGrade.points >= 5 : activeGrade.grade === 'ME');
+                        const approaching = !exceptionalCode && (is844 ? activeGrade.points >= 3 : activeGrade.grade === 'AE');
                         return (
                           <tr key={r.id} className="hover:bg-gray-50/50 transition-colors">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-[#111111]">{r.subjects?.name === 'Creative Arts' ? 'C-Arts' : r.subjects?.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <div className="text-sm font-bold text-[#111111]">{pct}%</div>
-                              <div className="w-24 bg-gray-100 h-1.5 rounded-full mx-auto mt-1.5 overflow-hidden">
+                              <div className="text-sm font-bold text-[#111111]">{exceptionalCode || `${pct}%`}</div>
+                              {!exceptionalCode && <div className="w-24 bg-gray-100 h-1.5 rounded-full mx-auto mt-1.5 overflow-hidden">
                                 <div className={`h-full rounded-full ${pct >= 75 ? 'bg-green-500' : pct >= 41 ? 'bg-blue-500' : pct >= 21 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
-                              </div>
+                              </div>}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase ${
-                                g === 'EE' ? 'bg-green-100 text-green-700' : g === 'ME' ? 'bg-blue-100 text-blue-700' : g === 'AE' ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'
+                                  strong ? 'bg-green-100 text-green-700' : meeting ? 'bg-blue-100 text-blue-700' : approaching ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'
                               }`}>{g}</span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center gap-1.5 text-xs font-medium text-[#666666]">
-                                {pct >= 75 ? <TrendingUp className="w-3.5 h-3.5 text-green-500" /> : pct >= 41 ? <Minus className="w-3.5 h-3.5 text-blue-500" /> : <TrendingDown className="w-3.5 h-3.5 text-red-500" />}
-                                {pct >= 75 ? 'Exceeding' : pct >= 41 ? 'Meeting' : pct >= 21 ? 'Approaching' : 'Below'}
+                                {strong ? <TrendingUp className="w-3.5 h-3.5 text-green-500" /> : meeting || exceptionalCode ? <Minus className="w-3.5 h-3.5 text-blue-500" /> : <TrendingDown className="w-3.5 h-3.5 text-red-500" />}
+                                {exceptionalCode === 'X' ? 'Missing (X)' : exceptionalCode === 'Y' ? 'Cheated (Y)' : strong ? 'Exceeding' : meeting ? 'Meeting' : approaching ? 'Approaching' : 'Below'}
                               </div>
                             </td>
                           </tr>

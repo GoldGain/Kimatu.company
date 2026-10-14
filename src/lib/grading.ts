@@ -1,3 +1,5 @@
+import { calculatePathwayPerformance, strongestPathway } from './pathwayPerformance';
+
 export type Curriculum = 'CBE' | '844';
 export type SchoolLevelBand = 'primary' | 'junior' | 'senior';
 
@@ -21,10 +23,11 @@ export function is844Curriculum(classData?: {
   const isForm3Or4 = /\bform\s*(?:3|three|4|four)\b/i.test(name);
 
   // Classes.tsx stores traditional Form 3/4 presets with curriculum: ''. An
-  // explicit CBE value always wins; blank or 8-4-4 values plus a Form label
-  // select the legacy A-E grading system.
-  if (isForm3Or4 && (normalizedCurriculum === '' || normalizedCurriculum === '844')) return true;
-  if (normalizedCurriculum !== '844') return false;
+  // explicit 8-4-4 flag applies to Forms 1–4; an explicit CBE value always
+  // wins, while a blank curriculum is treated as 8-4-4 only for Form 3/4.
+  if (normalizedCurriculum === '844') return true;
+  if (isForm3Or4 && normalizedCurriculum === '') return true;
+  if (normalizedCurriculum !== '') return false;
 
   const rawLevel = classData?.grade_level ?? classData?.level;
   const parsedLevel = typeof rawLevel === 'number'
@@ -34,6 +37,26 @@ export function is844Curriculum(classData?: {
   // Kimatu's 8-4-4 setup maps Form 3/Form 4 to grade levels 11/12, while
   // older school records may store the form number directly as 3/4.
   return parsedLevel === 3 || parsedLevel === 4 || parsedLevel === 11 || parsedLevel === 12;
+}
+
+/**
+ * Returns the grading/curriculum scope used when forming same-level cohorts.
+ * CBE and eligible 8-4-4 classes must never share an all-stream group merely
+ * because their stored numeric level happens to match.
+ */
+export function curriculumScopeKey(classData?: Parameters<typeof is844Curriculum>[0]): 'CBE' | '844' {
+  return is844Curriculum(classData) ? '844' : 'CBE';
+}
+
+/** Stable level + curriculum key for all-stream and comparison cohorts. */
+export function curriculumCohortKey(classData?: Parameters<typeof is844Curriculum>[0]): string {
+  const rawLevel = classData?.grade_level ?? classData?.level;
+  const parsedLevel = typeof rawLevel === 'number'
+    ? rawLevel
+    : parseInt(String(rawLevel ?? '').replace(/[^0-9-]/g, ''), 10);
+  const name = String(classData?.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const levelKey = Number.isFinite(parsedLevel) ? String(parsedLevel) : `name:${name || 'unassigned'}`;
+  return `${curriculumScopeKey(classData)}:${levelKey}`;
 }
 
 export interface NumericGrade844 {
@@ -57,7 +80,7 @@ function normalizePercentage(value: number): number {
 }
 
 export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | string | null; grade_level?: number | string | null; level?: number | string | null; name?: string | null }): SchoolLevelBand {
-  // Form 3/Form 4 8-4-4 results use the senior display band for shared UI.
+  // 8-4-4 curriculum: treat Form 1-4 as senior band for CBE display
   if (is844Curriculum(classData)) return 'senior';
   // Use grade_level first (new column), fall back to level (legacy)
   const rawLevel = classData?.grade_level ?? classData?.level;
@@ -88,7 +111,7 @@ export function getSchoolLevelBand(classData?: { curriculum?: Curriculum | strin
 
 /**
  * PRIMARY SCHOOL (PP1, PP2, Grades 1-6): MARKS ONLY — NO points shown to users.
- * EE: 75-100%, ME: 41-74%, AE: 21-40%, BE: 1-20%
+ * EE: 76-100%, ME: 51-75%, AE: 26-50%, BE: 0-25%
  *
  * JUNIOR SCHOOL (Grades 7-9): 8-level scale WITH points.
  * EE1=8, EE2=7, ME1=6, ME2=5, AE1=4, AE2=3, BE1=2, BE2=1
@@ -112,10 +135,10 @@ export function calculateCompetencyGrade(score: number, band: SchoolLevelBand = 
   }
 
   // Primary (PP1, PP2, Grades 1-6): MARKS ONLY — 4 competency descriptors, NO points shown.
-  // EE: 75-100%, ME: 41-74%, AE: 21-40%, BE: 1-20%
-  if (percentage >= 75) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band };
-  if (percentage >= 41) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band };
-  if (percentage >= 21) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band };
+  // EE: 76-100%, ME: 51-75%, AE: 26-50%, BE: 0-25%
+  if (percentage >= 76) return { subLevel: 'EE', grade: 'EE', points: 0, descriptor: 'Exceeding Expectation', band };
+  if (percentage >= 51) return { subLevel: 'ME', grade: 'ME', points: 0, descriptor: 'Meeting Expectation', band };
+  if (percentage >= 26) return { subLevel: 'AE', grade: 'AE', points: 0, descriptor: 'Approaching Expectation', band };
   return { subLevel: 'BE', grade: 'BE', points: 0, descriptor: 'Below Expectation', band };
 }
 
@@ -128,6 +151,7 @@ export function calculateResultGrades(percentage: number, classData?: { curricul
 
 export function calculate844Grade(score: number): NumericGrade844 {
   const percentage = normalizePercentage(score);
+  // Kimatu's Form 3/Form 4 scale: the KNEC A–E grade bands carry 12–1 points.
   if (percentage >= 80) return { grade: 'A', points: 12, descriptor: 'Excellent', band: '844' };
   if (percentage >= 75) return { grade: 'A-', points: 11, descriptor: 'Very Good', band: '844' };
   if (percentage >= 70) return { grade: 'B+', points: 10, descriptor: 'Good', band: '844' };
@@ -171,6 +195,17 @@ export function gradePointsForClass(
   return calculateGradeForClass(score, classData).points;
 }
 
+/** Maximum points available for one learning area on the class's scale. */
+export function gradePointsMaxForClass(
+  classData?: Parameters<typeof getSchoolLevelBand>[0],
+): number {
+  if (is844Curriculum(classData)) return 12;
+  return getSchoolLevelBand(classData) === 'primary' ? 0 : 8;
+}
+
+// Descriptive alias for callers that prefer a getter-style helper name.
+export const getMaxPointsForClass = gradePointsMaxForClass;
+
 export function gradeDisplayLabel(
   band: SchoolLevelBand,
   classData?: Parameters<typeof getSchoolLevelBand>[0],
@@ -206,8 +241,9 @@ function getSubjectAdvice(subjectName: string, band: SchoolLevelBand): string {
   return 'review class notes, complete all assignments, and seek extra help from your teacher';
 }
 
-function getGradeLabel(pct: number, band: SchoolLevelBand, classData?: any): string {
-  return classData ? gradeLabelForClass(pct, classData) : calculateCompetencyGrade(pct, band).subLevel;
+function getGradeLabel(pct: number, band: SchoolLevelBand): string {
+  const g = calculateCompetencyGrade(pct, band);
+  return g.subLevel;
 }
 
 /**
@@ -261,12 +297,12 @@ export function generateSubjectSpecificComment(
       subjectName.toLowerCase().includes(s.name.toLowerCase())
     );
     if (subjectResult) {
-      return getGradeLabel(subjectResult.percentage, band, classData);
+      return getGradeLabel(subjectResult.percentage, band);
     }
-    return getGradeLabel(avgPct, band, classData);
+    return getGradeLabel(avgPct, band);
   };
 
-  const bestGrade = getGradeLabel(best.percentage, band, classData);
+  const bestGrade = getGradeLabel(best.percentage, band);
   let comment = '';
   const firstName = studentName.split(' ')[0] || studentName;
 
@@ -329,52 +365,12 @@ export function generateSubjectSpecificComment(
     });
   }
 
-  // FIX Issue 2: Add pathway performance sentence
-  // Group subjects by pathway and find the strongest pathway
-  const SUBJECT_PATHWAY_MAP: Record<string, string> = {
-    'Mathematics': 'STEM',
-    'Integrated Science': 'STEM',
-    'Pre-Technical Studies': 'STEM',
-    'Agriculture and Nutrition': 'STEM',
-    'Agriculture': 'STEM',
-    'Science and Technology': 'STEM',
-    'English': 'Social Sciences',
-    'Kiswahili': 'Social Sciences',
-    'Social Studies': 'Social Sciences',
-    'Religious Education': 'Social Sciences',
-    'CRE': 'Social Sciences',
-    'IRE': 'Social Sciences',
-    'HRE': 'Social Sciences',
-    'Creative Arts and Sports': 'Creative Arts and Sports',
-    'Creative Arts': 'Creative Arts and Sports',
-    'Physical and Health Education': 'Creative Arts and Sports',
-    'Music': 'Creative Arts and Sports',
-    'Art and Craft': 'Creative Arts and Sports',
-  };
-
-  const pathwayScores: Record<string, { total: number; count: number }> = {};
-  subjects.forEach(s => {
-    // Find matching pathway
-    const pathwayKey = Object.keys(SUBJECT_PATHWAY_MAP).find(k =>
-      s.name.toLowerCase().includes(k.toLowerCase()) ||
-      k.toLowerCase().includes(s.name.toLowerCase())
-    );
-    const pathway = pathwayKey ? SUBJECT_PATHWAY_MAP[pathwayKey] : null;
-    if (pathway) {
-      if (!pathwayScores[pathway]) pathwayScores[pathway] = { total: 0, count: 0 };
-      pathwayScores[pathway].total += s.percentage;
-      pathwayScores[pathway].count += 1;
-    }
-  });
-
-  const pathwayAverages = Object.entries(pathwayScores)
-    .filter(([, v]) => v.count > 0)
-    .map(([name, v]) => ({ name, avg: v.total / v.count }))
-    .sort((a, b) => b.avg - a.avg);
-
-  if (pathwayAverages.length > 0) {
-    const strongestPathway = pathwayAverages[0];
-    comment += `Your performance in the ${strongestPathway.name} pathway (${strongestPathway.avg.toFixed(1)}%) shows strong potential. `;
+  // Use the same pathway mapping, denominator and highest-score rule as the
+  // report-card profile so the advisory always matches the strongest flag.
+  const pathwayPerformance = calculatePathwayPerformance(subjects);
+  const bestPathway = strongestPathway(pathwayPerformance);
+  if (bestPathway && bestPathway.outOf > 0) {
+    comment += `Your best-performed pathway is ${bestPathway.pathway} (${bestPathway.percentage.toFixed(1)}%), showing strong potential. `;
   }
 
   // Closing encouragement with position
@@ -396,33 +392,31 @@ export function generateSubjectSpecificComment(
   return comment;
 }
 
-// ── Required Learning Areas (fixed ranking denominator) ────────────────────
-// Ranking must divide a learner's total score by the FIXED number of learning
-// areas required for their level — NOT by how many subjects they happen to
-// have marks in. This stops learners with only a couple of uploaded subjects
-// from ranking #1 on an inflated mean.
+// ── Required Learning Areas (configured denominator) ───────────────────────
+// Junior School is the one deliberate exception: IRE and CRE are optional
+// alternatives, so its reported denominator is always nine learning areas.
+// Every other level must use the school's configured area count. Callers should
+// pass the count they derive from the class/assessment configuration; returning
+// null when it is unavailable prevents this helper from inventing a national
+// default such as 500 marks.
 export function getRequiredLearningAreas(classData?: {
   curriculum?: Curriculum | string | null;
   grade_level?: number | string | null;
   level?: number | string | null;
   name?: string | null;
-}): number | null {
+}, configuredCount?: number | null): number | null {
   const rawLevel = classData?.grade_level ?? classData?.level;
   const grade = typeof rawLevel === 'number'
     ? rawLevel
     : parseInt(String(rawLevel ?? '').replace(/[^0-9-]/g, ''), 10);
 
-  if (Number.isFinite(grade)) {
-    if (grade >= 10 && grade <= 12) return 7; // Senior School
-    if (grade >= 7 && grade <= 9) return 9;   // Junior School
-    if (grade >= 4 && grade <= 6) return 7;   // Upper Primary
-    if (grade >= 1 && grade <= 3) return 5;   // Lower Primary
-  }
+  if (Number.isFinite(grade) && grade >= 7 && grade <= 9) return 9;
 
   const name = String(classData?.name || '').toLowerCase();
-  if (/senior|grade\s*1[012]/.test(name)) return 7;
   if (/junior|jss|grade\s*[789]/.test(name)) return 9;
-  return null; // playgroup / PP / unknown: keep old divide-by-count behaviour
+  if (Number.isFinite(configuredCount) && Number(configuredCount) > 0) return Math.floor(Number(configuredCount));
+  if (/senior|grade\s*1[012]/.test(name)) return null;
+  return null;
 }
 
 // ── Learning Area Performance status band ────────────────────────────────────
@@ -437,7 +431,11 @@ export function statusForGrade(subLevel?: string | null): 'STRONG' | 'AVERAGE' |
 }
 
 // ── Grade band labels for a school level band ────────────────────────────────
-export function gradeLabelsForBand(band: SchoolLevelBand): string[] {
+export function gradeLabelsForBand(
+  band: SchoolLevelBand,
+  classData?: Parameters<typeof getSchoolLevelBand>[0],
+): string[] {
+  if (is844Curriculum(classData)) return ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'E'];
   if (band === 'primary') return ['EE', 'ME', 'AE', 'BE'];
   return ['EE1', 'EE2', 'ME1', 'ME2', 'AE1', 'AE2', 'BE1', 'BE2'];
 }

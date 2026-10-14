@@ -1,12 +1,14 @@
 import {
+  calculateGradeForClass,
   getCanonicalLearningAreas,
   getRequiredLearningAreas,
   getSchoolLevelBand,
   type SchoolLevelBand,
 } from '@/lib/grading';
 import { normalizeLearningAreaName } from '@/lib/learningAreas';
-import { rankByUnifiedRule } from '@/lib/ranking';
+import { rankByPathway, rankByUnifiedRule } from '@/lib/ranking';
 import { aggregateLearnerTotals } from '@/lib/learnerTotals';
+import { isSeniorCbeClass } from '@/lib/seniorPathways';
 
 export type AssessmentLearnerSummary = {
   studentId: string;
@@ -19,9 +21,14 @@ export type AssessmentLearnerSummary = {
   count: number;
   avgPct: number;
   totalPoints: number;
+  rankingTotalMarks?: number;
+  rankingTotalPoints?: number;
+  rankingSubjects?: string[];
   gender: string | null;
   examName: string;
   position: number;
+  /** Overall grade label on the learner's class grading scale. */
+  gradeLabel: string;
 };
 
 export const LEARNING_AREA_ORDER = [
@@ -89,12 +96,19 @@ export function requiredLearningAreaCount(classObj: any, rawResults: any[], addi
 export function buildAssessmentLearnerSummaries(rawResults: any[], classObj: any): AssessmentLearnerSummary[] {
   const band: SchoolLevelBand = getSchoolLevelBand(classObj);
   // Shared aggregation (also used by the student/parent portals and report
-  // cards) so every surface ranks the same totals, then the shared rule orders
-  // them: total marks first, then the level-specific tie-breaker.
-  const summaries = aggregateLearnerTotals(rawResults, classObj).map((entry) => ({
-    ...entry,
-    // Kept for existing consumers that read totalPct.
-    totalPct: entry.totalMarks,
-  }));
-  return rankByUnifiedRule(summaries, band) as AssessmentLearnerSummary[];
+  // cards) so every surface ranks the same totals. Junior/Senior use points
+  // first and marks as tie-break; Primary remains marks-only. Form 3/4 carries
+  // its KNEC seven-subject ranking metrics through this same path.
+  const summaries = aggregateLearnerTotals(rawResults, classObj).map((entry) => {
+    const grade = calculateGradeForClass(entry.avgPct, classObj);
+    return {
+      ...entry,
+      // Kept for existing consumers that read totalPct.
+      totalPct: entry.totalMarks,
+      gradeLabel: 'subLevel' in grade ? grade.subLevel : grade.grade,
+    };
+  });
+  return (isSeniorCbeClass(classObj)
+    ? rankByPathway(summaries, band)
+    : rankByUnifiedRule(summaries, band)) as AssessmentLearnerSummary[];
 }

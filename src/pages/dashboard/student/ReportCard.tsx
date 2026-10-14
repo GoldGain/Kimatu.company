@@ -13,10 +13,13 @@ import {
   drawReportHeader,
   drawStudentInfo,
   drawResultsTable,
+  drawPathwayPerformance,
   drawSummaryBox,
   drawDeviation,
   drawAchievements,
   drawAIComment,
+  canFitReportCardOptionalSection,
+  getReportCardCommentBottomY,
   drawNextTermStartDate,
   getPercentage,
   formatPosition,
@@ -30,13 +33,14 @@ import {
   DEFAULT_PDF_FONT_SIZE,
   type PdfFontSize,
 } from '@/lib/pdfFontSize';
-import { calculateGradeForClass, getSchoolLevelBand, gradeLabelForClass, gradePointsForClass, is844Curriculum } from '@/lib/grading';
+import { calculateGradeForClass, gradePointsForClass, getSchoolLevelBand, is844Curriculum } from '@/lib/grading';
 import { computeBestPerSubject } from '@/lib/bestPerSubject';
 import type { BestInSubject } from '@/lib/bestPerSubject';
 import { formatClassStream } from '@/lib/class-label';
-import { rankByUnifiedRule } from '@/lib/ranking';
+import { rankByPathway, rankByUnifiedRule } from '@/lib/ranking';
 import { fetchAllRows } from '@/lib/paginatedQuery';
-import { aggregateLearnerTotals } from '@/lib/learnerTotals';
+import { aggregateLearnerTotals, isExcludedResult, usesSevenSubjectRanking } from '@/lib/learnerTotals';
+import { isSeniorCbeClass } from '@/lib/seniorPathways';
 
 export default function StudentReportCard() {
   const { user } = useAuth();
@@ -64,7 +68,7 @@ export default function StudentReportCard() {
     try {
       const { data: studentData } = await supabaseUntyped
         .from('students')
-        .select('*, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum, class_teacher_id)')
+        .select('*, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum, class_teacher_id)').or('is_active.eq.true,is_active.is.null')
         .eq('profile_id', user?.id)
         .eq('school_id', user?.schoolId)
         .single();
@@ -73,7 +77,7 @@ export default function StudentReportCard() {
       if (studentData) {
         const { count } = await supabaseUntyped
           .from('students')
-          .select('id', { count: 'exact', head: true })
+          .select('id', { count: 'exact', head: true }).or('is_active.eq.true,is_active.is.null')
           .eq('class_id', studentData.class_id)
           .eq('school_id', studentData.school_id);
         setTotalStudents(count || 0);
@@ -205,7 +209,7 @@ export default function StudentReportCard() {
     // exceeds that, so an unpaged read would truncate the ranking cohort.
     const classResults = await fetchAllRows((from, to) => supabaseUntyped
       .from('results')
-      .select('*, students(id, first_name, last_name), subjects(name)')
+      .select('*, students!inner(is_active, id, first_name, last_name), subjects(name)').or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
       .eq('class_id', student.class_id)
       .eq('school_id', student.school_id)
       .eq('term_id', selectedTerm)
@@ -221,10 +225,10 @@ export default function StudentReportCard() {
     // and the Class Summary for the same learner, term and assessment.
     if (classResults && classResults.length > 0) {
       // Same aggregation as the class summary, so both report the same total.
-      const ranked = rankByUnifiedRule(
-        aggregateLearnerTotals(classResults, student?.classes || {}),
-        getSchoolLevelBand(student?.classes || {}),
-      );
+      const totals = aggregateLearnerTotals(classResults, student?.classes || {});
+      const ranked = isSeniorCbeClass(student?.classes || {})
+        ? rankByPathway(totals, getSchoolLevelBand(student?.classes || {}))
+        : rankByUnifiedRule(totals, getSchoolLevelBand(student?.classes || {}));
       const entry = ranked.find((row) => row.studentId === student.id);
       setClassPosition(entry ? entry.position : null);
     } else {
@@ -236,7 +240,7 @@ export default function StudentReportCard() {
     if (!student) return;
     const { data: allResults } = await supabaseUntyped
       .from('results')
-        .select('percentage, marks, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
+        .select('percentage, marks, mark_code, out_of, term_id, exam_id, terms(name, academic_year), school_exams(name, type)')
         .eq('student_id', student.id)
         .eq('school_id', student.school_id)
       .order('terms(academic_year)', { ascending: true })
@@ -261,17 +265,18 @@ export default function StudentReportCard() {
     const prevTerm = sortedTerms[currentIdx - 1];
     const { data: prevResults } = await supabaseUntyped
       .from('results')
-      .select('marks, out_of, percentage')
+      .select('marks, out_of, percentage, mark_code')
       .eq('student_id', student.id)
       .eq('school_id', student.school_id)
       .eq('term_id', prevTerm.id);
-    if (!prevResults || prevResults.length === 0) { setPreviousAvg(null); return; }
-    const totalPct = prevResults.reduce((s: number, r: any) => s + (r.percentage || (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
-    setPreviousAvg(totalPct / prevResults.length);
+    const numericResults = (prevResults || []).filter((result: any) => !isExcludedResult(result));
+    if (!numericResults.length) { setPreviousAvg(null); return; }
+    const totalPct = numericResults.reduce((s: number, r: any) => s + (r.percentage ?? (r.out_of > 0 ? (r.marks / r.out_of) * 100 : 0)), 0);
+    setPreviousAvg(totalPct / numericResults.length);
   };
 
   const classDataForGrading = student?.classes || {};
-  const is = is844Curriculum(classDataForGrading);
+  const is844Class = is844Curriculum(classDataForGrading);
   const band = getSchoolLevelBand(classDataForGrading);
   const isPrimary = band === 'primary';
 
@@ -284,14 +289,12 @@ export default function StudentReportCard() {
       configurePdfFontSize(doc, fontSize);
       const term = terms.find(t => t.id === selectedTerm);
 
-      const avgPercentage = results.length
-        ? results.reduce((s, r) => s + getPercentage(r), 0) / results.length
-        : 0;
-      const totalPoints = isPrimary
-        ? null
-        : results.reduce((sum, result) => sum + gradePointsForClass(getPercentage(result), classDataForGrading), 0);
+      const learnerMetrics = aggregateLearnerTotals(results.map((row: any) => ({ ...row, students: student })), classDataForGrading)[0];
+      const rankingDetails = learnerMetrics?.rankingSubjects?.length ? { subjects: learnerMetrics.rankingSubjects, totalMarks: learnerMetrics.rankingTotalMarks || 0, totalPoints: learnerMetrics.rankingTotalPoints || 0 } : undefined;
+      const avgPercentage = learnerMetrics?.count ? learnerMetrics.avgPct : 0;
+      const totalPoints = isPrimary ? null : (rankingDetails?.totalPoints ?? learnerMetrics?.totalPoints ?? 0);
 
-      const deviation = previousAvg !== null ? avgPercentage - previousAvg : null;
+      const deviation = learnerMetrics?.count && previousAvg !== null ? avgPercentage - previousAvg : null;
       const isNew = deviation === null;
       // Prefer the unified ranking position so the report card cannot disagree
       // with the portal and class summary; fall back to the stored value.
@@ -300,10 +303,13 @@ export default function StudentReportCard() {
 
       const subjectScores = results.map(r => ({
         name: r.subjects?.name || 'Unknown',
-        percentage: getPercentage(r),
+        marks: r.marks,
+        out_of: r.out_of,
+        mark_code: r.mark_code,
+        percentage: isExcludedResult(r) ? 0 : getPercentage(r),
         previousPercentage: null,
       }));
-      const sortedBest = [...subjectScores].sort((a, b) => b.percentage - a.percentage);
+      const sortedBest = subjectScores.filter((result) => !isExcludedResult(result)).sort((a, b) => b.percentage - a.percentage);
       const bestSubject = sortedBest[0]?.name || 'all subjects';
       const weakestSubject = sortedBest[sortedBest.length - 1]?.name || 'some subjects';
       const studentFullName = `${student.first_name} ${student.last_name}`;
@@ -328,19 +334,25 @@ export default function StudentReportCard() {
         48,
         results[0]?.school_exams?.name || undefined,
         student.assessment_number || undefined,
+        { showPoints: !isPrimary, totalMarks: rankingDetails ? `${Math.round(rankingDetails.totalMarks)} marks out of 700` : undefined, totalPoints: rankingDetails ? `${rankingDetails.totalPoints} points out of 84` : undefined, pathway: student.pathway, track: student.track, overallGrade: learnerMetrics?.count ? (() => { const grade = calculateGradeForClass(avgPercentage, classDataForGrading); return 'subLevel' in grade ? grade.subLevel : grade.grade; })() : 'N/A', showPathway: usesSevenSubjectRanking(classDataForGrading), is844: is844Class },
       );
 
-      const tableEndY = drawResultsTable(doc, results, classDataForGrading, 70);
-      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10);
+      const qrOptions = { assessmentNumber: student.assessment_number };
+      const commentBottomY = getReportCardCommentBottomY(doc, schoolInfo, qrOptions);
+      let tableEndY = drawResultsTable(doc, results, classDataForGrading, usesSevenSubjectRanking(classDataForGrading) ? 76 : 70, { showDeviation: previousAvg !== null, rankingDetails });
+      if (band === 'junior') tableEndY = drawPathwayPerformance(doc, results, tableEndY + 4) + 6;
+      const summaryEndY = drawSummaryBox(doc, results, avgPercentage, totalPoints, positionStr, classDataForGrading, tableEndY + 10, undefined, rankingDetails);
       const devEndY = drawDeviation(doc, deviation, previousAvg, null, summaryEndY);
       let trendEndY = devEndY;
-      if (trendData.length >= 2) {
+      if (trendData.length >= 2 && canFitReportCardOptionalSection(doc, devEndY, 38, aiComment, schoolInfo, qrOptions)) {
         trendEndY = drawTrendGraph(doc, trendData, 14, devEndY, 182, 34, band) + 2;
       }
       const myBestSubjects = classBestList.filter(b => b.studentId === student.id);
-      const achievementEndY = drawAchievements(doc, myBestSubjects, trendEndY);
-      const commentEndY = drawAIComment(doc, aiComment, achievementEndY);
-      await addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo);
+      const achievementEndY = myBestSubjects.length > 0 && canFitReportCardOptionalSection(doc, trendEndY, 20, aiComment, schoolInfo, qrOptions)
+        ? drawAchievements(doc, myBestSubjects, trendEndY)
+        : trendEndY;
+      const commentEndY = drawAIComment(doc, aiComment, achievementEndY, { bottomY: commentBottomY });
+      await addSignaturesToPDF(doc, signatures, commentEndY, schoolInfo, qrOptions);
 
       // Footer anchored to the bottom of the last page (never pushes content down)
       drawReportFooter(doc);
@@ -476,7 +488,7 @@ export default function StudentReportCard() {
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Learning Area</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Marks</th>
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">%</th>
-                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is ? '844 Grade' : 'CBE Grade'}</th>
+                  <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">{is844Class ? '8-4-4 Grade' : 'CBE Grade'}</th>
                   {!isPrimary && <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Points</th>}
                   <th className="text-left text-xs font-medium text-[#666666] uppercase py-2 px-3">Descriptor</th>
                 </tr>
@@ -484,17 +496,14 @@ export default function StudentReportCard() {
               <tbody>
                 {results.map((r, i) => {
                   const percentage = getPercentage(r);
-                  const gradeInfo = calculateGradeForClass(percentage, classDataForGrading);
-                  const grading = {
-                    grade: gradeLabelForClass(percentage, classDataForGrading),
-                    points: gradeInfo.points,
-                    descriptor: gradeInfo.descriptor,
-                  };
+                  const markCode = String(r.mark_code || '').toUpperCase();
+                  const activeGrade = calculateGradeForClass(percentage, classDataForGrading);
+                  const grading = { grade: markCode === 'X' || markCode === 'Y' ? markCode : ('subLevel' in activeGrade ? activeGrade.subLevel : activeGrade.grade), points: markCode ? 0 : activeGrade.points, descriptor: markCode === 'X' ? 'Missing marks / absent' : markCode === 'Y' ? 'Cheated examination' : activeGrade.descriptor };
                   return (
                     <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2 px-3 font-medium">{r.subjects?.name === 'Creative Arts' ? 'C-Arts' : r.subjects?.name}</td>
-                      <td className="py-2 px-3">{r.marks}</td>
-                      <td className="py-2 px-3">{percentage}%</td>
+                      <td className="py-2 px-3">{markCode || r.marks}</td>
+                      <td className="py-2 px-3">{markCode || `${percentage}%`}</td>
                       <td className="py-2 px-3">
                         <span className={`text-xs font-bold px-2 py-1 rounded-full ${
                           grading.grade.startsWith('EE') || grading.grade.startsWith('A') ? 'bg-green-100 text-green-700' :
@@ -520,7 +529,7 @@ export default function StudentReportCard() {
               </div>
               {classBestList.filter(b => b.studentId === student?.id).map((b, i) => (
                 <div key={i} className="text-sm text-yellow-900">
-                  You were the best in <strong>{b.subjectName}</strong>: {b.percentage}% — {b.gradeLabel}{b.points !== null ? ` (${b.points} pts)` : ''}
+                  You were the best in <strong>{b.subjectName}</strong>: {b.percentage}% — {b.gradeLabel}{!isPrimary && b.points !== null ? ` (${b.points} pts)` : ''}
                 </div>
               ))}
             </div>
