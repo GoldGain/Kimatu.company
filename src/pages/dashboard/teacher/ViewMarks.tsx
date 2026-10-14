@@ -145,11 +145,11 @@ export default function ViewMarks() {
         .from('results')
         .select(`
           *,
-          students(first_name, last_name, admission_number),
+          students!inner(is_active, first_name, last_name, admission_number),
           subjects(name),
           classes(name, stream, stream_name, level, grade_level, curriculum),
           terms(name, academic_year)
-        `)
+        `).or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
         .eq('teacher_id', teacherId)
         .eq('school_id', user?.schoolId)
         .order('submitted_at', { ascending: false });

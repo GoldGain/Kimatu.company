@@ -4,7 +4,7 @@ import { supabaseUntyped } from '@/lib/supabase/client';
 import { getSchoolLevelBand, gradeLabelForClass } from '@/lib/grading';
 import { rankByUnifiedRule } from '@/lib/ranking';
 import { fetchAllRows } from '@/lib/paginatedQuery';
-import { aggregateLearnerTotals } from '@/lib/learnerTotals';
+import { aggregateLearnerTotals, excludedResultCode, isExcludedResult } from '@/lib/learnerTotals';
 import { Filter, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 /** Term order helper: Term 1 < Term 2 < Term 3 regardless of label casing. */
@@ -35,7 +35,7 @@ export default function StudentResults() {
         // students has two FKs to classes (class_id, stream_id); the embed must
         // name the class_id relationship explicitly or PostgREST returns
         // PGRST201 and the whole learner portal loses its student record.
-        .select('id, class_id, school_id, status, graduation_year, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum)')
+        .select('id, class_id, school_id, status, graduation_year, classes!students_class_id_fkey(name, stream, stream_name, level, grade_level, curriculum)').or('is_active.eq.true,is_active.is.null')
         .eq('profile_id', user?.id)
         .eq('school_id', user?.schoolId)
         .maybeSingle();
@@ -110,7 +110,7 @@ export default function StudentResults() {
           // class and the learner's position comes out wrong.
           const classResults = await fetchAllRows((from, to) => supabaseUntyped
             .from('results')
-            .select('student_id, class_id, marks, out_of, percentage, cbc_points, created_at, students(id, gender), subjects(name)')
+            .select('student_id, class_id, marks, out_of, percentage, cbc_points, created_at, students!inner(is_active, id, gender), subjects(name)').or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
             .eq('class_id', student.class_id)
             .eq('school_id', student.school_id)
             .eq('term_id', selectedTerm)
@@ -172,6 +172,7 @@ export default function StudentResults() {
   };
 
   const getDisplayGrade = (r: any): string => {
+    if (isExcludedResult(r)) return excludedResultCode(r) || 'X';
     const percentage = Number(r.percentage ?? (Number(r.out_of) > 0 ? (Number(r.marks || 0) / Number(r.out_of)) * 100 : 0));
     return gradeLabelForClass(percentage, student?.classes || student || {});
   };

@@ -62,7 +62,7 @@ export default function SchoolAdminFees() {
 
     const [{ data: inv }, { data: paymentRows }, { data: stds }, { data: cls }, { data: trms }, { data: fs }] = await Promise.all([
       supabaseUntyped.from('fee_invoices')
-        .select('*, students(first_name, last_name, admission_number, assessment_number, class_id), terms(name, academic_year)')
+        .select('*, students!inner(is_active, first_name, last_name, admission_number, assessment_number, class_id), terms(name, academic_year)').or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
         .eq('school_id', schoolId)
         .is('deleted_at', null)
         .order('created_at', { ascending: false }),

@@ -84,7 +84,7 @@ export default function ParentChildren() {
     // Load children linked via parent_student_links
     const { data: linked } = await supabaseUntyped
       .from('parent_student_links')
-      .select('*, students(id, first_name, last_name, admission_number, school_id, class_id, classes(name), photo_url, curriculum, gender))')
+      .select('*, students!inner(is_active, id, first_name, last_name, admission_number, school_id, class_id, classes(name), photo_url, curriculum, gender))').or('is_active.eq.true,is_active.is.null', { foreignTable: 'students' })
       .eq('parent_id', user?.id);
     if (linked) {
       const kids = linked.map((l: any) => l.students as unknown as ChildRecord).filter(Boolean);
