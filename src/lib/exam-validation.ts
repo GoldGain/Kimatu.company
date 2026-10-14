@@ -1,8 +1,9 @@
 import type { ExamBlueprint, ExamGenerationRequest, GeneratedExamQuestion } from './exam-schema.js';
-import { hasCompleteTableVisual, hasUsableVisualSpec } from './exam-visuals.js';
+import { hasCompleteTableVisual, hasUsableVisualSpec, isSupportedExamMapSpec } from './exam-visuals.js';
 import {
   buildCoveragePlanFromRequest,
   isMathsLikeSubject,
+  isSocialStudiesSubject,
   missingAnswerIndices,
   normalizePaperVariant,
   paperVariantLabel,
@@ -10,6 +11,17 @@ import {
   uncoveredStrands,
 } from './exam-construction.js';
 import { getKjseaPaperSpec } from './kjsea-paper-formats.js';
+import { scientificContentIssues } from './exam-science-policy.js';
+import { literarySourceIssues } from './exam-literary-policy.js';
+import {
+  expectedExamMarks,
+  getExamBlueprintSlots,
+  questionBlueprintId,
+  questionBlueprintItemIndex,
+  questionBlueprintNumber,
+} from './exam-generation-contract.js';
+
+const EXPLICIT_VISUAL_REFERENCE = /\b(?:study|use|refer to|observe|label|complete|interpret|in|from|according to|based on)\s+(?:(?:the|this|following)\s+)?(?:diagram|figure|map|graph|chart|table|picture|image|illustration)\b|\b(?:diagram|figure|map|graph|chart|table|picture|image|illustration)\s+(?:shown\s+)?(?:below|above|given|provided)\b|\bsee\s+(?:the\s+)?(?:diagram|figure|map|graph|chart|table)\b/i;
 
 export type ExamValidationSeverity = 'critical' | 'warning' | 'info';
 
@@ -29,6 +41,10 @@ export interface ExamValidationSummary {
 
 function normalizeStem(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeMcqAnswer(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase().replace(/^(?:[a-h][.)]|\([a-h]\))\s*/i, '').trim();
 }
 
 function normalizeCurriculumLabel(value: unknown): string {
@@ -53,6 +69,26 @@ function blueprintMarks(blueprint?: ExamBlueprint): number | null {
     : null;
 }
 
+export const REQUIRED_MAP_MISSING = 'REQUIRED_MAP_MISSING';
+
+function mapScopeSelected(request: ExamGenerationRequest): boolean {
+  const selected = [
+    ...request.strands,
+    ...request.subStrands,
+    ...request.topics,
+    ...(request.curriculumScope || []).flatMap((node) => [node.strand, ...node.subStrands, ...node.topics]),
+  ].join(' ');
+  return /\bmap(?:s| work| skills?)?\b|topograph|neighbou?r(?:ing)? countries|countries of east africa|east african countries/i.test(selected);
+}
+
+function mapSlotIndex(request: ExamGenerationRequest): number | undefined {
+  const slots = getExamBlueprintSlots(request);
+  const index = slots.findIndex((slot) => /map|topograph/i.test(`${slot.id} ${slot.title}`));
+  if (index >= 0) return index;
+  const structured = slots.findIndex((slot) => slot.questionType !== 'multiple_choice');
+  return structured >= 0 ? structured : undefined;
+}
+
 export function validateGeneratedExam(
   request: ExamGenerationRequest,
   questions: GeneratedExamQuestion[],
@@ -60,7 +96,7 @@ export function validateGeneratedExam(
 ): ExamValidationSummary {
   const issues: ExamValidationIssue[] = [];
   const expectedCount = blueprintCount(request.blueprint);
-  const expectedMarks = blueprintMarks(request.blueprint) ?? request.totalMarks;
+  const expectedMarks = blueprintMarks(request.blueprint) ?? expectedExamMarks(request);
   const actualMarks = questions.reduce((sum, question) => sum + question.marks, 0);
 
   if (!questions.length) {
@@ -71,6 +107,43 @@ export function validateGeneratedExam(
   }
   if (actualMarks !== expectedMarks) {
     issues.push({ code: 'TOTAL_MARKS_MISMATCH', severity: 'critical', message: `The generated questions total ${actualMarks} marks instead of ${expectedMarks}.` });
+  }
+  if (request.blueprint?.sections.length) {
+    const slots = getExamBlueprintSlots(request);
+    questions.forEach((question, index) => {
+      const slot = slots[index];
+      if (!slot) return;
+      const declaredId = questionBlueprintId(question);
+      if (declaredId && declaredId !== slot.id) {
+        issues.push({ code: 'BLUEPRINT_COMPONENT_MISMATCH', severity: 'critical', message: `Question ${index + 1} is bound to ${declaredId}, but this position belongs to ${slot.id} (${slot.title}).`, questionIndex: index });
+      }
+      if (question.question_type !== slot.questionType) {
+        issues.push({ code: 'BLUEPRINT_SLOT_TYPE_MISMATCH', severity: 'critical', message: `Question ${index + 1} must be ${slot.questionType} for ${slot.title}, not ${question.question_type}.`, questionIndex: index });
+      }
+      if (question.marks !== slot.marks) {
+        issues.push({ code: 'BLUEPRINT_SLOT_MARKS_MISMATCH', severity: 'critical', message: `Question ${index + 1} must be worth ${slot.marks} marks for ${slot.title}, not ${question.marks}.`, questionIndex: index });
+      }
+      const declaredItemIndex = questionBlueprintItemIndex(question);
+      if (declaredItemIndex !== null && declaredItemIndex !== slot.itemIndex) {
+        issues.push({ code: 'BLUEPRINT_ITEM_INDEX_MISMATCH', severity: 'critical', message: `Question ${index + 1} must retain item index ${slot.itemIndex} within ${slot.title}.`, questionIndex: index });
+      }
+      const declaredQuestionNumber = questionBlueprintNumber(question);
+      if (declaredQuestionNumber !== null && declaredQuestionNumber !== slot.questionNumber) {
+        issues.push({ code: 'BLUEPRINT_QUESTION_NUMBER_MISMATCH', severity: 'critical', message: `Question ${index + 1} must retain blueprint question number ${slot.questionNumber}.`, questionIndex: index });
+      }
+      if (slot.strand && normalizeCurriculumLabel(question.strand) !== normalizeCurriculumLabel(slot.strand)) {
+        issues.push({ code: 'BLUEPRINT_COMPONENT_STRAND_MISMATCH', severity: 'critical', message: `Question ${index + 1} must use the strand assigned to ${slot.title}: ${slot.strand}.`, questionIndex: index });
+      }
+      if (slot.subStrand && normalizeCurriculumLabel(question.sub_strand) !== normalizeCurriculumLabel(slot.subStrand)) {
+        issues.push({ code: 'BLUEPRINT_COMPONENT_SUBSTRAND_MISMATCH', severity: 'critical', message: `Question ${index + 1} must use the sub-strand assigned to ${slot.title}: ${slot.subStrand}.`, questionIndex: index });
+      }
+      if (slot.topic && normalizeCurriculumLabel(question.topic) !== normalizeCurriculumLabel(slot.topic)) {
+        issues.push({ code: 'BLUEPRINT_COMPONENT_TOPIC_MISMATCH', severity: 'critical', message: `Question ${index + 1} must use the topic assigned to ${slot.title}: ${slot.topic}.`, questionIndex: index });
+      }
+      if (slot.competency && normalizeCurriculumLabel(question.competency) !== normalizeCurriculumLabel(slot.competency)) {
+        issues.push({ code: 'BLUEPRINT_COMPONENT_COMPETENCY_MISMATCH', severity: 'critical', message: `Question ${index + 1} must use the competency assigned to ${slot.title}: ${slot.competency}.`, questionIndex: index });
+      }
+    });
   }
   if (request.format === 'standard30') {
     const objective = questions.slice(0, 10);
@@ -85,10 +158,14 @@ export function validateGeneratedExam(
   if (request.format === 'kjsea') {
     const spec = getKjseaPaperSpec(request.subject, normalizePaperVariant(request.paperVariant));
     const objective = questions.filter((question) => question.question_type === 'multiple_choice');
-    if (spec?.subjectKey === 'integratedscience' && spec.variant === 'paper1') {
-      if (objective.length !== 30) issues.push({ code: 'KJSEA_OBJECTIVE_LAYOUT', severity: 'critical', message: 'Integrated Science Paper 1 requires exactly 30 multiple-choice questions.' });
-    } else if (spec?.subjectKey !== 'integratedscience' && (spec?.variant === 'paper1' || spec?.variant === 'single')) {
-      if (objective.length < 50) issues.push({ code: 'KJSEA_OBJECTIVE_LAYOUT', severity: 'critical', message: 'English and Kiswahili Paper 1 require 50 multiple-choice questions.' });
+    const expectedObjectiveCount = spec?.subjectKey === 'integratedscience' && spec.variant === 'paper1' ? 30
+      : (spec?.subjectKey === 'english' || spec?.subjectKey === 'kiswahili') && spec.variant === 'paper1' ? 50
+        : (spec?.subjectKey === 'agriculture' || spec?.subjectKey === 'pretechnical') && spec.variant === 'paper1' ? 30
+          : spec?.subjectKey === 'creativearts' && spec.variant === 'paper2' ? 40
+            : spec?.variant === 'single' && ['mathematics', 'socialstudies', 'cre', 'ire', 'hre'].includes(spec.subjectKey) ? 20
+              : null;
+    if (expectedObjectiveCount !== null && objective.length !== expectedObjectiveCount) {
+      issues.push({ code: 'KJSEA_OBJECTIVE_LAYOUT', severity: 'critical', message: `${spec?.title || 'This KJSEA paper'} requires exactly ${expectedObjectiveCount} multiple-choice questions; ${objective.length} were generated.` });
     }
     if (spec?.variant === 'paper2' && questions.some((question) => question.question_type === 'multiple_choice')) {
       issues.push({ code: 'KJSEA_PAPER2_OBJECTIVE_LAYOUT', severity: 'critical', message: 'KJSEA Paper 2 must not contain multiple-choice questions.' });
@@ -139,8 +216,23 @@ export function validateGeneratedExam(
       });
     }
   }
-  if (request.includeImages && questions.length > 0 && !questions.some((question) => question.visual_spec)) {
+  const visualPaperRequired=request.format==='kjsea'&&/^integrated\s+science$/i.test(request.subject.trim());
+  if (request.includeImages && visualPaperRequired&&questions.length > 0 && !questions.some((question) => question.visual_spec)) {
     issues.push({ code: 'VISUAL_REQUIRED', severity: 'critical', message: 'Visual questions are enabled, but the paper contains no structured visual specification.' });
+  }
+  const hasMapBlueprintSlot = request.blueprint?.sections.some((section) => /map|topograph/i.test(`${section.id} ${section.title || ''}`)) || false;
+  const mapRequired = mapScopeSelected(request)
+    || (isSocialStudiesSubject(request.subject) && request.format === 'kjsea' && request.includeImages && hasMapBlueprintSlot);
+  if (mapRequired) {
+    const mapQuestions = questions.filter((question) => String(question.visual_spec?.asset_type || '').toLowerCase() === 'map' && isSupportedExamMapSpec(question)).length;
+    if (mapQuestions < 1) {
+      issues.push({
+        code: REQUIRED_MAP_MISSING,
+        severity: 'critical',
+        message: 'The selected map/topography curriculum requires an actual supported East Africa map question; a non-visual replacement is not acceptable.',
+        questionIndex: mapSlotIndex(request),
+      });
+    }
   }
 
   const seen = new Map<string, number>();
@@ -163,6 +255,8 @@ export function validateGeneratedExam(
   const selectedTopics = new Set(request.topics.map(normalizeCurriculumLabel).filter(Boolean));
 
   questions.forEach((question, index) => {
+    scientificContentIssues(question).forEach(message=>issues.push({code:'SCIENTIFIC_CONTENT_CORRECTION',severity:'critical',message,questionIndex:index}));
+    literarySourceIssues(request,question).forEach(message=>issues.push({code:'LITERARY_SOURCE_CORRECTION',severity:'critical',message,questionIndex:index}));
     const stem = normalizeStem(question.question_text);
     if (!stem) issues.push({ code: 'EMPTY_STEM', severity: 'critical', message: 'Question text is empty.', questionIndex: index });
     if (stem && seen.has(stem)) {
@@ -208,6 +302,23 @@ export function validateGeneratedExam(
       if (!question.correct_answer) {
         issues.push({ code: 'MISSING_CORRECT_ANSWER', severity: 'critical', message: 'Multiple-choice questions need an expected answer.', questionIndex: index });
       }
+      const normalizedOptions = (question.options || []).map((option) => normalizeMcqAnswer(option));
+      if (normalizedOptions.some((option) => !option)) {
+        issues.push({ code: 'MCQ_EMPTY_OPTION', severity: 'critical', message: 'Multiple-choice options must not be empty.', questionIndex: index });
+      }
+      if (new Set(normalizedOptions).size !== normalizedOptions.length) {
+        issues.push({ code: 'MCQ_DUPLICATE_OPTION', severity: 'critical', message: 'Multiple-choice options must be distinct.', questionIndex: index });
+      }
+      if (question.correct_answer && question.options?.length) {
+        const answer = normalizeMcqAnswer(question.correct_answer);
+        const matches = question.options.filter((option, optionIndex) => {
+          const normalized = normalizeMcqAnswer(option);
+          return answer === normalized || answer === String.fromCharCode(97 + optionIndex);
+        }).length;
+        if (matches !== 1) {
+          issues.push({ code: 'MCQ_CORRECT_ANSWER_INVALID', severity: 'critical', message: 'The multiple-choice correct_answer must identify exactly one listed option (by option text or A-D letter).', questionIndex: index });
+        }
+      }
     }
     if (question.sub_parts?.length) {
       const subPartMarks = question.sub_parts.reduce((sum, part) => sum + Number(part.marks || 0), 0);
@@ -226,6 +337,10 @@ export function validateGeneratedExam(
     }
     if (question.question_type === 'essay' && question.marks < 4) {
       issues.push({ code: 'ESSAY_MARKS_LOW', severity: 'warning', message: 'Extended-response questions normally need enough marks for a developed response.', questionIndex: index });
+    }
+    const visualReferenceText = [question.question_text, ...(question.sub_parts || []).map((part) => part.prompt)].join(' ');
+    if (!question.visual_spec && EXPLICIT_VISUAL_REFERENCE.test(visualReferenceText)) {
+      issues.push({ code: 'VISUAL_REFERENCE_MISSING', severity: 'critical', message: 'This question explicitly refers to a diagram, map, table, or other visual but has no structured visual specification; repair it or replace the question.', questionIndex: index });
     }
     if (question.visual_spec && !question.image_url) {
       issues.push({ code: 'VISUAL_NOT_RENDERED', severity: 'critical', message: 'This question has a visual specification but no rendered visual asset.', questionIndex: index });

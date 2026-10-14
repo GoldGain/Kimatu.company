@@ -15,7 +15,8 @@ export function normalizeKey(value: unknown): string {
   return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 export function supportsTwoPapers(subject: string): boolean {
-  return TWO_PAPER_SUBJECTS.includes(normalizeKey(subject));
+  const key = normalizeKey(subject);
+  return TWO_PAPER_SUBJECTS.includes(key) || key === 'agricultureandnutrition' || key === 'pretechnicalstudies';
 }
 export function normalizePaperVariant(value: unknown): PaperVariant {
   return value === 'paper1' || value === 'paper2' ? value : 'single';
@@ -31,11 +32,11 @@ function paperFocus(subject: string, variant: PaperVariant): string {
   if (key === 'english') {
     return variant === 'paper1'
       ? 'Paper 1 is the 50-mark objective Language paper: reading comprehension, listening and speaking, cloze, grammar and language use.'
-      : 'Paper 2 is the 50-mark constructed-response paper: composition, oral literature, novella, play and poetry.';
+      : 'Paper 2 is the 50-mark constructed-response paper: composition, oral literature, novella/short story, play and poetry.';
   }
   if (key === 'kiswahili') {
     return variant === 'paper1'
-      ? 'Karatasi ya Kwanza ni ya alama 50 na ya chaguo: ufahamu wa kusoma, kusikiliza na kuzungumza, cloze, sarufi na matumizi ya lugha.'
+      ? 'Karatasi ya Kwanza ni ya alama 50 na ya chaguo: Ufahamu wa Kusoma (alama 20), Kusikiliza na Kuzungumza (alama 5), na Sarufi (alama 25); cloze inaweza kuwa sehemu ya Sarufi, si sehemu tofauti ya alama 10.'
       : 'Karatasi ya Pili ni ya alama 50 na ya majibu yaliyoundwa: insha, fasihi simulizi, novela, tamthilia na ushairi.';
   }
   if (key === 'agriculture') {
@@ -53,13 +54,16 @@ function paperFocus(subject: string, variant: PaperVariant): string {
       ? 'Creative Arts and Sports Paper 1 is a 100-mark project assessed over three months.'
       : 'Creative Arts and Sports Paper 2 has 40 multiple-choice marks and 60 structured marks.';
   }
-    return variant === 'paper1'
+  if (key === 'hre') return 'Hindu Religious Education uses one 100-mark paper: 20 multiple-choice marks plus 80 structured marks, with a 90-minute duration.';
+  return variant === 'paper1'
       ? 'Integrated Science Paper 1 is a 70-mark theory paper: 30 objective marks plus 40 structured/essay marks.'
       : 'Integrated Science Paper 2 is a current 30-mark, 60-minute written practical-skills paper with three science tasks.';
 }
 export function paperVariantLaw(request: ExamGenerationRequest): string {
   const variant = normalizePaperVariant(request.paperVariant);
-  if (variant === 'single' || !supportsTwoPapers(request.subject)) return '';
+  if (variant === 'single') return '';
+  if (request.format !== 'kjsea') return `School-configured paper variant: ${paperVariantLabel(variant)}. Follow the supplied school blueprint, curriculum and mark total; do not import KJSEA or legacy KCSE paper totals or component rules into this grade.`;
+  if (!supportsTwoPapers(request.subject)) return '';
   return [
     `Paper type law: this paper is ${paperVariantLabel(variant)} only.`,
     paperFocus(request.subject, variant),
@@ -82,6 +86,7 @@ export function answerCompletenessLaw(): string {
 export function isMathsLikeSubject(subject: string): boolean {
   const key = normalizeKey(subject);
   return key === 'mathematics' || key === 'maths' || key === 'math'
+    || key === 'coremathematics' || key === 'essentialmathematics'
     || key.startsWith('integratedscience') || key.startsWith('pretechnical')
     || key === 'physics' || key === 'chemistry' || key === 'biology';
 }
@@ -91,10 +96,13 @@ export function isSocialStudiesSubject(subject: string): boolean {
 }
 export function mapWorkLaw(request: ExamGenerationRequest): string {
   if (!isSocialStudiesSubject(request.subject)) return '';
+  const fullKjsea = request.format === 'kjsea' && /social\s*studies/i.test(request.subject);
   return [
-    'Map work law: where the selected strand or topic covers map work, include at least one map-based question.',
-    'Use the Kenya map for counties, physical features, climate or vegetation; the Africa map for countries, regions and physical features; the world map for continents, oceans and latitude.',
-    'Describe each map with a visual_spec whose asset_type is "map", whose map_regions list the regions shown, and whose labels name every feature the learner must read. Maps must be readable in black and white.',
+    fullKjsea ? 'Map work law: for a full KJSEA Social Studies paper, include at least one map-based structured question in its named map component. Q21 is a January 2025 sample-style placement, not a 2026 KNEC numbering rule.' : 'Map work law: include a map when the selected geography/map-work curriculum or a question requires interpretation of a map. Do not impose Grade 9 KJSEA numbering or mandatory map counts on school-based papers or history-only topics.',
+    'Use the Kenya map for counties, physical features, climate or vegetation; the East Africa map for regional countries and the Great Lakes/Rift Valley context; the Africa map for countries, regions and physical features. Do not invent a hand-drawn polygon or use a photographic/AI-generated map.',
+    'The embedded base maps show country boundaries and supported geographic anchors, not county boundaries or surveyed topographic contours. Never ask for county boundaries, contour readings, grid references, measured distances or unrendered geographic features unless those exact layers/readings are explicitly supplied. Prefer a complete supported country-location or direction task over an unsupported topographical-map placeholder.',
+    'Describe each map with a visual_spec whose asset_type is "map", whose base_map is one of "kenya", "east_africa", or "africa", whose map_regions list at least two named regions/countries shown, whose labels name every feature the learner must read, and whose legend has at least two entries.',
+    'Every map visual must include a readable title, a north-arrow/compass field, a scale_text field, a visible map frame, and a key/legend. The renderer supplies the vector country boundaries; do not put a map placeholder, Markdown table, or image URL in question_text.',
   ].join(' ');
 }
 export function kjseaFormatLaw(request: ExamGenerationRequest): string {
@@ -253,6 +261,10 @@ export function buildCoveragePlanFromRequest(request: CoveragePlanInput): Covera
   if (!strands.length || questionCount <= 0) return [];
   const byStrand = subStrandsByStrand(request);
   const fallback = request.subStrands || [];
+  const sections=request.blueprint?.sections||[];
+  if(sections.length&&sections.every(section=>Boolean(section.strand)&&strands.includes(section.strand!))){
+    return strands.map(strand=>({strand,subStrands:byStrand[normalizeKey(strand)]||fallback,questions:sections.filter(section=>section.strand===strand).reduce((sum,section)=>sum+section.count,0)}));
+  }
   if (questionCount <= strands.length) {
     return strands.map((strand, index) => ({
       strand, subStrands: byStrand[normalizeKey(strand)] || fallback,

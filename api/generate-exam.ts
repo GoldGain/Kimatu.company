@@ -22,8 +22,8 @@ import {
   makeBalancedBlueprint,
   makeFormatBlueprint,
   makePaperVariantBlueprint,
-  isForm344ExamLevel,
   ExamBlueprintSection,
+  isForm344ExamLevel,
 } from '../src/lib/exam-schema.js';
 import { filterUnnecessaryExamVisual, withRenderedExamVisual } from '../src/lib/exam-visuals.js';
 import { getStrandPacks } from '../src/lib/kicd-knowledge.js';
@@ -35,6 +35,9 @@ import {
   supportsTwoPapers,
 } from '../src/lib/exam-construction.js';
 import { getKjseaPaperSpec, makeKjseaBlueprint } from '../src/lib/kjsea-paper-formats.js';
+import { assessmentLevelForGrade, gradeFormatError, getKpseaPaperSpec, makeKpseaBlueprint } from '../src/lib/exam-grade-policy.js';
+import { bindLanguagePaperComponents } from '../src/lib/exam-component-scope.js';
+import { questionDisplayStem } from '../src/lib/exam-display-stem.js';
 import { applyCuratedVisualFallback } from '../src/lib/exam-visual-library.js';
 import {
   buildQuestionRewritePrompt,
@@ -65,26 +68,6 @@ type ResponseLike = {
   end: () => void;
 };
 
-// This API writes to several tables that are not represented in the browser's
-// generated Database type. Keep those table names dynamic while retaining
-// typed row/insert/update records for the serverless handler.
-type DynamicTable = {
-  Row: Record<string, unknown>;
-  Insert: Record<string, unknown>;
-  Update: Record<string, unknown>;
-  Relationships: [];
-};
-type DynamicDatabase = {
-  public: {
-    Tables: Record<string, DynamicTable>;
-    Views: Record<string, DynamicTable>;
-    Functions: Record<string, never>;
-    Enums: Record<string, string>;
-    CompositeTypes: Record<string, never>;
-  };
-};
-type ExamSupabaseClient = ReturnType<typeof createClient<DynamicDatabase>>;
-
 function jsonError(response: ResponseLike, status: number, message: string): void {
   response.status(status).json({ error: message });
 }
@@ -109,14 +92,14 @@ function stringArray(value: unknown, limit = 20): string[] {
 
 function parseCurriculumScope(value: unknown): CurriculumScopeNode[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const nodes = value.slice(0, 20).flatMap((entry) => {
+  const nodes = value.slice(0, 64).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const node = entry as Record<string, unknown>;
     const strand = typeof node.strand === 'string' ? node.strand.trim().slice(0, 180) : '';
     if (!strand) return [];
     return [{
       strand,
-      subStrands: stringArray(node.subStrands, 80),
+      subStrands: stringArray(node.subStrands, 200),
       topics: stringArray(node.topics, 120),
     }];
   });
@@ -127,7 +110,7 @@ function parseBlueprint(value: unknown): ExamBlueprint | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as { sections?: unknown; total_marks?: unknown; estimated_minutes?: unknown };
   if (!Array.isArray(raw.sections)) return undefined;
-  const sections = raw.sections.slice(0, 20).flatMap((entry, index) => {
+  const sections = raw.sections.slice(0, 64).flatMap((entry, index) => {
     if (!entry || typeof entry !== 'object') return [];
     const section = entry as Record<string, unknown>;
     const allowedTypes: QuestionType[] = ['multiple_choice', 'multiple_response', 'modified_true_false', 'completion', 'matching', 'short_answer', 'numeric_response', 'case_study', 'essay'];
@@ -138,7 +121,7 @@ function parseBlueprint(value: unknown): ExamBlueprint | undefined {
     const base: ExamBlueprintSection = {
       id: typeof section.id === 'string' ? section.id.slice(0, 80) : `section-${index + 1}`,
       question_type: type,
-      count: Math.min(60, Math.round(count)),
+      count: Math.min(200, Math.round(count)),
       marks_per_question: Math.min(30, Math.round(marks)),
       difficulty: (['easy','medium','hard','mixed'].includes(String(section.difficulty)) ? section.difficulty : 'mixed') as ExamBlueprintSection['difficulty'],
     };
@@ -174,9 +157,9 @@ function parseExamRequest(raw: unknown): ExamGenerationRequest | null {
     title: typeof body.title === 'string' ? body.title.trim().slice(0, 255) : undefined,
     gradeLevel: typeof body.gradeLevel === 'string' ? body.gradeLevel.trim().slice(0, 32) : '',
     subject: typeof body.subject === 'string' ? body.subject.trim().slice(0, 100) : '',
-    strands: stringArray(body.strands),
-    subStrands: stringArray(body.subStrands),
-    topics: stringArray(body.topics),
+    strands: stringArray(body.strands, 64),
+    subStrands: stringArray(body.subStrands, 300),
+    topics: stringArray(body.topics, 400),
     curriculumScope: parseCurriculumScope(body.curriculumScope),
     questionTypes,
     totalMarks: Number.isFinite(totalMarks) ? Math.round(totalMarks) : 0,
@@ -256,7 +239,7 @@ function embeddedCurriculumContext(request: ExamGenerationRequest): { context: s
 }
 
 async function loadRecentQuestionStems(
-  supabase: ExamSupabaseClient,
+  supabase: ReturnType<typeof createClient>,
   profile: ExamProfile,
   request: ExamGenerationRequest,
 ): Promise<string[]> {
@@ -293,33 +276,240 @@ function makeVariationKey(): string {
 }
 
 async function loadVettedContext(
-  supabase: ExamSupabaseClient,
+  supabase: ReturnType<typeof createClient>,
   request: ExamGenerationRequest,
 ): Promise<{ context: string; sourceSummary: string[] }> {
+  const kpsea = request.format === 'kpsea' ? getKpseaPaperSpec(request.subject) : null;
+  if (kpsea && kpsea.components.length > 1) {
+    const { data: grades } = await supabase.from('curriculum_grades').select('id').eq('grade_name', request.gradeLevel).limit(1);
+    if (!grades?.length) return {context:'',sourceSummary:[]};
+    const { data: subjects } = await supabase.from('curriculum_subjects').select('id,subject_name').eq('grade_id', (grades[0] as any).id).eq('is_current',true).limit(60);
+    const contexts: string[] = [];
+    const sources: string[] = [kpsea.source, kpsea.score_basis];
+    const scopedSections: NonNullable<ExamGenerationRequest['blueprint']>['sections'] = [];
+    for (const [componentIndex,component] of kpsea.components.entries()) {
+      const member = (subjects || []).find((subject: any) => component.subjects.includes(subject.subject_name));
+      if (!member) return {context:'',sourceSummary:[]};
+      const { data: strandRows } = await supabase.from('curriculum_strands').select('strand_name,strand_description').eq('subject_id',(member as any).id).limit(100);
+      const names = new Set((strandRows || []).filter((strand: any) => /(?:official|source-verified)\s+kicd/i.test(strand.strand_description || '')).map((strand: any) => strand.strand_name));
+      const scope = (request.curriculumScope || []).filter(node => names.has(node.strand));
+      if(!scope.length)return {context:'',sourceSummary:[]};
+      const perStrand=Math.floor(component.count/scope.length);
+      scope.forEach((node,index)=>{const count=perStrand+(index<component.count%scope.length?1:0);if(count)scopedSections.push({id:`kpsea-component-${componentIndex+1}-strand-${index+1}`,title:`${component.label}: ${node.strand}`,question_type:'multiple_choice',count,marks_per_question:1,difficulty:request.difficulty,strand:node.strand});});
+      const memberRequest = {...request, format:'cbe' as const, subject:(member as any).subject_name, curriculumScope:scope, strands:scope.map(node=>node.strand), subStrands:scope.flatMap(node=>node.subStrands)};
+      const evidence = await loadVettedContext(supabase,memberRequest);
+      if (!evidence.context.trim()) return {context:'',sourceSummary:[]};
+      contexts.push(`KPSEA component ${component.label}: exactly ${component.count} MCQs, derived one-point-per-item practice score. Use only this member learning-area curriculum:\n${evidence.context}`);
+      sources.push(...evidence.sourceSummary);
+    }
+    if(request.blueprint)request.blueprint={...request.blueprint,sections:scopedSections};
+    return {context:contexts.join('\n\n'),sourceSummary:Array.from(new Set(sources))};
+  }
   const { data, error } = await supabase
     .from('exam_knowledge_chunks')
     .select('content_summary, subject, grade_level, strand, sub_strand, source_name')
     .eq('is_approved', true)
     .eq('subject', request.subject)
     .eq('grade_level', request.gradeLevel)
-    .limit(100);
+    .limit(1000);
 
   const requestedGrade = normalizeContextKey(request.gradeLevel);
   const requestedStrands = new Set(request.strands.map(normalizeContextKey));
   const requestedSubStrands = new Set(request.subStrands.map(normalizeContextKey));
-  const matching = (error ? [] : (data || []))
+  const scopedByStrand = new Map<string, { subStrands: Set<string>; topics: Set<string> }>();
+  for (const node of request.curriculumScope || []) {
+    const strandKey = normalizeContextKey(node.strand);
+    if (!strandKey) continue;
+    scopedByStrand.set(strandKey, {
+      subStrands: new Set(node.subStrands.map(normalizeContextKey).filter(Boolean)),
+      topics: new Set(node.topics.map(normalizeContextKey).filter(Boolean)),
+    });
+  }
+  const filtered = (error ? [] : (data || []))
     .filter((row: any) => !row.grade_level || normalizeContextKey(row.grade_level) === requestedGrade)
     .filter((row: any) => !requestedStrands.size || (row.strand && requestedStrands.has(normalizeContextKey(row.strand))))
-    .filter((row: any) => !requestedSubStrands.size || (row.sub_strand && requestedSubStrands.has(normalizeContextKey(row.sub_strand))))
-    .slice(0, 10);
+    .filter((row: any) => {
+      const strandScope = scopedByStrand.get(normalizeContextKey(row.strand));
+      const allowedSubStrands = strandScope?.subStrands.size ? strandScope.subStrands : requestedSubStrands;
+      return !allowedSubStrands.size || Boolean(row.sub_strand && allowedSubStrands.has(normalizeContextKey(row.sub_strand)));
+    });
+  // Keep one evidence item for every selected strand before adding deeper
+  // sub-strand detail. This prevents a full-paper request from being narrowed
+  // to the first few alphabetic records in a large learning area.
+  const coverage = new Map<string, any>();
+  const remainder: any[] = [];
+  for (const row of filtered) {
+    const key = normalizeContextKey(row.strand);
+    if (key && !coverage.has(key)) coverage.set(key, row);
+    else remainder.push(row);
+  }
+  const matching = [...coverage.values(), ...remainder].slice(0, 24);
   const databaseContext = matching.map((row: any) => [row.strand, row.sub_strand, row.content_summary].filter(Boolean).join(': ')).join('\n');
   const databaseSources = matching.map((row: any) => row.source_name).filter(Boolean);
-  const embedded = embeddedCurriculumContext(request);
-  const context = [databaseContext, embedded.context].filter(Boolean).join('\n');
+  const requiresSourceBackedContext = (request.level === 'upper_primary' || request.level === 'senior_secondary') && request.format !== '844';
+  const officialCurriculum = await loadApprovedCurriculumTreeContext(supabase, request);
+  const embedded = requiresSourceBackedContext || officialCurriculum.context
+    ? { context: '', sourceSummary: [] }
+    : embeddedCurriculumContext(request);
+  const context = [officialCurriculum.context || databaseContext, embedded.context].filter(Boolean).join('\n');
   return {
     context,
-    sourceSummary: Array.from(new Set([...databaseSources, ...embedded.sourceSummary])).slice(0, 12),
+    sourceSummary: Array.from(new Set([...databaseSources, ...officialCurriculum.sourceSummary, ...embedded.sourceSummary])).slice(0, 12),
   };
+}
+
+async function loadApprovedCurriculumTreeContext(
+  supabase: ReturnType<typeof createClient>,
+  request: ExamGenerationRequest,
+): Promise<{ context: string; sourceSummary: string[] }> {
+  const empty = { context: '', sourceSummary: [] as string[] };
+  if (!request.curriculumScope?.length || !request.strands.length) return empty;
+
+  try {
+    const { data: grades, error: gradeError } = await supabase
+      .from('curriculum_grades')
+      .select('id, grade_name')
+      .eq('grade_name', request.gradeLevel)
+      .limit(2);
+    const grade = (grades || []).find((row: any) => normalizeContextKey(row.grade_name) === normalizeContextKey(request.gradeLevel));
+    if (gradeError || !grade) return empty;
+
+    const { data: subjects, error: subjectError } = await supabase
+      .from('curriculum_subjects')
+      .select('id, subject_name, curriculum_source_id')
+      .eq('grade_id', grade.id)
+      .eq('subject_name', request.subject)
+      .eq('is_current', true)
+      .limit(2);
+    const subject = (subjects || []).find((row: any) => normalizeContextKey(row.subject_name) === normalizeContextKey(request.subject));
+    if (subjectError || !subject?.curriculum_source_id) return empty;
+
+    const { data: sources, error: sourceError } = await supabase
+      .from('curriculum_sources')
+      .select('source_name, source_url, license_status, retrieval_status')
+      .eq('id', subject.curriculum_source_id)
+      .limit(2);
+    const source = (sources || [])[0];
+    if (sourceError || !source
+      || source.license_status !== 'official_public'
+      || source.retrieval_status !== 'approved'
+      || !/^https:\/\//i.test(String(source.source_url || ''))
+      || !/kicd/i.test(String(source.source_name || ''))) return empty;
+
+    const { data: strandRows, error: strandError } = await supabase
+      .from('curriculum_strands')
+      .select('id, strand_name, strand_description, strand_order')
+      .eq('subject_id', subject.id)
+      .order('strand_order', { ascending: true })
+      .limit(500);
+    if (strandError) return empty;
+    const provenanceLinkedStrands = (strandRows || []).filter((row: any) => /source-verified curriculum.*provenance/i.test(String(row.strand_description || '')));
+    const verifiedStrands = provenanceLinkedStrands.length ? provenanceLinkedStrands : (strandRows || []).filter((row: any) => /(?:official|source-verified)\s+kicd/i.test(String(row.strand_description || '')));
+    const verifiedByKey = new Map<string, any>(verifiedStrands.map((row: any): [string, any] => [normalizeContextKey(row.strand_name), row]));
+    const requestedNodes = request.curriculumScope;
+    const selectedStrands = requestedNodes.map((node) => verifiedByKey.get(normalizeContextKey(node.strand)));
+    if (selectedStrands.some((row) => !row)) return empty;
+    const selectedStrandRows = selectedStrands as any[];
+    const selectedKeys = new Set(selectedStrandRows.map((row) => normalizeContextKey(row.strand_name)));
+    if (request.strands.some((name) => !selectedKeys.has(normalizeContextKey(name)))) return empty;
+
+    const { data: subStrandRows, error: subStrandError } = await supabase
+      .from('curriculum_sub_strands')
+      .select('id, strand_id, sub_strand_name, sub_strand_description, sub_strand_order')
+      .in('strand_id', selectedStrandRows.map((row) => row.id))
+      .order('sub_strand_order', { ascending: true })
+      .limit(2000);
+    if (subStrandError) return empty;
+    const allSubStrands = subStrandRows || [];
+    const requestedSubKeys = new Set(request.subStrands.map(normalizeContextKey));
+    if ([...requestedSubKeys].some((key) => !allSubStrands.some((row: any) => normalizeContextKey(row.sub_strand_name) === key))) return empty;
+
+    const selectedSubStrands: any[] = [];
+    for (const node of requestedNodes) {
+      const strand = verifiedByKey.get(normalizeContextKey(node.strand));
+      const children = allSubStrands.filter((row: any) => row.strand_id === strand.id);
+      const allowedNames = node.subStrands.length
+        ? new Set(node.subStrands.map(normalizeContextKey))
+        : requestedSubKeys.size
+          ? requestedSubKeys
+          : new Set(children.map((row: any) => normalizeContextKey(row.sub_strand_name)));
+      const selectedChildren = children.filter((row: any) => allowedNames.has(normalizeContextKey(row.sub_strand_name)));
+      if (!selectedChildren.length || [...allowedNames].some((key) => !selectedChildren.some((row: any) => normalizeContextKey(row.sub_strand_name) === key))) return empty;
+      selectedSubStrands.push(...selectedChildren);
+    }
+    const selectedSubIds = [...new Set(selectedSubStrands.map((row) => row.id))];
+    let topicRows: any[] = [];
+    if (selectedSubIds.length) {
+      const { data, error } = await supabase
+        .from('curriculum_topics')
+        .select('id, sub_strand_id, topic_name, topic_description, learning_objectives, topic_order')
+        .in('sub_strand_id', selectedSubIds)
+        .order('topic_order', { ascending: true })
+        .limit(3000);
+      if (error && requestedNodes.some((node) => node.topics.length)) return empty;
+      topicRows = data || [];
+    }
+
+    const contextLines = [
+      `Approved official curriculum source: ${source.source_name} (${source.source_url}).`,
+      `Verified KICD curriculum scope: ${grade.grade_name} · ${subject.subject_name}.`,
+    ];
+    for (const node of requestedNodes) {
+      const strand = verifiedByKey.get(normalizeContextKey(node.strand));
+      const children = selectedSubStrands.filter((row) => row.strand_id === strand.id);
+      const requestedTopics = new Set(node.topics.map(normalizeContextKey));
+      const allNodeTopics = topicRows.filter((row) => children.some((child) => child.id === row.sub_strand_id));
+      if (requestedTopics.size && [...requestedTopics].some((key) => !allNodeTopics.some((row) => normalizeContextKey(row.topic_name) === key))) return empty;
+      for (const child of children) {
+        const childTopics = allNodeTopics.filter((row) => row.sub_strand_id === child.id
+          && (!requestedTopics.size || requestedTopics.has(normalizeContextKey(row.topic_name)))).slice(0, 6);
+        const topicText = childTopics.map((row) => {
+          const objectives = Array.isArray(row.learning_objectives) ? row.learning_objectives.filter(Boolean).slice(0, 3).join('; ') : '';
+          return [row.topic_name, String(row.topic_description || '').slice(0, 400), objectives].filter(Boolean).join(' — ');
+        });
+        contextLines.push(`${strand.strand_name}: ${child.sub_strand_name}${child.sub_strand_description ? ` — ${String(child.sub_strand_description).slice(0, 500)}` : ''}${topicText.length ? `; topics: ${topicText.join(' | ')}` : ''}`);
+      }
+    }
+    return {
+      context: contextLines.join('\n'),
+      sourceSummary: [String(source.source_name)],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/** KJSEA is a junior-school exit assessment: Novela (Grade 7) and Tamthilia
+ * (Grade 8) remain required in the Grade 9 Kiswahili Paper 2 specification. */
+async function cumulativeLanguageContext(supabase: ReturnType<typeof createClient>, request: ExamGenerationRequest): Promise<{ request: ExamGenerationRequest; context: string; sources: string[] }> {
+  const empty = { request, context: '', sources: [] as string[] };
+  if (request.format !== 'kjsea' || request.paperVariant !== 'paper2' || !/^kiswahili$/i.test(request.subject.trim())) return empty;
+  const { data: grades } = await supabase.from('curriculum_grades').select('id,grade_number').in('grade_number', [7, 8]).limit(4);
+  if (!grades?.length) return empty;
+  const { data: subjects } = await supabase.from('curriculum_subjects').select('id,grade_id,curriculum_source_id').in('grade_id', grades.map((grade: any) => grade.id)).eq('subject_name', 'Kiswahili').eq('is_current', true).limit(4);
+  if (!subjects?.length) return empty;
+  const sourceIds = subjects.map((subject: any) => subject.curriculum_source_id).filter(Boolean);
+  const { data: sources } = await supabase.from('curriculum_sources').select('id,source_name,source_url').in('id', sourceIds).eq('license_status', 'official_public').eq('retrieval_status', 'approved').limit(4);
+  const approved = new Set((sources || []).filter((source: any) => /^https:\/\//.test(source.source_url || '') && /kicd/i.test(source.source_name || '')).map((source: any) => source.id));
+  const subjectIds = subjects.filter((subject: any) => approved.has(subject.curriculum_source_id)).map((subject: any) => subject.id);
+  if (!subjectIds.length) return empty;
+  const { data: strands } = await supabase.from('curriculum_strands').select('id,strand_name,strand_description').in('subject_id', subjectIds).limit(50);
+  const provenanceLinked = (strands || []).filter((strand: any) => /source-verified curriculum.*provenance/i.test(strand.strand_description || ''));
+  const verified = provenanceLinked.length ? provenanceLinked : (strands || []).filter((strand: any) => /(?:official|source-verified)\s+kicd/i.test(strand.strand_description || ''));
+  if (!verified.length) return empty;
+  const { data: children } = await supabase.from('curriculum_sub_strands').select('strand_id,sub_strand_name').in('strand_id', verified.map((strand: any) => strand.id)).limit(300);
+  const scope = (request.curriculumScope || []).map(node => ({...node, subStrands: [...node.subStrands], topics: [...node.topics]}));
+  const lines: string[] = [];
+  for (const child of children || []) {
+    if (!/novela|tamthilia|tanzu.*fasihi/i.test(String(child.sub_strand_name))) continue;
+    const strand = verified.find((node: any) => node.id === child.strand_id);
+    if (!strand) continue;
+    let node = scope.find(item => item.strand === strand.strand_name);
+    if (!node) { node = {strand: strand.strand_name, subStrands: [], topics: []}; scope.push(node); }
+    if (!node.subStrands.includes(child.sub_strand_name)) node.subStrands.push(child.sub_strand_name);
+    lines.push(`${strand.strand_name}: ${child.sub_strand_name} (approved cumulative Grade 7/8 curriculum skill; use an original, self-contained literary extract).`);
+  }
+  return {request: {...request, curriculumScope: scope, strands: scope.map(node => node.strand), subStrands: scope.flatMap(node => node.subStrands)}, context: lines.join('\n'), sources: (sources || []).filter((source: any) => approved.has(source.id)).map((source: any) => `${source.source_name} (${source.source_url})`)};
 }
 
 type ExamProfile = {
@@ -346,10 +536,11 @@ function assertGenerationAccess(profile: ExamProfile): string | null {
 
 async function handleExamGeneration(
   response: ResponseLike,
-  supabase: ExamSupabaseClient,
+  supabase: ReturnType<typeof createClient>,
   profile: ExamProfile,
   user: { id: string; email?: string; user_metadata?: Record<string, unknown> },
   request: RequestLike,
+  deadlineAt: number,
 ): Promise<void> {
   const parsedBodyRequest = parseExamRequest(parseBody(request.body));
   if (!parsedBodyRequest) {
@@ -365,13 +556,35 @@ async function handleExamGeneration(
         blueprint: makeFormatBlueprint('844', 100, parsedBodyRequest.difficulty),
       }
     : parsedBodyRequest;
-  const paperVariant = supportsTwoPapers(rawParsedRequest.subject)
+  const formatError = gradeFormatError(rawParsedRequest.gradeLevel, rawParsedRequest.format);
+  if (formatError) {
+    jsonError(response, 400, formatError);
+    return;
+  }
+  rawParsedRequest.level = assessmentLevelForGrade(rawParsedRequest.gradeLevel) || rawParsedRequest.level;
+  const paperVariant = rawParsedRequest.format !== 'kjsea' || supportsTwoPapers(rawParsedRequest.subject)
     ? normalizePaperVariant(rawParsedRequest.paperVariant)
     : 'single';
   const kjseaSpec = rawParsedRequest.format === 'kjsea'
     ? getKjseaPaperSpec(rawParsedRequest.subject, paperVariant)
     : null;
-  let parsedRequest: ExamGenerationRequest = rawParsedRequest.format === 'kjsea'
+  if (rawParsedRequest.format === 'kjsea' && !kjseaSpec) {
+    jsonError(response, 400, 'No verified KJSEA paper format is available for this subject and paper. Choose a school-based CBE assessment.');
+    return;
+  }
+  const kpseaSpec = rawParsedRequest.format === 'kpsea' ? getKpseaPaperSpec(rawParsedRequest.subject) : null;
+  if (rawParsedRequest.format === 'kpsea' && (!kpseaSpec || paperVariant !== 'single')) {
+    jsonError(response,400,'Choose a supported single KPSEA paper group, or use school-based CBE for an individual learning area. KPSEA does not have Paper 1/Paper 2 variants.');
+    return;
+  }
+  let parsedRequest: ExamGenerationRequest = rawParsedRequest.format === '844'
+    ? {
+        ...rawParsedRequest,
+        totalMarks: 100,
+        durationMinutes: 180,
+        blueprint: makeFormatBlueprint('844', 100, rawParsedRequest.difficulty),
+      }
+    : rawParsedRequest.format === 'kjsea'
     ? {
         ...rawParsedRequest,
         totalMarks: kjseaSpec?.marks ?? rawParsedRequest.totalMarks,
@@ -379,8 +592,8 @@ async function handleExamGeneration(
         blueprint: makeKjseaBlueprint(rawParsedRequest.subject, paperVariant, rawParsedRequest.difficulty)
           || makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty),
       }
-    : ['standard30', '844', 'kpsea'].includes(rawParsedRequest.format)
-    ? { ...rawParsedRequest, blueprint: makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty) }
+    : ['standard30', 'kpsea'].includes(rawParsedRequest.format)
+    ? { ...rawParsedRequest, totalMarks: kpseaSpec?.marks ?? rawParsedRequest.totalMarks, durationMinutes: kpseaSpec?.duration_minutes ?? rawParsedRequest.durationMinutes, blueprint: kpseaSpec ? makeKpseaBlueprint(rawParsedRequest.subject,rawParsedRequest.difficulty) : makeFormatBlueprint(rawParsedRequest.format, rawParsedRequest.totalMarks, rawParsedRequest.difficulty) }
     : rawParsedRequest.blueprint
     ? rawParsedRequest
     : {
@@ -389,6 +602,9 @@ async function handleExamGeneration(
       };
   if (parsedRequest.format === 'standard30') {
     parsedRequest = { ...parsedRequest, durationMinutes: 45 };
+  }
+  if (parsedRequest.format === '844') {
+    parsedRequest = { ...parsedRequest, totalMarks: 100, durationMinutes: 180, blueprint: makeFormatBlueprint('844', 100, parsedRequest.difficulty) };
   }
   if (paperVariant !== 'single' && parsedRequest.format !== 'kjsea') {
     parsedRequest = {
@@ -410,12 +626,11 @@ async function handleExamGeneration(
     .select('name')
     .eq('id', profile.school_id)
     .maybeSingle();
-  const schoolName = typeof school?.name === 'string' ? school.name.trim() : '';
-  if (schoolError || !schoolName) {
+  if (schoolError || !school?.name?.trim()) {
     jsonError(response, 503, 'Your school name could not be loaded. Refresh the page and try again.');
     return;
   }
-  parsedRequest = { ...parsedRequest, schoolName: schoolName.slice(0, 255) };
+  parsedRequest = { ...parsedRequest, schoolName: school.name.trim().slice(0, 255) };
   const rateKey = `${user.id}:${request.socket?.remoteAddress || 'unknown'}`;
   if (!checkRateLimit(rateKey)) {
     jsonError(response, 429, 'Generation limit reached. Please wait a few minutes before trying again.');
@@ -430,7 +645,7 @@ async function handleExamGeneration(
 
   let generationJobId: string | null = null;
   const configuredProvider = String(process.env.AI_EXAM_PROVIDER || '').trim().toLowerCase();
-  const useGemini = configuredProvider === 'gemini' || (!configuredProvider && Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY));
+  const useGemini = configuredProvider === 'gemini' || (!configuredProvider && !process.env.DEEPSEEK_API_KEY && Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY));
   const primaryProvider = useGemini ? 'gemini' : 'deepseek';
   const primaryModel = useGemini ? (process.env.GEMINI_MODEL || 'gemini-3.7-flash') : (process.env.AI_EXAM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat');
   let actualProvider = primaryProvider;
@@ -442,19 +657,31 @@ async function handleExamGeneration(
       .select('id')
       .single();
     if (generationJobError) throw new Error(`Could not start the generation job: ${generationJobError.message}`);
-    generationJobId = typeof generationJob?.id === 'string' ? generationJob.id : null;
+    generationJobId = generationJob?.id || null;
     const recentQuestionStems = await loadRecentQuestionStems(supabase, profile, parsedRequest);
-    const generationRequest: ExamGenerationRequest = {
+    let generationRequest: ExamGenerationRequest = {
       ...parsedRequest,
       variationKey: makeVariationKey(),
       avoidQuestionStems: Array.from(new Set([...(parsedRequest.avoidQuestionStems || []), ...recentQuestionStems])).slice(0, 40),
     };
     const vetted = await loadVettedContext(supabase, generationRequest);
+    if (!vetted.context.trim()) {
+      throw new Error('No approved KICD source evidence matches this grade, subject, and selected scope. Refresh the curriculum selection or contact an administrator.');
+    }
+    const cumulative = await cumulativeLanguageContext(supabase, generationRequest);
+    generationRequest = bindLanguagePaperComponents(cumulative.request);
+    parsedRequest = {...parsedRequest, blueprint: generationRequest.blueprint};
+    vetted.context = [vetted.context, cumulative.context].filter(Boolean).join('\n');
+    vetted.sourceSummary = Array.from(new Set([...vetted.sourceSummary, ...cumulative.sources]));
+    if (generationJobId) {
+      await supabase.from('exam_generation_jobs').update({request_payload:generationRequest,updated_at:new Date().toISOString()}).eq('id',generationJobId);
+    }
+    const generationDeadline=Math.min(deadlineAt-70000,Date.now()+190000);
     let draftPaper;
     try {
       draftPaper = useGemini
-        ? await generateExamWithGemini(generationRequest, vetted.context)
-        : await generateExamWithDeepSeek(generationRequest, vetted.context);
+        ? await generateExamWithGemini(generationRequest, vetted.context,generationDeadline)
+        : await generateExamWithDeepSeek(generationRequest, vetted.context,generationDeadline);
     } catch (error) {
       // Either provider may fail transiently (quota, timeout, malformed JSON,
       // or a provider-side model error). Try the other configured route before
@@ -469,33 +696,31 @@ async function handleExamGeneration(
         ? (process.env.AI_EXAM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat')
         : (process.env.GEMINI_MODEL || 'gemini-3.7-flash');
       draftPaper = useGemini
-        ? await generateExamWithDeepSeek(generationRequest, vetted.context)
-        : await generateExamWithGemini(generationRequest, vetted.context);
+        ? await generateExamWithDeepSeek(generationRequest, vetted.context,generationDeadline)
+        : await generateExamWithGemini(generationRequest, vetted.context,generationDeadline);
       if (generationJobId) {
         await supabase.from('exam_generation_jobs').update({ provider: actualProvider, model: actualModel }).eq('id', generationJobId);
       }
     }
     const mathsLike = isMathsLikeSubject(parsedRequest.subject);
-    const postProcess = (question: GeneratedExamQuestion): GeneratedExamQuestion => applyCuratedVisualFallback(
-      repairQuestionAnswers(
-        normalizeQuestionNotation(
-          withRenderedExamVisual(filterUnnecessaryExamVisual(question)),
-          { division: mathsLike },
-        ),
-      ),
-      parsedRequest.subject,
-    );
+    const postProcess = (question: GeneratedExamQuestion): GeneratedExamQuestion => {
+      const filtered = filterUnnecessaryExamVisual(question);
+      const fallback = applyCuratedVisualFallback(filtered, parsedRequest.subject);
+      return repairQuestionAnswers(
+        normalizeQuestionNotation(withRenderedExamVisual({...fallback,question_text:questionDisplayStem(fallback)}), { division: mathsLike }),
+      );
+    };
     let renderedQuestions = draftPaper.questions.map(postProcess);
 
-    // A single bad question used to fail the entire paper here. Now each broken
-    // question gets its own retry budget and is asked to fix only what was wrong;
-    // only if that still cannot produce usable content is the question removed.
-    // A repair that cannot even be attempted degrades to a drop, never to a lost paper.
+    // Preserve all fixed slots. A bounded repair may recover bad questions, but
+    // an unrecoverable slot must fail honestly rather than shorten the paper.
+    const repairDeadline=deadlineAt-15000;
     const repairWithProvider = async (prompt: string): Promise<Record<string, unknown> | null> => {
+      if(Date.now()>=repairDeadline)return null;
       try {
         return actualProvider === 'gemini'
-          ? await rewriteQuestionWithGemini(prompt)
-          : await rewriteQuestionWithDeepSeek(prompt);
+          ? await rewriteQuestionWithGemini(prompt,repairDeadline)
+          : await rewriteQuestionWithDeepSeek(prompt,repairDeadline);
       } catch {
         return null;
       }
@@ -517,16 +742,24 @@ async function handleExamGeneration(
         // Adopt only the visual; the question the teacher already has is kept as is.
         return postProcess({ ...question, visual_spec: repaired.visual_spec ?? null });
       },
-    }, { previousStems: recentQuestionStems });
+    }, { previousStems: recentQuestionStems,deadlineAt:repairDeadline });
     if (repair.status === 'failed') {
-      throw new DeepSeekResponseError(repair.failureMessage || 'The generated paper could not be repaired.');
+      const details=repair.validation.issues.filter(issue=>issue.severity==='critical').slice(0,8).map(issue=>`Q${issue.questionIndex===undefined?'paper':issue.questionIndex+1}: ${issue.code} — ${issue.message}`).join('; ');
+      console.error('[exam-gen] exact repair failed:',details);
+      throw new DeepSeekResponseError(`${repair.failureMessage || 'The generated paper could not be repaired.'}${details?` Details: ${details}`:''}`);
     }
     renderedQuestions = repair.questions;
     const validation = repair.validation;
     if (repair.status === 'repaired') {
       console.log('[exam-gen] repair pass:', repair.teacherMessage, JSON.stringify(repair.actions.map((action) => action.kind)));
     }
-    const paper = { ...draftPaper, paper_variant: parsedRequest.paperVariant || 'single', questions: renderedQuestions, total_marks: renderedQuestions.reduce((sum, question) => sum + question.marks, 0) };
+    const actualMarks = renderedQuestions.reduce((sum, question) => sum + question.marks, 0);
+    const expectedCount = parsedRequest.blueprint?.sections.reduce((sum, section) => sum + section.count, 0);
+    if (actualMarks !== parsedRequest.totalMarks || (expectedCount !== undefined && renderedQuestions.length !== expectedCount) || validation.issues.some((issue) => issue.severity === 'critical')) {
+      throw new DeepSeekResponseError('The paper did not satisfy its complete question, mark and validation contract. It has not been saved as a successful paper.');
+    }
+    const markingScheme=renderedQuestions.map((question,index)=>`Q${index+1}: ${question.sub_parts?.length?question.sub_parts.map(part=>`${part.label} ${part.marking_scheme||part.correct_answer} [${part.marks} marks]`).join(' | '):question.marking_scheme}`).join('\n');
+    const paper = { ...draftPaper, marking_scheme:markingScheme, instructions: kpseaSpec ? [...draftPaper.instructions, kpseaSpec.score_basis] : draftPaper.instructions, paper_variant: parsedRequest.paperVariant || 'single', blueprint: parsedRequest.blueprint, questions: renderedQuestions.map((question, index) => ({ ...question, question_number: index + 1 })), total_marks: actualMarks };
     const { data: storedQuestions, error: questionError } = await supabase
       .from('exam_questions')
       .insert(paper.questions.map((question) => ({
@@ -580,9 +813,7 @@ async function handleExamGeneration(
         term: paper.term || null,
         year: paper.year,
         questions: questionIds,
-        marking_scheme: paper.questions.map((question, index) => `Q${index + 1}: ${question.sub_parts?.length
-          ? question.sub_parts.map((part) => `${part.label} ${part.marking_scheme || part.correct_answer || 'Award for a correct response.'} [${part.marks} mark${part.marks === 1 ? '' : 's'}]`).join(' | ')
-          : question.marking_scheme}`).join('\n'),
+        marking_scheme: paper.marking_scheme,
         instructions: paper.instructions.join('\n'),
         duration_minutes: paper.duration_minutes,
         total_marks: paper.total_marks,
@@ -600,7 +831,7 @@ async function handleExamGeneration(
       .single();
 
     if (paperError) throw new Error(`Could not save the exam paper: ${paperError.message}`);
-    const paperId = typeof storedPaper?.id === 'string' ? storedPaper.id : null;
+    const paperId = storedPaper?.id;
     const { error: snapshotError } = await supabase.from('exam_paper_question_snapshots').insert(persistedQuestions.map((question, index) => ({
       paper_id: paperId, question_id: question.id, question_order: index + 1, payload: question,
     })));
@@ -645,6 +876,7 @@ async function handleExamGeneration(
 }
 
 export default async function handler(request: RequestLike, response: ResponseLike): Promise<void> {
+  const deadlineAt=Date.now()+270000;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('Cache-Control', 'no-store');
 
@@ -672,7 +904,7 @@ export default async function handler(request: RequestLike, response: ResponseLi
     return;
   }
 
-  const supabase = createClient<DynamicDatabase>(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: { user }, error: userError } = await (supabase.auth as any).getUser(accessToken);
   if (userError || !user) {
     jsonError(response, 401, 'Your session could not be verified. Please sign in again.');
@@ -680,12 +912,11 @@ export default async function handler(request: RequestLike, response: ResponseLi
   }
 
   // Get the authoritative profile. Do not create or infer a profile in a paid/content-generation path.
-  const { data: profileRow, error: profileError } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, school_id, role, first_name, last_name, email')
     .eq('id', user.id)
     .maybeSingle();
-  const profile = profileRow as ExamProfile | null;
   if (profileError || !profile) {
     jsonError(response, 403, 'Your school profile could not be verified for Exam Generator access.');
     return;
@@ -694,5 +925,5 @@ export default async function handler(request: RequestLike, response: ResponseLi
     jsonError(response, 403, 'Only school teachers and school administrators with an active school profile can generate exams.');
     return;
   }
-  await handleExamGeneration(response, supabase, profile, user, request);
+  await handleExamGeneration(response, supabase as any, profile as ExamProfile, user, request,deadlineAt);
 }

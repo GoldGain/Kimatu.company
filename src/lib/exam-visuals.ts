@@ -1,5 +1,16 @@
 import type { GeneratedExamQuestion } from './exam-schema.js';
 import { curatedVisualDataUrl } from './exam-visual-library.js';
+import {
+  EAST_AFRICA_FEATURES,
+  KENYA_FEATURES,
+  NATURAL_EARTH_AFRICA_FEATURES,
+  inferExamMapBase,
+  type ExamMapBase,
+  type ExamMapFeature,
+} from './exam-map-data.js';
+
+export const DETERMINISTIC_SCIENCE_VISUAL_RULES=' Deterministic Science diagram contract: an atom diagram labels the nucleus first and an electron second; particle counts, electron arrangements and outer-shell counts are NOT shown. A digestive-system diagram labels the stomach first and small intestine second. A flower diagram labels the anther first and stigma second. A concave-mirror ray diagram has its object beyond the centre of curvature, with the centre labelled first and focus second; other object positions are unsupported. Use letter labels or the exact anatomical names in that order. For other counts, positions or unsupported anatomy, provide a complete data table or self-contained numerical text instead of a misleading diagram.';
+export const DETERMINISTIC_MATH_VISUAL_RULES=' Deterministic Mathematics visual contract: render a right triangle only when the prompt explicitly establishes a right angle and structured values/labels agree with the given side lengths; preserve an explicitly named right-angle vertex (default B only when no vertex is named). Do not turn an arbitrary, isosceles or equilateral triangle into a right triangle. Render a circle only for supported radius/diameter/parts labels, matching explicit values; sector, central-angle, arc-length/area, proof, similarity/congruence and coordinate-plane requests are unsupported and must be rejected. Quantitative geometry must never use a fixed generic 3-4-5 or generic circle-parts fallback. When a visual cannot represent the exact givens, return no visual so the question can be repaired as self-contained text.';
 
 export interface ExamVisualSpec {
   asset_type?: string;
@@ -11,10 +22,15 @@ export interface ExamVisualSpec {
   x_labels?: string[];
   legend?: string[];
   map_regions?: string[];
+  base_map?: ExamMapBase;
+  scale_text?: string;
+  compass?: string;
+  map_features?: string[];
   table_headers?: string[];
   table_rows?: Array<Array<string | number>>;
   rows?: Array<Array<string | number>>;
   data?: Array<Array<string | number>>;
+  print_panel?: boolean;
 }
 
 function escapeXml(value: unknown): string {
@@ -54,7 +70,7 @@ function centeredTextLines(text: string, x: number, y: number, maxChars: number,
 }
 
 function tableCellText(text: unknown, x: number, centerY: number, width: number, header = false): string {
-  const lines = wrapWords(text, Math.floor(width / 7)).slice(0, 2);
+  const lines = wrapWords(text, Math.floor(width / 7));
   const lineHeight = 13;
   const startY = centerY - ((lines.length - 1) * lineHeight) / 2 + 4;
   return lines.map((entry, index) => `<text x="${x}" y="${startY + index * lineHeight}" text-anchor="middle" class="${header ? 'table-header' : 'table-cell'}">${escapeXml(entry)}</text>`).join('');
@@ -112,15 +128,232 @@ function renderMeasuringCylinderDiagram(spec: ExamVisualSpec): string {
   return `${drawCylinder(72, initial, false, 'Before')}${drawCylinder(296, final, true, 'After stone')}<text x="240" y="302" text-anchor="middle" class="small">Read the bottom of the meniscus at eye level.</text>`;
 }
 
-function renderMap(spec: ExamVisualSpec): string {
-  const regions = (spec.map_regions || spec.labels || ['Region A', 'Region B', 'Region C']).slice(0, 6);
-  const polygon = '<path d="M105 55 L235 42 L335 85 L390 160 L338 245 L230 268 L130 232 L75 150 Z" fill="#fee2e2" stroke="#991b1b" stroke-width="4"/>';
-  const labels = regions.map((label, index) => {
-    const positions = [[150, 110], [260, 90], [315, 155], [245, 190], [145, 190], [205, 135]];
-    const [x, y] = positions[index] || [200, 150];
-    return `<circle cx="${x}" cy="${y}" r="5" fill="#1d4ed8"/><text x="${x + 9}" y="${y + 4}" class="small">${escapeXml(label)}</text>`;
+function normalizedWords(value: unknown): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function defaultMapRegions(base: ExamMapBase): string[] {
+  if (base === 'kenya') return ['Kenya', 'Uganda', 'Tanzania', 'Ethiopia', 'Somalia'];
+  if (base === 'africa') return ['Kenya', 'Nigeria', 'Egypt', 'South Africa', 'Madagascar'];
+  return ['Kenya', 'Uganda', 'Tanzania', 'Ethiopia', 'Somalia', 'South Sudan'];
+}
+
+function mapScaleText(base: ExamMapBase): string {
+  if (base === 'kenya') return '≈ 200 km (indicative)';
+  if (base === 'africa') return '≈ 1,500 km (indicative)';
+  return '≈ 500 km (indicative)';
+}
+
+function mapFeaturesForBase(base: ExamMapBase): ExamMapFeature[] {
+  if (base === 'kenya') return KENYA_FEATURES;
+  if (base === 'africa') return NATURAL_EARTH_AFRICA_FEATURES;
+  return EAST_AFRICA_FEATURES;
+}
+
+function normalizeMapSpec(spec: ExamVisualSpec, question?: GeneratedExamQuestion): ExamVisualSpec {
+  const descriptor = [spec.base_map, spec.title, spec.prompt, spec.caption, ...(spec.map_regions || []), ...(spec.labels || [])].filter(Boolean).join(' ');
+  const base = spec.base_map || inferExamMapBase(descriptor || question?.question_text || 'east Africa');
+  const regions = (spec.map_regions || spec.labels || []).map(String).filter((value) => value.trim());
+  const legend = (spec.legend || []).map(String).filter((value) => value.trim());
+  const title = String(spec.title || spec.caption || '').trim().replace(/\bschematic\b/gi, 'vector');
+  const caption = String(spec.caption || '').trim().replace(/\bschematic\b/gi, 'vector');
+  const rawScale = String(spec.scale_text || '').trim();
+  const scale = rawScale && /≈|approx(?:imate)?|indicative|not\s+to\s+scale/i.test(rawScale)
+    ? rawScale
+    : rawScale ? `${rawScale} (indicative)` : mapScaleText(base);
+  return {
+    ...spec,
+    base_map: base,
+    ...(title ? { title } : {}),
+    ...(caption ? { caption } : {}),
+    map_regions: regions,
+    legend: legend.length >= 2 ? legend : [
+      'Hatch: focus region',
+      'Line: country boundary',
+      'North arrow; approx. bar',
+    ],
+    scale_text: scale,
+    compass: String(spec.compass || '').trim() || 'North',
+  };
+}
+
+function projectMapPoint(point: number[], bounds: { west: number; east: number; south: number; north: number; x: number; y: number; width: number; height: number }): [number, number] {
+  const [longitude, latitude] = point;
+  const x = bounds.x + ((longitude - bounds.west) / (bounds.east - bounds.west)) * bounds.width;
+  const y = bounds.y + ((bounds.north - latitude) / (bounds.north - bounds.south)) * bounds.height;
+  return [Number(x.toFixed(1)), Number(y.toFixed(1))];
+}
+
+function polygonPath(rings: number[][][], bounds: { west: number; east: number; south: number; north: number; x: number; y: number; width: number; height: number }): string {
+  return rings.map((ring) => ring.map((point, index) => {
+    const [x, y] = projectMapPoint(point, bounds);
+    return `${index ? 'L' : 'M'}${x} ${y}`;
+  }).join(' ') + ' Z').join(' ');
+}
+
+function featureCentroid(feature: ExamMapFeature): [number, number] {
+  const points = feature.polygons.flatMap((polygon) => polygon[0] || []);
+  if (!points.length) return [0, 0];
+  return [
+    points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    points.reduce((sum, point) => sum + point[1], 0) / points.length,
+  ];
+}
+
+function matchesMapFeature(feature: ExamMapFeature, values: string[]): boolean {
+  const aliases: Record<string, string[]> = {
+    's sudan': ['south sudan'],
+    'dem rep congo': ['democratic republic of the congo', 'democratic republic of congo', 'dr congo', 'congo kinshasa'],
+    'cote d ivoire': ['cote divoire', 'cote d ivoire', 'ivory coast'],
+  };
+  const name = normalizedWords(feature.name);
+  const names = [name, ...(aliases[name] || [])].map(normalizedWords);
+  return values.some((value) => {
+    const query = normalizedWords(value);
+    return query && names.includes(query);
+  });
+}
+
+type MapBounds = { west: number; east: number; south: number; north: number; x: number; y: number; width: number; height: number };
+
+function mapReferencePoint(value: string, bounds: MapBounds): [number, number] | null {
+  const query = normalizedWords(value);
+  if (query === 'lake victoria') return projectMapPoint([33.2, -1], bounds);
+  if (query === 'mount kenya') return projectMapPoint([37.3, -0.15], bounds);
+  if (query === 'indian ocean') return projectMapPoint([42.2, -2], bounds);
+  if (query === 'equator') return projectMapPoint([bounds.west + (bounds.east - bounds.west) * 0.62, 0], bounds);
+  if (query === 'rift valley') return projectMapPoint([36.1, -1], bounds);
+  return null;
+}
+
+function mapTextClaimsUnsupportedDetail(value: string): boolean {
+  return /\bcount(?:y|ies)\b|sub[ -]?count(?:y|ies)|\bprovince|\bdistrict|topograph|contour|elevation|altitude|relief|hypsometric|road network|railway|river(?:s)?\b|capital cit(?:y|ies)|\btowns?\b/i.test(value);
+}
+
+function uniqueMapTargets(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.map(String).map((value) => value.trim()).filter((value) => {
+    const key = normalizedWords(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isSupportedMapTarget(value: string, features: ExamMapFeature[], bounds: MapBounds): boolean {
+  return !mapTextClaimsUnsupportedDetail(value)
+    && wrapWords(value, 20).length <= 2
+    && (features.some((feature) => matchesMapFeature(feature, [value])) || Boolean(mapReferencePoint(value, bounds)));
+}
+
+/**
+ * The embedded geometry is country-level Natural Earth data plus four explicitly
+ * positioned East African references. It is not a county, road, river, or
+ * topographic data set, so unsupported claims must fail rather than receiving a
+ * guessed marker or a generic placeholder.
+ */
+export function isSupportedExamMapSpec(question: GeneratedExamQuestion): boolean {
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  if (String(spec.asset_type || '').toLowerCase() !== 'map') return false;
+  const base = String(spec.base_map || '').toLowerCase() as ExamMapBase;
+  if (!['kenya', 'east_africa', 'africa'].includes(base)) return false;
+  const descriptor = [question.question_text, spec.title, spec.prompt, spec.caption].filter(Boolean).join(' ');
+  if (mapTextClaimsUnsupportedDetail(descriptor)) return false;
+  const bounds = base === 'kenya'
+    ? { west: 33, east: 43.5, south: -5.5, north: 5.5, x: 34, y: 55, width: 304, height: 190 }
+    : base === 'africa'
+      ? { west: -20, east: 52, south: -36, north: 38, x: 34, y: 55, width: 304, height: 190 }
+      : { west: 27, east: 53, south: -12, north: 16, x: 34, y: 55, width: 304, height: 190 };
+  const features = mapFeaturesForBase(base);
+  const explicitTargets = uniqueMapTargets([
+    ...(spec.map_regions || []),
+    ...(spec.map_features || []),
+    ...(spec.labels || []),
+  ]);
+  const maxTargets = base === 'africa' ? 6 : 8;
+  return explicitTargets.length >= 2
+    && explicitTargets.length <= maxTargets
+    && explicitTargets.every((target) => isSupportedMapTarget(target, features, bounds));
+}
+
+function mapLabelMarkup(text: string, point: [number, number], bounds: MapBounds): string {
+  const lines = wrapWords(text, 20).slice(0, 2);
+  const [rawX, rawY] = point;
+  const left = bounds.x + 7;
+  const right = bounds.x + bounds.width - 7;
+  const x = Math.max(left, Math.min(right, rawX));
+  const anchor = x > bounds.x + bounds.width * 0.72 ? 'end' : x < bounds.x + bounds.width * 0.28 ? 'start' : 'middle';
+  const y = Math.max(bounds.y + 13, Math.min(bounds.y + bounds.height - 7, rawY - (lines.length - 1) * 5));
+  return `<text x="${Number(x.toFixed(1))}" y="${Number(y.toFixed(1))}" text-anchor="${anchor}" class="map-label">${lines.map((line, index) => `<tspan x="${Number(x.toFixed(1))}" dy="${index ? 11 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+}
+
+function renderMapReferenceOverlays(values: string[], bounds: MapBounds): string {
+  return values.flatMap((value) => {
+    const query = normalizedWords(value);
+    const point = mapReferencePoint(value, bounds);
+    if (query === 'lake victoria' && point) {
+      return `<ellipse cx="${point[0]}" cy="${point[1]}" rx="17" ry="9" fill="#ffffff" stroke="#111827" stroke-width="1.5" stroke-dasharray="3 2"/>`;
+    }
+    if (query === 'mount kenya' && point) {
+      return `<path d="M${point[0] - 7} ${point[1] + 6} L${point[0]} ${point[1] - 8} L${point[0] + 7} ${point[1] + 6} Z" fill="#ffffff" stroke="#111827" stroke-width="1.5"/>`;
+    }
+    if (query === 'rift valley') {
+      const start = projectMapPoint([36.7, 5], bounds);
+      const end = projectMapPoint([35.1, -5], bounds);
+      return `<path d="M${start[0]} ${start[1]} L${end[0]} ${end[1]}" fill="none" stroke="#111827" stroke-width="1.5" stroke-dasharray="5 3"/>`;
+    }
+    if (query === 'equator') {
+      const start = projectMapPoint([bounds.west, 0], bounds);
+      const end = projectMapPoint([bounds.east, 0], bounds);
+      return `<path d="M${start[0]} ${start[1]} L${end[0]} ${end[1]}" fill="none" stroke="#111827" stroke-width="1.2" stroke-dasharray="4 3"/>`;
+    }
+    return '';
   }).join('');
-  return `${polygon}${labels}<path d="M410 65 L410 35 L400 48 L420 48 Z" fill="#111827"/><text x="410" y="25" text-anchor="middle" class="small">N</text><line x1="70" y1="285" x2="150" y2="285" stroke="#111827" stroke-width="3"/><text x="160" y="289" class="small">schematic scale</text>`;
+}
+
+function renderMap(spec: ExamVisualSpec, question?: GeneratedExamQuestion): string | null {
+  const normalized = normalizeMapSpec(spec);
+  const base = normalized.base_map || 'east_africa';
+  if (base === 'world') return null;
+  const features = mapFeaturesForBase(base);
+  const bounds = base === 'kenya'
+    ? { west: 33, east: 43.5, south: -5.5, north: 5.5, x: 34, y: 55, width: 304, height: 190 }
+    : base === 'africa'
+      ? { west: -20, east: 52, south: -36, north: 38, x: 34, y: 55, width: 304, height: 190 }
+      : { west: 27, east: 53, south: -12, north: 16, x: 34, y: 55, width: 304, height: 190 };
+  if (question && !isSupportedExamMapSpec({ ...question, visual_spec: spec as Record<string, unknown> })) return null;
+  const requested = uniqueMapTargets([...(normalized.map_regions || []), ...(normalized.map_features || []), ...(normalized.labels || [])]);
+  if ((normalized.legend || []).some((entry) => wrapWords(entry, 17).length > 2)) return null;
+  const paths = features.map((feature) => {
+    const focus = matchesMapFeature(feature, requested);
+    const fill = focus ? 'url(#map-focus-hatch)' : '#ffffff';
+    const stroke = focus ? '#111827' : '#4b5563';
+    return feature.polygons.map((polygon) => `<path d="${polygonPath(polygon, bounds)}" fill="${fill}" stroke="${stroke}" stroke-width="${focus ? 1.6 : 0.8}" fill-rule="evenodd"/>`).join('');
+  }).join('');
+  const labelTargets = uniqueMapTargets([
+    ...((normalized.map_regions || []).length ? normalized.map_regions || [] : normalized.labels || defaultMapRegions(base)),
+    ...(normalized.map_features || []),
+  ]).slice(0, base === 'africa' ? 6 : 8);
+  const labels = labelTargets.map((label) => {
+    const feature = features.find((candidate) => matchesMapFeature(candidate, [label]));
+    const referencePoint = feature ? null : mapReferencePoint(label, bounds);
+    if (!feature && !referencePoint) return '';
+    const point = feature ? projectMapPoint(featureCentroid(feature), bounds) : referencePoint!;
+    const marker = feature || !/indian ocean/i.test(label) ? `<circle cx="${point[0]}" cy="${point[1]}" r="2.8" fill="#111827"/>` : '';
+    return marker + mapLabelMarkup(label, point, bounds);
+  }).join('');
+  const overlays = renderMapReferenceOverlays(requested, bounds);
+  let legendY = 82;
+  const legend = (normalized.legend || []).slice(0, 3).map((entry) => {
+    const lines = wrapWords(entry, 17).slice(0, 2);
+    const markup = `<text x="363" y="${legendY}" class="map-legend">${lines.map((line, index) => `<tspan x="363" dy="${index ? 11 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+    legendY += Math.max(25, lines.length * 11 + 8);
+    return markup;
+  }).join('');
+  const scaleLines = wrapWords(normalized.scale_text || 'approximate distance', 26).slice(0, 2);
+  const scaleMarkup = `<text x="110" y="282" class="small">${scaleLines.map((line, index) => `<tspan x="110" dy="${index ? 11 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+  const baseLabel = base === 'kenya' ? 'Kenya context' : base === 'africa' ? 'Africa context' : 'East Africa context';
+  return `<defs><clipPath id="map-clip"><rect x="26" y="47" width="322" height="215"/></clipPath><pattern id="map-focus-hatch" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#e5e7eb"/><path d="M-2 2 L2 -2 M0 8 L8 0 M6 10 L10 6" stroke="#111827" stroke-width="1"/></pattern></defs><rect x="26" y="47" width="322" height="215" fill="#ffffff" stroke="#111827" stroke-width="2"/><g aria-label="${escapeXml(baseLabel)}" clip-path="url(#map-clip)">${paths}${overlays}${labels}<path d="M40 72 H335 M40 230 H335" stroke="#9ca3af" stroke-width="0.7" stroke-dasharray="3 4"/></g><rect x="352" y="47" width="116" height="150" fill="#ffffff" stroke="#111827" stroke-width="1.5"/><text x="363" y="64" class="map-key-title">KEY</text>${legend}<path d="M328 79 L328 55 L321 66 L335 66 Z" fill="#111827"/><text x="328" y="49" text-anchor="middle" class="small">${escapeXml(normalized.compass || 'North')}</text><line x1="42" y1="278" x2="102" y2="278" stroke="#111827" stroke-width="3"/><line x1="42" y1="273" x2="42" y2="283" stroke="#111827" stroke-width="2"/><line x1="102" y1="273" x2="102" y2="283" stroke="#111827" stroke-width="2"/>${scaleMarkup}<text x="360" y="216" class="small">${escapeXml(baseLabel)}</text><text x="360" y="232" class="small">Vector country</text><text x="360" y="246" class="small">boundaries</text>`;
 }
 
 function renderCircuitDiagram(spec: ExamVisualSpec): string {
@@ -234,21 +467,91 @@ function renderConceptMapDiagram(spec: ExamVisualSpec): string {
   return `<g>${connectors}<circle cx="240" cy="154" r="54" fill="#dcfce7" stroke="#15803d" stroke-width="3"/>${centeredTextLines('Healthy Friendship', 240, 149, 15, 'body', 16)}${boxes}<text x="240" y="277" text-anchor="middle" class="small">Concept map; relationships are shown schematically.</text></g>`;
 }
 
-function renderGenericLabeledDiagram(spec: ExamVisualSpec): string {
-  const labels = (spec.labels || []).map(String).filter(Boolean).slice(0, 4);
-  const effectiveLabels = labels.length >= 2 ? labels : ['Part A', 'Part B'];
-  const positions = [[72, 68], [408, 68], [72, 236], [408, 236]];
-  const connectors = effectiveLabels.map((_, index) => {
-    const [x, y] = positions[index];
-    const endX = x < 240 ? 130 : 350;
-    const endY = y < 150 ? 100 : 205;
-    return `<line x1="${x}" y1="${y}" x2="${endX}" y2="${endY}" stroke="#64748b" stroke-width="2"/>`;
-  }).join('');
-  const boxes = effectiveLabels.map((entry, index) => {
-    const [x, y] = positions[index];
-    return `<rect x="${x - 58}" y="${y - 15}" width="116" height="30" rx="7" fill="#f8fafc" stroke="#475569" stroke-width="2"/>${centeredTextLines(entry, x, y - 2, 15, 'small', 11)}`;
-  }).join('');
-  return `<g>${connectors}<rect x="130" y="100" width="220" height="105" rx="12" fill="#f8fafc" stroke="#1d4ed8" stroke-width="3" stroke-dasharray="7 5"/><text x="240" y="145" text-anchor="middle" class="body">SCHEMATIC VISUAL</text><text x="240" y="165" text-anchor="middle" class="small">Use the labelled parts shown.</text>${boxes}<text x="240" y="252" text-anchor="middle" class="small">Not to scale; interpret only as directed by the question.</text></g>`;
+function diagramLabelCode(spec: ExamVisualSpec, index: number, fallback: string): string {
+  const raw = String(spec.labels?.[index] || '').trim();
+  return raw.match(/^([A-Za-z])\s*(?:=|:)/)?.[1] || fallback;
+}
+
+function renderAtomDiagram(spec: ExamVisualSpec): string {
+  const nucleus = escapeXml(diagramLabelCode(spec, 0, 'X'));
+  const electron = escapeXml(diagramLabelCode(spec, 1, 'Y'));
+  return `<g>
+    <ellipse cx="240" cy="164" rx="116" ry="78" fill="none" stroke="#64748b" stroke-width="2.5"/>
+    <circle cx="240" cy="164" r="37" fill="#dbeafe" stroke="#1d4ed8" stroke-width="3"/>
+    <circle cx="316" cy="111" r="9" fill="#f97316" stroke="#9a3412" stroke-width="2"/>
+    <path d="M91 112 L199 151" fill="none" stroke="#111827" stroke-width="1.8"/>
+    <rect x="55" y="92" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="74" y="115" text-anchor="middle" class="body">${nucleus}</text>
+    <path d="M352 93 L324 106" fill="none" stroke="#111827" stroke-width="1.8"/>
+    <rect x="352" y="74" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="371" y="97" text-anchor="middle" class="body">${electron}</text>
+    <text x="240" y="270" text-anchor="middle" class="small">Simplified model; not to scale; particle counts are not shown.</text>
+  </g>`;
+}
+
+function renderDigestiveSystemDiagram(spec: ExamVisualSpec): string {
+  const stomach = escapeXml(diagramLabelCode(spec, 0, 'P'));
+  const intestine = escapeXml(diagramLabelCode(spec, 1, 'Q'));
+  return `<g>
+    <path d="M202 58 Q240 42 278 58 L292 118 Q300 161 281 221 L266 263 L214 263 L199 221 Q180 161 188 118 Z" fill="#f8fafc" stroke="#64748b" stroke-width="2.5"/>
+    <path d="M240 70 L240 127" fill="none" stroke="#be123c" stroke-width="8" stroke-linecap="round"/>
+    <path d="M240 125 C210 125 202 148 208 169 C214 190 238 198 256 183 C273 169 265 143 247 137" fill="#fda4af" stroke="#9f1239" stroke-width="3"/>
+    <path d="M218 194 C200 207 279 205 261 220 C246 232 205 217 216 232 C229 246 272 232 262 247 C254 258 224 252 220 260" fill="none" stroke="#ea580c" stroke-width="5" stroke-linecap="round"/>
+    <path d="M256 165 L347 136" fill="none" stroke="#111827" stroke-width="1.8"/>
+    <rect x="347" y="119" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="366" y="142" text-anchor="middle" class="body">${stomach}</text>
+    <path d="M252 231 L347 224" fill="none" stroke="#111827" stroke-width="1.8"/>
+    <rect x="347" y="207" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="366" y="230" text-anchor="middle" class="body">${intestine}</text>
+    <text x="240" y="282" text-anchor="middle" class="small">Simplified human digestive system; not to scale.</text>
+  </g>`;
+}
+
+function renderFlowerDiagram(spec: ExamVisualSpec): string {
+  const anther = escapeXml(diagramLabelCode(spec, 0, 'A'));
+  const stigma = escapeXml(diagramLabelCode(spec, 1, 'B'));
+  return `<g>
+    <path d="M240 145 C192 118 173 83 195 63 C220 61 239 88 240 120 C244 83 264 61 287 63 C309 84 287 119 240 145 Z" fill="#fbcfe8" stroke="#be185d" stroke-width="2.5"/>
+    <path d="M239 145 C200 155 174 139 181 118 C199 106 222 119 240 142 C258 119 281 106 299 118 C306 139 280 155 241 145 Z" fill="#f9a8d4" stroke="#be185d" stroke-width="2.5"/>
+    <path d="M240 145 L240 194" stroke="#15803d" stroke-width="6"/>
+    <path d="M224 194 Q240 181 256 194 L251 217 Q240 226 229 217 Z" fill="#bbf7d0" stroke="#15803d" stroke-width="2.5"/>
+    <path d="M202 231 Q240 218 278 231 L267 242 Q240 236 213 242 Z" fill="#86efac" stroke="#15803d" stroke-width="2"/>
+    <path d="M216 112 L205 91 M264 112 L275 91" stroke="#a16207" stroke-width="3"/>
+    <ellipse cx="203" cy="88" rx="10" ry="5" fill="#facc15" stroke="#a16207" stroke-width="2"/>
+    <ellipse cx="277" cy="88" rx="10" ry="5" fill="#facc15" stroke="#a16207" stroke-width="2"/>
+    <line x1="240" y1="89" x2="240" y2="125" stroke="#15803d" stroke-width="3"/>
+    <path d="M230 87 Q240 78 250 87 Q247 94 240 94 Q233 94 230 87 Z" fill="#86efac" stroke="#15803d" stroke-width="2"/>
+    <path d="M204 88 L112 73" stroke="#111827" stroke-width="1.8"/>
+    <rect x="72" y="56" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="91" y="79" text-anchor="middle" class="body">${anther}</text>
+    <path d="M247 84 L345 69" stroke="#111827" stroke-width="1.8"/>
+    <rect x="345" y="52" width="38" height="34" rx="6" fill="#fff" stroke="#334155" stroke-width="2"/>
+    <text x="364" y="75" text-anchor="middle" class="body">${stigma}</text>
+    <text x="240" y="278" text-anchor="middle" class="small">Longitudinal section of a flower; simplified, not to scale.</text>
+  </g>`;
+}
+
+function renderConcaveMirrorDiagram(spec: ExamVisualSpec): string {
+  const centre = escapeXml(diagramLabelCode(spec, 0, 'C'));
+  const focus = escapeXml(diagramLabelCode(spec, 1, 'F'));
+  return `<g>
+    <line x1="42" y1="180" x2="360" y2="180" stroke="#111827" stroke-width="2"/>
+    <path d="M320 72 Q280 180 320 288" fill="none" stroke="#1d4ed8" stroke-width="5"/>
+    <path d="M329 76 Q289 180 329 284" fill="none" stroke="#94a3b8" stroke-width="2"/>
+    <line x1="140" y1="173" x2="140" y2="187" stroke="#111827" stroke-width="2"/>
+    <line x1="220" y1="173" x2="220" y2="187" stroke="#111827" stroke-width="2"/>
+    <text x="140" y="207" text-anchor="middle" class="body">${centre}</text>
+    <text x="220" y="207" text-anchor="middle" class="body">${focus}</text>
+    <line x1="60" y1="180" x2="60" y2="108" stroke="#15803d" stroke-width="4"/>
+    <path d="M52 119 L60 105 L68 119 Z" fill="#15803d"/>
+    <text x="60" y="94" text-anchor="middle" class="small">Object</text>
+    <line x1="180" y1="180" x2="180" y2="212" stroke="#7c3aed" stroke-width="4"/>
+    <path d="M172 201 L180 215 L188 201 Z" fill="#7c3aed"/>
+    <text x="180" y="235" text-anchor="middle" class="small">Image</text>
+    <path d="M60 108 L309 108 L180 212 M60 108 L300 180 L180 212" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+    <text x="346" y="180" class="small">Concave mirror</text>
+    <text x="240" y="276" text-anchor="middle" class="small">Simplified ray diagram; not to scale.</text>
+  </g>`;
 }
 
 function renderNurseryBedDiagram(spec: ExamVisualSpec) {
@@ -305,86 +608,185 @@ function parseMarkdownTableBlocks(source: string): string[][][] {
   return blocks;
 }
 
-function parseMarkdownTable(source: string): string[][] {
-  return parseMarkdownTableBlocks(source).flat();
+type TableSet = { headers: string[]; rows: string[][] };
+
+interface RenderedTable {
+  markup: string;
+  height: number;
+  captionY: number;
 }
 
-function renderTable(spec: ExamVisualSpec, question?: GeneratedExamQuestion): string {
-  const sourceLabels = (spec.labels || []).map(String).filter(Boolean);
-  const sourceRows = (spec.x_labels || []).map(String).filter(Boolean);
-  const values = (spec.values || []).map((value) => String(value));
-  const structuredHeaders = (spec.table_headers || spec.labels || []).map(String).filter(Boolean);
-  const structuredRows = (spec.table_rows || spec.rows || spec.data || [])
-    .filter((row): row is Array<string | number> => Array.isArray(row))
-    .map((row) => row.map((value) => String(value ?? '').trim()));
-  const parsedRows = sourceRows.map((row) => row.split(',').map((part) => part.trim()).filter(Boolean));
-  const commaSeparated = parsedRows.some((parts) => parts.length > 1);
-  const promptNumbers = String(spec.prompt || '').match(/[+-]?\s*\d+(?:\.\d+)?/g)?.map((value) => value.replace(/\s+/g, '')) || [];
-  const markdownRows = parseMarkdownTable(`${question?.question_text || ''}\n${spec.prompt || ''}`);
+function isRenderableTableSet(headers: string[], rows: string[][]): boolean {
+  return headers.length >= 2
+    && rows.length > 0
+    && headers.every((header) => header.trim())
+    && rows.every((row) => row.length === headers.length && row.every((value) => value.trim()));
+}
 
-  // Prefer the structured table contract, then complete Markdown tables from
-  // the learner-facing stem. When both are present, append any additional
-  // source table that is not a duplicate of the structured table. This keeps
-  // multi-table case studies faithful without manufacturing missing values.
-  const markdownTables = parseMarkdownTableBlocks(`${question?.question_text || ''}\n${spec.prompt || ''}`);
-  const tableSets: Array<{ headers: string[]; rows: string[][] }> = [];
-  if (structuredHeaders.length >= 2 && structuredRows.length > 0) {
-    const headers = structuredHeaders.slice(0, 6);
-    const rows = structuredRows.map((row) => [...row, ...Array(Math.max(0, headers.length - row.length)).fill('—')].slice(0, headers.length));
-    tableSets.push({ headers, rows });
-    for (const table of markdownTables) {
-      const candidateHeaders = table[0].slice(0, 6);
-      const candidateRows = table.slice(1).map((row) => [...row, ...Array(Math.max(0, candidateHeaders.length - row.length)).fill('—')].slice(0, candidateHeaders.length));
-      const duplicate = candidateHeaders.join('|') === headers.join('|') && candidateRows.some((row) => rows.some((existing) => existing.join('|') === row.join('|')));
-      if (!duplicate && candidateHeaders.length >= 2 && candidateRows.length > 0) tableSets.push({ headers: candidateHeaders, rows: candidateRows });
-    }
-  } else if (markdownTables.length > 0) {
-    for (const table of markdownTables) {
-      const columnCount = Math.min(6, Math.max(...table.map((row) => row.length)));
-      const headers = table[0].slice(0, columnCount);
-      while (headers.length < columnCount) headers.push(`Detail ${headers.length}`);
-      const rows = table.slice(1).map((row) => [...row, ...Array(Math.max(0, columnCount - row.length)).fill('—')].slice(0, columnCount));
-      tableSets.push({ headers, rows });
-    }
-  } else if (sourceLabels.length >= 2 && sourceRows.length >= 2 && (values.length >= sourceLabels.length || promptNumbers.length >= sourceLabels.length)) {
-    const rowValues = (values.length >= sourceLabels.length ? values : promptNumbers).slice(0, sourceLabels.length);
-    tableSets.push({ headers: [sourceRows[0] || 'Item', ...sourceLabels], rows: [[sourceRows[1] || 'Value', ...rowValues]] });
-  } else {
-    const fallbackHeaders = sourceLabels.length ? sourceLabels.slice(0, 6) : ['Item', 'Value'];
-    const fallbackRows = sourceRows.length ? sourceRows.slice(0, 6) : ['Item 1', 'Item 2', 'Item 3', 'Item 4'];
-    const inferredColumns = commaSeparated ? Math.max(fallbackHeaders.length, ...parsedRows.map((parts) => parts.length)) : Math.max(fallbackHeaders.length, values.length ? 2 : fallbackHeaders.length);
-    const headers = [...fallbackHeaders];
-    if (commaSeparated && headers.length === 3 && inferredColumns === 4) headers.splice(2, 0, 'Group');
-    while (headers.length < inferredColumns) headers.push(`Detail ${headers.length}`);
-    const rows = fallbackRows.map((row, rowIndex) => {
-      const parts = parsedRows[rowIndex];
-      if (commaSeparated && parts.length > 1) return [...parts, ...Array(Math.max(0, headers.length - parts.length)).fill('—')].slice(0, headers.length);
-      return headers.map((_, columnIndex) => columnIndex === 0 ? row : values[rowIndex] ?? '—');
-    });
-    tableSets.push({ headers, rows });
+function tableCellLines(text: unknown, width: number): string[] {
+  return wrapWords(text, Math.floor(Math.max(56, width) / 7));
+}
+
+function tableRowHeight(row: string[], widths: number[], header = false): number {
+  const lineCount = Math.max(1, ...row.map((value, index) => tableCellLines(value, widths[index] - 8).length));
+  return Math.max(header ? 30 : 30, lineCount * 13 + 10);
+}
+
+function tableColumnWidths(table: TableSet, indexes: number[], totalWidth: number): number[] {
+  const desired = indexes.map((columnIndex) => {
+    const longest = Math.max(
+      table.headers[columnIndex].length,
+      ...table.rows.map((row) => row[columnIndex].length),
+    );
+    return Math.min(150, Math.max(58, longest * 5.4 + 18));
+  });
+  const desiredTotal = desired.reduce((sum, width) => sum + width, 0);
+  if (desiredTotal <= totalWidth) {
+    const extra = (totalWidth - desiredTotal) / desired.length;
+    return desired.map((width) => width + extra);
+  }
+  return indexes.map(() => totalWidth / indexes.length);
+}
+
+function splitTableColumns(columnCount: number): number[][] {
+  if (columnCount <= 6) return [Array.from({ length: columnCount }, (_, index) => index)];
+  const panels: number[][] = [];
+  // Keep the first column (normally the row identifier) in every panel. Five
+  // data columns leave readable print widths without dropping wide-table data.
+  for (let start = 1; start < columnCount; start += 5) {
+    panels.push([0, ...Array.from({ length: Math.min(5, columnCount - start) }, (_, offset) => start + offset)]);
+  }
+  return panels;
+}
+
+function extractTableSets(spec: ExamVisualSpec, question?: GeneratedExamQuestion): TableSet[] | null {
+  const sourceLabels = (spec.labels || []).map(String);
+  const sourceRows = (spec.x_labels || []).map(String);
+  const values = (spec.values || []).map((value) => String(value));
+  const structuredHeaders = (spec.table_headers ?? ((spec.table_rows ?? spec.rows ?? spec.data) ? spec.labels : []) ?? []).map(String);
+  const rawStructuredRows = spec.table_rows ?? spec.rows ?? spec.data;
+  const malformedStructuredRows = Array.isArray(rawStructuredRows) && rawStructuredRows.some((row) => !Array.isArray(row));
+  const structuredRows = Array.isArray(rawStructuredRows)
+    ? rawStructuredRows.map((row) => Array.isArray(row) ? row.map((value) => String(value ?? '')) : [])
+    : [];
+  const hasStructuredSource = spec.table_headers !== undefined || spec.table_rows !== undefined || spec.rows !== undefined || spec.data !== undefined;
+  const parsedLegacyRows = sourceRows.map((row) => row.split(',').map((part) => part.trim()));
+  const promptNumbers = String(spec.prompt || '').match(/[+-]?\s*\d+(?:\.\d+)?/g)?.map((value) => value.replace(/\s+/g, '')) || [];
+  if (malformedStructuredRows) return null;
+  const markdownTables = spec.print_panel ? [] : parseMarkdownTableBlocks(`${question?.question_text || ''}\n${spec.prompt || ''}`);
+  const tableSets: TableSet[] = [];
+
+  if (hasStructuredSource && (structuredHeaders.length > 0 || structuredRows.length > 0)) {
+    if (!isRenderableTableSet(structuredHeaders, structuredRows)) return null;
+    tableSets.push({ headers: structuredHeaders, rows: structuredRows });
   }
 
+  for (const table of markdownTables) {
+    const [headers, ...rows] = table;
+    const candidate: TableSet = { headers, rows };
+    if (!isRenderableTableSet(candidate.headers, candidate.rows)) return null;
+    const duplicate = tableSets.some((existing) => existing.headers.join('|') === candidate.headers.join('|')
+      && existing.rows.length === candidate.rows.length
+      && existing.rows.every((row, index) => row.join('|') === candidate.rows[index].join('|')));
+    if (!duplicate) tableSets.push(candidate);
+  }
+
+  if (tableSets.length === 0 && sourceLabels.length >= 2 && parsedLegacyRows.length > 0
+    && parsedLegacyRows.every((row) => row.length >= sourceLabels.length && row.every((value) => value.trim()))) {
+    const legacyColumnCount = Math.max(...parsedLegacyRows.map((row) => row.length));
+    if (parsedLegacyRows.every((row) => row.length === legacyColumnCount)) {
+      const headers = [...sourceLabels];
+      while (headers.length < legacyColumnCount) headers.push(`Unlabelled column ${headers.length - sourceLabels.length + 1}`);
+      tableSets.push({ headers, rows: parsedLegacyRows });
+    }
+  }
+
+  if (tableSets.length === 0 && sourceLabels.length >= 2 && sourceRows.length >= 2) {
+    const rowValues = values.length === sourceLabels.length
+      ? values
+      : promptNumbers.length === sourceLabels.length ? promptNumbers : null;
+    if (rowValues) {
+      const candidate: TableSet = {
+        headers: [sourceRows[0], ...sourceLabels],
+        rows: [[sourceRows[1], ...rowValues]],
+      };
+      if (!isRenderableTableSet(candidate.headers, candidate.rows)) return null;
+      tableSets.push(candidate);
+    }
+  }
+
+  return tableSets.length > 0 ? tableSets : null;
+}
+
+export function examVisualPrintPanels(question: GeneratedExamQuestion): GeneratedExamQuestion[] {
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  if (String(spec.asset_type || '').toLowerCase() !== 'table') return [question];
+  const tableSets = extractTableSets(spec, question);
+  if (!tableSets) return [];
+  const panels: GeneratedExamQuestion[] = [];
+  tableSets.forEach((table) => {
+    const columnPanels = splitTableColumns(table.headers.length);
+    columnPanels.forEach((indexes) => {
+      for (let rowStart = 0; rowStart < table.rows.length; rowStart += 6) {
+        const rowChunk = table.rows.slice(rowStart, rowStart + 6).map((row) => indexes.map((index) => row[index]));
+        const panelNumber = panels.length + 1;
+        const panelSpec: ExamVisualSpec = {
+          ...spec,
+          title: `${spec.title || spec.caption || 'Table'} · panel ${panelNumber}`,
+          table_headers: indexes.map((index) => table.headers[index]),
+          table_rows: rowChunk,
+          labels: indexes.map((index) => table.headers[index]),
+          x_labels: [],
+          values: [],
+          print_panel: true,
+        };
+        panels.push({ ...question, image_url: null, visual_spec: panelSpec as Record<string, unknown> });
+      }
+    });
+  });
+  return panels;
+}
+
+function renderTable(spec: ExamVisualSpec, question?: GeneratedExamQuestion): RenderedTable | null {
+  const tableSets = extractTableSets(spec, question);
+  if (!tableSets) return null;
+
   const x = 28;
-  let y = 58;
   const tableWidth = 424;
-  const rowHeight = tableSets.length > 1 ? 20 : (tableSets[0]?.rows.length || 0) > 5 ? 26 : 30;
-  return tableSets.map(({ headers, rows }, tableIndex) => {
-    const columnWidth = tableWidth / headers.length;
-    const header = headers.map((header, index) => {
-      const cellX = x + index * columnWidth;
-      return `<rect x="${cellX}" y="${y}" width="${columnWidth}" height="${rowHeight}" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1"/>${tableCellText(header, cellX + columnWidth / 2, y + rowHeight / 2, columnWidth - 8, true)}`;
-    }).join('');
-    const body = rows.map((row, rowIndex) => {
-      const cellY = y + rowHeight * (rowIndex + 1);
-      return row.map((value, columnIndex) => {
-        const cellX = x + columnIndex * columnWidth;
-        return `<rect x="${cellX}" y="${cellY}" width="${columnWidth}" height="${rowHeight}" fill="${rowIndex % 2 === 0 ? '#ffffff' : '#f9fafb'}" stroke="#9ca3af" stroke-width="1"/>${tableCellText(value, cellX + columnWidth / 2, cellY + rowHeight / 2, columnWidth - 8)}`;
+  let y = 58;
+  let markup = '';
+  tableSets.forEach((table, tableIndex) => {
+    const panels = splitTableColumns(table.headers.length);
+    panels.forEach((indexes, panelIndex) => {
+      if (panels.length > 1) {
+        y += 4;
+        markup += `<text x="${x}" y="${y + 12}" class="small">Table ${tableIndex + 1} · Panel ${panelIndex + 1}/${panels.length} (shared identifier: ${escapeXml(table.headers[0])})</text>`;
+        y += 22;
+      }
+      const widths = tableColumnWidths(table, indexes, tableWidth);
+      const headerHeight = tableRowHeight(indexes.map((index) => table.headers[index]), widths, true);
+      const headerCells = indexes.map((columnIndex, index) => {
+        const cellX = x + widths.slice(0, index).reduce((sum, width) => sum + width, 0);
+        return `<rect x="${cellX}" y="${y}" width="${widths[index]}" height="${headerHeight}" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1"/>${tableCellText(table.headers[columnIndex], cellX + widths[index] / 2, y + headerHeight / 2, widths[index] - 8, true)}`;
       }).join('');
-    }).join('');
-    const markup = `${header}${body}`;
-    y += (rows.length + 1) * rowHeight + (tableIndex < tableSets.length - 1 ? 12 : 0);
-    return markup;
-  }).join('');
+      markup += headerCells;
+      y += headerHeight;
+      table.rows.forEach((row, rowIndex) => {
+        const valuesForPanel = indexes.map((index) => row[index]);
+        const height = tableRowHeight(valuesForPanel, widths);
+        const cells = valuesForPanel.map((value, index) => {
+          const cellX = x + widths.slice(0, index).reduce((sum, width) => sum + width, 0);
+          return `<rect x="${cellX}" y="${y}" width="${widths[index]}" height="${height}" fill="${rowIndex % 2 === 0 ? '#ffffff' : '#f9fafb'}" stroke="#9ca3af" stroke-width="1"/>${tableCellText(value, cellX + widths[index] / 2, y + height / 2, widths[index] - 8)}`;
+        }).join('');
+        markup += cells;
+        y += height;
+      });
+      y += 14;
+    });
+    y += tableIndex < tableSets.length - 1 ? 8 : 0;
+  });
+  const bodyBottom = y;
+  return { markup, height: Math.max(320, bodyBottom + 48), captionY: Math.max(302, bodyBottom + 16) };
 }
 
 const EXPLICIT_VISUAL_REFERENCE = /\b(?:diagram|figure|map|graph|chart|table|illustration|picture|image|photograph|flowchart|number\s+line)\b|\b(?:shown\s+(?:below|above)|as\s+(?:shown|illustrated)|study\s+(?:it|the)|observe\s+(?:it|the)|refer\s+to|look\s+at|use\s+the)\b/i;
@@ -397,19 +799,274 @@ const EXPLICIT_VISUAL_REFERENCE = /\b(?:diagram|figure|map|graph|chart|table|ill
 export function hasCompleteTableVisual(question: GeneratedExamQuestion): boolean {
   const spec = (question.visual_spec || {}) as ExamVisualSpec;
   if (String(spec.asset_type || '').toLowerCase() !== 'table') return true;
-  const headers = (spec.table_headers || spec.labels || []).map(String).filter((value) => value.trim());
-  const structuredRows = (spec.table_rows || spec.rows || spec.data || [])
-    .filter((row): row is Array<string | number> => Array.isArray(row))
-    .map((row) => row.map((value) => String(value ?? '').trim()));
-  if (headers.length >= 2 && structuredRows.length > 0 && structuredRows.every((row) => row.length >= headers.length && row.slice(0, headers.length).every((value) => value && value !== '—'))) return true;
-  const markdownRows = parseMarkdownTable(`${question.question_text || ''}\n${spec.prompt || ''}`);
-  if (markdownRows.length >= 2) return markdownRows.slice(1).every((row) => row.every((value) => value.trim() && value.trim() !== '—'));
-  const values = (spec.values || []).map((value) => String(value).trim()).filter(Boolean);
-  const promptNumbers = String(spec.prompt || '').match(/[+-]?\s*\d+(?:\.\d+)?/g)?.map((value) => value.replace(/\s+/g, '')) || [];
-  return headers.length >= 2 && (values.length >= headers.length || promptNumbers.length >= headers.length);
+  return extractTableSets(spec, question) !== null;
+}
+
+function deterministicDiagramType(question: GeneratedExamQuestion): string | null {
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  const assetType = String(spec.asset_type || '').toLowerCase();
+  const descriptor = [question.question_text, spec.title, spec.prompt, spec.caption, ...(spec.labels || [])].filter(Boolean).join(' ').toLowerCase();
+  if (assetType === 'diagram') {
+    if (/atom|nucleus|electron/.test(descriptor)) return 'atom';
+    if (/digestive system|stomach|small intestine/.test(descriptor)) return 'digestive_system';
+    if (/flower|anther|stigma|longitudinal section/.test(descriptor)) return 'flower';
+    if (/concave mirror|mirror.*(?:centre|center|focus)|(?:centre|center|focus).*mirror/.test(descriptor)) return 'concave_mirror';
+    if (/measuring\s+cylinder|meniscus|initial\s+volume|final\s+volume|stone/.test(descriptor)) return 'measuring_cylinder';
+    if (/electric\s+circuit|circuit|battery|bulb|switch|connecting\s+wires|ammeter|voltage|potential\s+difference/.test(descriptor)) return 'electric_circuit';
+    if (/nursery|horticulture|shade|seed drill|watering can/.test(descriptor)) return 'nursery';
+    if (/distillation|round-bottom|condenser|receiving flask|separation apparatus/.test(descriptor)) return 'distillation';
+    if (/separating funnel|stopcock|immiscible|two distinct layers/.test(descriptor)) return 'separating_funnel';
+    if (/filter funnel|filter paper|filtrate|residue|evaporating dish|tripod|bunsen|separation stages|sand.*salt/.test(descriptor)) return 'separation_stages';
+    if (/food chain|grasshopper|flow of energy|producer|consumer|predator|prey/.test(descriptor)) return 'food_chain';
+    if (/healthy friendship|friendship|qualities|honesty|kindness|respect|empathy/.test(descriptor)) return 'concept_map';
+  }
+  if (assetType === 'shape') {
+    if (/\bright[ -]?(?:angled|angle|triangle)\b|\bhypotenuse\b|\bpythagorean\b/.test(descriptor)) return 'right_triangle';
+    if (/parts of a circle|\bcircle\b|radius|diameter|circumference|chord|tangent/.test(descriptor)) return 'circle_parts';
+    if (/coordinate plane|cartesian plane/.test(descriptor)) return 'coordinate_plane';
+  }
+  return null;
+}
+
+type GeometryDecision = {
+  type: 'right_triangle' | 'circle_parts';
+  quantitative: boolean;
+  values: number[];
+  roles: string[];
+  unit: string;
+  rightAngleVertex?: 'A' | 'B' | 'C';
+};
+
+function geometryDescriptor(question: GeneratedExamQuestion): string {
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  return [question.question_text, spec.title, spec.prompt, spec.caption, ...(spec.labels || [])].filter(Boolean).join(' ');
+}
+
+function extractGeometryMeasurements(text: string): number[] {
+  const values: number[] = [];
+  const pattern = /(^|[^\d])(-?\d+(?:\.\d+)?)\s*(cm²|cm2|mm²|mm2|km²|km2|m²|m2|cm|mm|km|m|in|ft)?/gi;
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index || 0;
+    const end = start + match[0].length;
+    const before = text.slice(Math.max(0, start - 18), start);
+    const after = text.slice(end, end + 3);
+    if (match[1].includes('/') || /[/]\s*$/.test(before) || /^\s*\//.test(after) || /(?:π|pi)\s*[=:]?\s*$/i.test(before)) continue;
+    const value = Number(match[2]);
+    if (Number.isFinite(value) && value > 0) values.push(value);
+  }
+  return values;
+}
+
+function finiteGeometryValues(spec: ExamVisualSpec): number[] {
+  return (spec.values || []).map(Number).filter((value) => Number.isFinite(value) && value > 0);
+}
+
+function approximatelyEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= Math.max(0.0001, Math.max(Math.abs(left), Math.abs(right)) * 0.0001);
+}
+
+function sameMeasurementSet(expected: number[], actual: number[]): boolean {
+  const unmatched = [...actual];
+  return expected.every((value) => {
+    const index = unmatched.findIndex((candidate) => approximatelyEqual(value, candidate));
+    if (index < 0) return false;
+    unmatched.splice(index, 1);
+    return true;
+  });
+}
+
+function geometryLabelMeaning(label: string): string {
+  return label.replace(/^\s*[A-Za-z]\s*(?:=|:|[-–])\s*/, '').replace(/\d+(?:\.\d+)?\s*(?:cm²|cm2|mm²|mm2|km²|km2|cm|mm|km|m|in|ft)?/gi, '').trim().toLowerCase();
+}
+
+function geometryLabelRole(label: string): string | null {
+  const meaning = geometryLabelMeaning(label);
+  if (/\bhypotenuse\b|\bsloping side\b/.test(meaning)) return 'hypotenuse';
+  if (/\bbase\b|\bhorizontal side\b|\bleg\s*[ab]\b/.test(meaning)) return 'base';
+  if (/\bheight\b|\bvertical side\b|\bperpendicular side\b/.test(meaning)) return 'height';
+  if (/\bradius\b|\br\b/.test(meaning)) return 'radius';
+  if (/\bdiameter\b|\bd\b/.test(meaning)) return 'diameter';
+  return null;
+}
+
+function geometryUnit(text: string): string {
+  const match = text.match(/\b(?:cm²|cm2|mm²|mm2|km²|km2|cm|mm|km|m)\b/i);
+  return match ? match[0] : '';
+}
+
+function geometryLabelsHaveContradictoryNumbers(spec: ExamVisualSpec, values: number[]): boolean {
+  return (spec.labels || []).some((label) => {
+    const labelValues = extractGeometryMeasurements(String(label));
+    return labelValues.length > 0 && !labelValues.every((value) => values.some((candidate) => approximatelyEqual(value, candidate)));
+  });
+}
+
+function unsupportedGeometryClaim(descriptor: string): boolean {
+  return /\b(?:sector|central\s+angle|angle\s+of\s+the\s+sector|arc\s+length|area\s+of\s+(?:a\s+)?sector|segment|coordinate|cartesian|proof|prove|prove\s+that|show\s+that|congruen(?:t|ce)|similar(?:ity)?|construction)\b/i.test(descriptor);
+}
+
+function circleRoleValuePairs(text: string): Record<string, number> {
+  const pairs: Record<string, number> = {};
+  for (const match of text.matchAll(/\b(radius|diameter)\b[^\d]{0,24}(\d+(?:\.\d+)?)/gi)) pairs[match[1].toLowerCase()] = Number(match[2]);
+  return pairs;
+}
+
+function geometryDecision(question: GeneratedExamQuestion): GeometryDecision | null {
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  const assetType = String(spec.asset_type || '').toLowerCase();
+  if (assetType !== 'shape') return null;
+  const type = deterministicDiagramType(question);
+  if (type !== 'right_triangle' && type !== 'circle_parts') return null;
+  const descriptor = geometryDescriptor(question);
+  if (unsupportedGeometryClaim(descriptor)) return null;
+  const values = finiteGeometryValues(spec);
+  const labels = (spec.labels || []).map(String).filter((label) => label.trim());
+  const labelRoles = labels.map(geometryLabelRole).filter((role): role is string => Boolean(role));
+  const vertexMatch = descriptor.match(/\bright\s+angle\s+(?:is\s+)?at\s+([ABC])\b|\b([ABC])\s+is\s+the\s+right[- ]angle(?:d)?\s+vertex\b/i);
+  const rightAngleVertex = (vertexMatch?.[1] || vertexMatch?.[2] || 'B').toUpperCase() as 'A' | 'B' | 'C';
+  const questionValues = extractGeometryMeasurements([question.question_text, spec.prompt].filter(Boolean).join(' '));
+  const labelValues = labels.flatMap(extractGeometryMeasurements);
+  const quantitative = values.length > 0 || questionValues.length > 0 || labelValues.length > 0;
+  if (!quantitative) {
+    if (type === 'right_triangle' && rightAngleVertex !== 'B') return null;
+    return labels.length >= 2 || typeof (spec as Record<string, unknown>).curated_key === 'string'
+      ? { type, quantitative: false, values: [], roles: labelRoles, unit: geometryUnit(descriptor), rightAngleVertex }
+      : null;
+  }
+  if (!values.length || geometryLabelsHaveContradictoryNumbers(spec, values)) return null;
+  if (questionValues.length && !sameMeasurementSet(questionValues, values) && !(type === 'right_triangle' && questionValues.length === 2 && values.length === 3 && sameMeasurementSet(questionValues, values.slice(0, 2)))) return null;
+  if (type === 'right_triangle') {
+    if (values.length < 2 || values.length > 3) return null;
+    const sideRoles = labels.map(geometryLabelRole);
+    const hasHypotenuse = sideRoles.includes('hypotenuse');
+    if (values.length === 2 && hasHypotenuse) return null;
+    const base = values[sideRoles.indexOf('base')] ?? values[0];
+    const height = values[sideRoles.indexOf('height')] ?? values[1];
+    const hypotenuse = values[sideRoles.indexOf('hypotenuse')] ?? (values.length === 3 ? values[2] : Math.sqrt(base * base + height * height));
+    if (!approximatelyEqual(hypotenuse * hypotenuse, base * base + height * height)) return null;
+    return { type, quantitative: true, values, roles: sideRoles.map((role) => role || ''), unit: geometryUnit([question.question_text, spec.prompt, ...labels].filter(Boolean).join(' ')), rightAngleVertex };
+  }
+  if (values.length > 2) return null;
+  const text = [question.question_text, spec.prompt, ...labels].filter(Boolean).join(' ');
+  const pairs = circleRoleValuePairs(text);
+  const roles = labels.map(geometryLabelRole);
+  let radius = values[roles.indexOf('radius')];
+  let diameter = values[roles.indexOf('diameter')];
+  if (!Number.isFinite(radius) && Number.isFinite(pairs.radius)) radius = pairs.radius;
+  if (!Number.isFinite(diameter) && Number.isFinite(pairs.diameter)) diameter = pairs.diameter;
+  if (values.length === 1 && !Number.isFinite(radius) && !Number.isFinite(diameter)) {
+    if (/\bradius\b/i.test(text) && !/\bdiameter\b/i.test(text)) radius = values[0];
+    else if (/\bdiameter\b/i.test(text) && !/\bradius\b/i.test(text)) diameter = values[0];
+    else return null;
+  }
+  if (values.length === 2 && (!Number.isFinite(radius) || !Number.isFinite(diameter))) return null;
+  if (Number.isFinite(radius) && Number.isFinite(diameter) && !approximatelyEqual(diameter, radius * 2)) return null;
+  return { type, quantitative: true, values, roles, unit: geometryUnit([question.question_text, spec.prompt, ...labels].filter(Boolean).join(' ')) };
+}
+
+function renderParameterizedRightTriangle(spec: ExamVisualSpec, question: GeneratedExamQuestion): string | null {
+  const decision = geometryDecision(question);
+  if (!decision || decision.type !== 'right_triangle' || !decision.quantitative) return null;
+  const labels = (spec.labels || []).map(String);
+  const roleIndex = (role: string): number => decision.roles.findIndex((entry) => entry === role);
+  const valueFor = (role: string, fallback: number): number => decision.values[roleIndex(role) >= 0 ? roleIndex(role) : fallback];
+  const base = valueFor('base', 0);
+  const height = valueFor('height', 1);
+  const hypotenuse = decision.values.length === 2 ? Math.sqrt(base * base + height * height) : valueFor('hypotenuse', 2);
+  const unit = decision.unit ? ` ${decision.unit}` : '';
+  const sideText = (role: string, value: number, fallback: string): string => {
+    const source = labels.find((label) => geometryLabelRole(label) === role)
+      || labels.find((label) => extractGeometryMeasurements(label).some((candidate) => approximatelyEqual(candidate, value)))
+      || (role === 'base' ? labels[0] : role === 'height' ? labels[1] : undefined);
+    const explicitValue = source && extractGeometryMeasurements(source).some((candidate) => approximatelyEqual(candidate, value));
+    if (explicitValue) return source!.trim();
+    const meaning = source ? geometryLabelMeaning(source).replace(/[=:]\s*$/, '') : '';
+    const name = meaning || fallback;
+    return `${name} = ${value}${unit}`;
+  };
+  const vertex = decision.rightAngleVertex || 'B';
+  const points = vertex === 'A' ? { A: [110, 245], B: [390, 245], C: [110, 85] } : vertex === 'C' ? { A: [110, 245], B: [390, 245], C: [390, 85] } : { A: [110, 85], B: [110, 245], C: [390, 245] };
+  const [ax, ay] = points.A;
+  const [bx, by] = points.B;
+  const [cx, cy] = points.C;
+  const right = points[vertex];
+  const rightX = right[0];
+  const rightY = right[1];
+  const baseTextX = vertex === 'C' ? 250 : vertex === 'A' ? 250 : 250;
+  const baseTextY = vertex === 'A' || vertex === 'B' ? 270 : 145;
+  const heightTextX = vertex === 'C' ? 430 : 72;
+  const heightTextY = vertex === 'C' ? 170 : 170;
+  const hypotenuseText = decision.values.length === 2 ? 'hypotenuse = ?' : sideText('hypotenuse', hypotenuse, 'hypotenuse');
+  return `<g><polygon points="${ax},${ay} ${bx},${by} ${cx},${cy}" fill="#eff6ff" stroke="#1d4ed8" stroke-width="3"/><rect x="${rightX - 9}" y="${rightY - 9}" width="18" height="18" fill="none" stroke="#111827" stroke-width="2"/><text x="${baseTextX}" y="${baseTextY}" text-anchor="middle" class="body">${escapeXml(sideText('base', base, 'base'))}</text><text x="${heightTextX}" y="${heightTextY}" text-anchor="middle" class="body" transform="rotate(-90 ${heightTextX} ${heightTextY})">${escapeXml(sideText('height', height, 'height'))}</text><text x="276" y="145" text-anchor="middle" class="body">${escapeXml(hypotenuseText)}</text><text x="${rightX + 12}" y="${rightY - 12}" class="small">90° at ${vertex}</text></g>`;
+}
+
+function renderQualitativeCircle(spec: ExamVisualSpec, question: GeneratedExamQuestion): string | null {
+  const descriptor = geometryDescriptor(question).toLowerCase();
+  const labels = (spec.labels || []).map(String).filter((label) => label.trim());
+  const features = new Set(labels.map(geometryLabelRole).filter((role): role is string => Boolean(role)));
+  if (/\bradius\b/.test(descriptor)) features.add('radius');
+  if (/\bdiameter\b/.test(descriptor)) features.add('diameter');
+  if (/\bchord\b/.test(descriptor)) features.add('chord');
+  if (/\btangent\b/.test(descriptor)) features.add('tangent');
+  const parts: string[] = ['<circle cx="240" cy="150" r="92" fill="#eff6ff" stroke="#1d4ed8" stroke-width="3"/><circle cx="240" cy="150" r="4" fill="#111827"/><text x="250" y="146" class="small">O</text>'];
+  if (features.has('radius')) parts.push('<line x1="240" y1="150" x2="332" y2="150" stroke="#b45309" stroke-width="3"/><text x="286" y="139" text-anchor="middle" class="body">radius</text>');
+  if (features.has('diameter')) parts.push('<line x1="148" y1="150" x2="332" y2="150" stroke="#15803d" stroke-width="3"/><text x="240" y="183" text-anchor="middle" class="body">diameter</text>');
+  if (features.has('chord')) parts.push('<line x1="184" y1="84" x2="318" y2="216" stroke="#7c3aed" stroke-width="3"/><text x="320" y="218" class="body">chord</text>');
+  if (features.has('tangent')) parts.push('<line x1="148" y1="242" x2="332" y2="242" stroke="#dc2626" stroke-width="3"/><text x="336" y="246" class="body">tangent</text>');
+  return `<g>${parts.join('')}<text x="240" y="270" text-anchor="middle" class="small">${escapeXml(labels.join(' · ') || 'circle')}</text></g>`;
+}
+
+function renderParameterizedCircle(spec: ExamVisualSpec, question: GeneratedExamQuestion): string | null {
+  const decision = geometryDecision(question);
+  if (!decision || decision.type !== 'circle_parts' || !decision.quantitative) return null;
+  const text = [question.question_text, spec.prompt, ...(spec.labels || [])].filter(Boolean).join(' ');
+  const pairs = circleRoleValuePairs(text);
+  const labels = (spec.labels || []).map(String);
+  const radiusIndex = decision.roles.findIndex((role) => role === 'radius');
+  const diameterIndex = decision.roles.findIndex((role) => role === 'diameter');
+  const radius = radiusIndex >= 0 ? decision.values[radiusIndex] : Number.isFinite(pairs.radius) ? pairs.radius : /\bradius\b/i.test(text) ? decision.values[0] : NaN;
+  const diameter = diameterIndex >= 0 ? decision.values[diameterIndex] : Number.isFinite(pairs.diameter) ? pairs.diameter : /\bdiameter\b/i.test(text) ? decision.values[0] : NaN;
+  const unit = decision.unit ? ` ${decision.unit}` : '';
+  const radiusLabel = Number.isFinite(radius) ? `radius = ${radius}${unit}` : '';
+  const diameterLabel = Number.isFinite(diameter) ? `diameter = ${diameter}${unit}` : '';
+  const labelText = labels.filter((label) => !extractGeometryMeasurements(label).length).slice(0, 2).map(geometryLabelMeaning).filter(Boolean).join(' · ');
+  const radiusMarkup = Number.isFinite(radius) ? `<line x1="240" y1="150" x2="332" y2="150" stroke="#b45309" stroke-width="3"/><text x="286" y="139" text-anchor="middle" class="body">${escapeXml(radiusLabel)}</text>` : '';
+  const diameterMarkup = Number.isFinite(diameter) ? `<line x1="148" y1="150" x2="332" y2="150" stroke="#15803d" stroke-width="3"/><text x="240" y="183" text-anchor="middle" class="body">${escapeXml(diameterLabel)}</text>` : '';
+  return `<g><circle cx="240" cy="150" r="92" fill="#eff6ff" stroke="#1d4ed8" stroke-width="3"/><circle cx="240" cy="150" r="4" fill="#111827"/>${radiusMarkup}${diameterMarkup}<text x="240" y="270" text-anchor="middle" class="small">${escapeXml(labelText || 'circle')}</text></g>`;
+}
+
+function diagramTemplateCompatible(question: GeneratedExamQuestion): boolean {
+  const spec=question.visual_spec as ExamVisualSpec;
+  if(spec?.asset_type!=='diagram')return true;
+  const type=deterministicDiagramType(question);
+  const expected: Record<string,RegExp[]>= {atom:[/\bnucleus\b/i,/\belectron\b/i],digestive_system:[/\bstomach\b/i,/\bsmall\s+intestine\b/i],flower:[/\banther\b/i,/\bstigma\b/i],concave_mirror:[/\b(?:centre|center)\b|\bcurvature\b/i,/\bfocus\b|\bfocal\s+point\b/i]};
+  const labels = (spec.labels || []).map(String).filter((label) => label.trim());
+  for(const [index,pattern]of(expected[type||'']||[]).entries()){
+    const label=String(spec.labels?.[index]||'').trim();
+    const meaning=label.replace(/^[A-Za-z]\s*(?:=|:|[-–])\s*/,'').trim();
+    if(meaning&&!/^[A-Za-z]$/.test(meaning)&&!pattern.test(meaning))return false;
+  }
+  const descriptor=[question.question_text,...(question.sub_parts||[]).map(part=>part.prompt),spec.title,spec.prompt,...labels].filter(Boolean).join(' ');
+  const unsupportedTemplateReferences: Record<string, RegExp> = {
+    atom: /\b(?:proton|neutron|nucleon|atomic\s+(?:number|mass)|mass\s+number|electron\s+(?:arrangement|configuration|shell)|energy\s+level|valence|outer(?:most)?\s+shell)\b/i,
+    digestive_system: /\b(?:liver|pancreas|gall\s*bladder|oesophagus|esophagus|mouth|salivary|duodenum|ileum|colon|large\s+intestine|rectum|anus|appendix)\b/i,
+    flower: /\b(?:ovary|ovule|filament|style|sepal|petal|nectary|pollen\s+tube|receptacle)\b/i,
+  };
+  if (unsupportedTemplateReferences[type || '']?.test(descriptor)) return false;
+  if (type === 'atom' && labels.length > 2) return false;
+  if (type === 'digestive_system' && labels.length > 2) return false;
+  if (type === 'flower' && labels.length > 2) return false;
+  if (type === 'concave_mirror' && labels.slice(2).some((label) => {
+    const meaning = label.replace(/^[A-Za-z]\s*(?:=|:|[-–])\s*/,'').trim();
+    return !/^object\s+(?:is\s+)?(?:beyond|outside)\s+(?:the\s+)?(?:centre|center|c)\b/i.test(meaning);
+  })) return false;
+  if(type==='atom'&&/\b(?:electron\s+(?:arrangement|configuration)|outer(?:most)?\s+shell|number\s+of\s+(?:electrons|protons|neutrons)|count\s+(?:the\s+)?(?:electrons|protons|neutrons))\b/i.test(descriptor))return false;
+  if(type==='concave_mirror'&&/\b(?:between\b|at\s+(?:the\s+)?(?:focus|focal\s+point|centre|center)|inside\s+(?:the\s+)?(?:focus|focal\s+point|centre|center)|within\s+(?:the\s+)?(?:focus|focal\s+point|centre|center))\b/i.test(descriptor))return false;
+  return true;
 }
 
 export function hasUsableVisualSpec(question: GeneratedExamQuestion): boolean {
+  if(!diagramTemplateCompatible(question))return false;
   const spec = (question.visual_spec || {}) as ExamVisualSpec;
   const assetType = String(spec.asset_type || '').toLowerCase();
   const labels = (spec.labels || []).map(String).filter((value) => value.trim());
@@ -420,12 +1077,32 @@ export function hasUsableVisualSpec(question: GeneratedExamQuestion): boolean {
   if (!assetType) return false;
   if (!String(spec.title || spec.caption || '').trim()) return false;
   if (assetType === 'table') return hasCompleteTableVisual(question);
-  if (assetType === 'map') return mapRegions.length >= 2 || labels.length >= 2;
+  if (assetType === 'map') {
+    if (!String(spec.title || '').trim()) return false;
+    const base = String(spec.base_map || '').toLowerCase();
+    const legend = (spec.legend || []).map(String).filter((value) => value.trim());
+    const rawScale = String(spec.scale_text || '').trim();
+    const normalizedScale = normalizeMapSpec(spec, question).scale_text || '';
+    return isSupportedExamMapSpec(question)
+      && (mapRegions.length >= 2 || labels.length >= 2 || (spec.map_features || []).length >= 2)
+      && ['kenya', 'east_africa', 'africa'].includes(base)
+      && legend.length >= 2
+      && legend.every((entry) => wrapWords(entry, 17).length <= 2)
+      && Boolean(rawScale)
+      && /≈|approx(?:imate)?|indicative|not\s+to\s+scale/i.test(normalizedScale)
+      && Boolean(String(spec.compass || '').trim());
+  }
   if (assetType === 'graph' || assetType === 'chart') return values.length >= 2 && (xLabels.length >= values.length || labels.length >= values.length);
   if (assetType === 'flowchart') return flowLabels >= 2;
   if (assetType === 'number_line') return labels.length >= 2;
-  if (assetType === 'diagram' || assetType === 'shape') return labels.length >= 2;
-  if (assetType === 'illustration') return Boolean(String(spec.prompt || '').trim()) && labels.length >= 1;
+  if (assetType === 'diagram' || assetType === 'shape') {
+    const diagramType = deterministicDiagramType(question);
+    if (diagramType === 'right_triangle' || diagramType === 'circle_parts' || diagramType === 'coordinate_plane') return geometryDecision(question) !== null;
+    const curatedKey = (spec as Record<string, unknown>).curated_key;
+    if (typeof curatedKey === 'string' && curatedVisualDataUrl(curatedKey)) return true;
+    return labels.length >= 2 && diagramType !== null;
+  }
+  if (assetType === 'illustration') return false;
   return false;
 }
 
@@ -449,40 +1126,76 @@ export function filterUnnecessaryExamVisual(question: GeneratedExamQuestion): Ge
 }
 
 export function renderExamVisualDataUrl(question: GeneratedExamQuestion): string | null {
+  if(!diagramTemplateCompatible(question))return null;
+  const spec = (question.visual_spec || {}) as ExamVisualSpec;
+  const assetType = String(spec.asset_type || '').toLowerCase();
+  const deterministicType = deterministicDiagramType(question);
+  if ((assetType === 'shape' || assetType === 'diagram') && (deterministicType === 'right_triangle' || deterministicType === 'circle_parts' || deterministicType === 'coordinate_plane') && !geometryDecision(question)) return null;
   const curatedKey = (question.visual_spec as Record<string, unknown> | null | undefined)?.curated_key;
-  if (typeof curatedKey === 'string' && curatedKey) {
+  const isGeometryKey = curatedKey === 'right_triangle' || curatedKey === 'circle_parts' || curatedKey === 'coordinate_plane';
+  if (typeof curatedKey === 'string' && curatedKey && !curatedKey.startsWith('map_') && !isGeometryKey) {
     const curated = curatedVisualDataUrl(curatedKey);
     if (curated) return curated;
   }
-  const spec = (question.visual_spec || {}) as ExamVisualSpec;
-  const assetType = String(spec.asset_type || '').toLowerCase();
-  if (!assetType && !question.image_url) return null;
-  const title = visualTitle(spec, question);
+  if (!assetType) return null;
+  const effectiveSpec = assetType === 'map' ? normalizeMapSpec(spec, question) : spec;
+  const title = visualTitle(effectiveSpec, question);
   let body = '';
-  if (assetType === 'map') body = renderMap(spec);
+  let visualHeight = 320;
+  let captionY = 302;
+  if (assetType === 'map') {
+    const mapBody = renderMap(effectiveSpec, question);
+    if (!mapBody) return null;
+    body = mapBody;
+  }
   else if (assetType === 'graph' || assetType === 'chart') body = renderGraph(spec);
-  else if (assetType === 'table') body = renderTable(spec, question);
+  else if (assetType === 'table') {
+    const table = renderTable(spec, question);
+    if (!table) return null;
+    body = table.markup;
+    visualHeight = table.height;
+    captionY = table.captionY;
+  }
   else if (assetType === 'number_line') body = renderNumberLine(spec);
   else if (assetType === 'shape' || assetType === 'diagram') {
-    const descriptor = `${question.question_text} ${spec.title || ''} ${spec.prompt || ''} ${spec.caption || ''} ${(spec.labels || []).join(' ')}`.toLowerCase();
-    if (assetType === 'diagram' && /measuring\s+cylinder|meniscus|initial\s+volume|final\s+volume|stone/.test(descriptor)) {
+    const diagramType = deterministicDiagramType(question);
+    if (diagramType === 'atom') {
+      body = renderAtomDiagram(spec);
+    } else if (diagramType === 'digestive_system') {
+      body = renderDigestiveSystemDiagram(spec);
+    } else if (diagramType === 'flower') {
+      body = renderFlowerDiagram(spec);
+    } else if (diagramType === 'concave_mirror') {
+      body = renderConcaveMirrorDiagram(spec);
+    } else if (diagramType === 'right_triangle') {
+      const geometry = geometryDecision(question);
+      body = geometry?.quantitative ? renderParameterizedRightTriangle(spec, question) || '' : curatedVisualDataUrl(diagramType) ? decodeURIComponent(curatedVisualDataUrl(diagramType)!.split(',', 2)[1] || '') : '';
+      if (!body) return null;
+      if (body.startsWith('<svg')) return curatedVisualDataUrl(diagramType);
+    } else if (diagramType === 'circle_parts') {
+      const geometry = geometryDecision(question);
+      body = geometry?.quantitative ? renderParameterizedCircle(spec, question) || '' : renderQualitativeCircle(spec, question) || '';
+      if (!body) return null;
+    } else if (diagramType === 'coordinate_plane') {
+      return null;
+    } else if (diagramType === 'measuring_cylinder') {
       body = renderMeasuringCylinderDiagram(spec);
-    } else if (assetType === 'diagram' && /electric\s+circuit|circuit|cell(?:s)?\b|bulb|switch|connecting\s+wires|ammeter|voltage|potential\s+difference/.test(descriptor)) {
+    } else if (diagramType === 'electric_circuit') {
       body = renderCircuitDiagram(spec);
-    } else if (assetType === 'diagram' && /nursery|horticulture|shade|seed drill|watering can/.test(descriptor)) {
+    } else if (diagramType === 'nursery') {
       body = renderNurseryBedDiagram(spec);
-    } else if (assetType === 'diagram' && /distillation|round-bottom|condenser|receiving flask|separation apparatus/.test(descriptor)) {
+    } else if (diagramType === 'distillation') {
       body = renderDistillationDiagram(spec);
-    } else if (assetType === 'diagram' && /separating funnel|stopcock|immiscible|two distinct layers/.test(descriptor)) {
+    } else if (diagramType === 'separating_funnel') {
       body = renderSeparatingFunnelDiagram(spec);
-    } else if (assetType === 'diagram' && /filter funnel|filter paper|filtrate|residue|evaporating dish|tripod|bunsen|separation stages|sand.*salt/.test(descriptor)) {
+    } else if (diagramType === 'separation_stages') {
       body = renderSeparationStagesDiagram(spec);
-    } else if (assetType === 'diagram' && /food chain|grasshopper|flow of energy|producer|consumer|predator|prey/.test(descriptor)) {
+    } else if (diagramType === 'food_chain') {
       body = renderFoodChainDiagram(spec);
-    } else if (assetType === 'diagram' && /healthy friendship|friendship|qualities|honesty|kindness|respect|empathy/.test(descriptor)) {
+    } else if (diagramType === 'concept_map') {
       body = renderConceptMapDiagram(spec);
     } else {
-      body = renderGenericLabeledDiagram(spec);
+      return null;
     }
   } else if (assetType === 'flowchart') {
     const labels = (spec.labels || ['Start', 'Process', 'Decision', 'End']).slice(0, 4);
@@ -497,16 +1210,23 @@ export function renderExamVisualDataUrl(question: GeneratedExamQuestion): string
         : '';
       return box + arrow;
     }).join('');
-  } else {
-    body = textLines(spec.prompt || 'Teacher-approved educational visual', 55, 110, 340);
-  }
-  const caption = spec.caption || (assetType === 'map' ? 'Schematic map for interpretation; verify labels before approval.' : 'Teacher-approved visual');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320"><style>.title{font:700 18px Arial;fill:#111827}.body{font:14px Arial;fill:#1f2937}.small{font:12px Arial;fill:#374151}.table-header{font:700 11px Arial;fill:#1e3a8a}.table-cell{font:11px Arial;fill:#374151}.axis{stroke:#111827;stroke-width:2;fill:none}</style><rect width="480" height="320" rx="12" fill="#ffffff" stroke="#d1d5db" stroke-width="2"/>${centeredTextLines(title, 240, 22, 42, 'title', 18)}${body}<text x="240" y="310" text-anchor="middle" class="small">${escapeXml(caption)}</text></svg>`;
+  } else return null;
+  const caption = effectiveSpec.caption || (assetType === 'map' ? 'Use the key, scale and north arrow when interpreting this vector map.' : 'Teacher-approved visual');
+  const captionMarkup = centeredTextLines(caption, 240, captionY, 62, 'small', 12);
+  const printWidthPx = 2550;
+  const printHeightPx = Math.ceil(visualHeight * printWidthPx / 480);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${printWidthPx}" height="${printHeightPx}" data-print-dpi="300" preserveAspectRatio="xMidYMin meet" viewBox="0 0 480 ${visualHeight}"><style>.title{font:700 18px Arial;fill:#111827}.body{font:14px Arial;fill:#1f2937}.small{font:12px Arial;fill:#374151}.map-label{font:11px Arial;fill:#111827}.map-legend{font:10.5px Arial;fill:#111827}.map-key-title{font:700 11px Arial;fill:#111827}.table-header{font:11px Arial;fill:#1e3a8a;font-weight:700}.table-cell{font:11px Arial;fill:#374151}.axis{stroke:#111827;stroke-width:2;fill:none}</style><rect width="480" height="${visualHeight}" rx="12" fill="#ffffff" stroke="#d1d5db" stroke-width="2"/>${centeredTextLines(title, 240, 22, 42, 'title', 18)}${body}${captionMarkup}</svg>`;
   return dataUrl(svg);
 }
 
 export function withRenderedExamVisual(question: GeneratedExamQuestion): GeneratedExamQuestion {
-  if (question.image_url || !question.visual_spec) return question;
-  const rendered = renderExamVisualDataUrl(question);
-  return rendered ? { ...question, image_url: rendered } : question;
+  if (!question.visual_spec) return question;
+  const assetType = String((question.visual_spec as ExamVisualSpec).asset_type || '').toLowerCase();
+  const visualSpec = (assetType === 'map' ? normalizeMapSpec(question.visual_spec as ExamVisualSpec, question) : question.visual_spec) as Record<string, unknown>;
+  const rendered = renderExamVisualDataUrl({ ...question, image_url: null, visual_spec: visualSpec });
+  if (rendered) return { ...question, image_url: rendered, visual_spec: visualSpec };
+  if (['map', 'diagram', 'shape', 'table', 'graph', 'chart', 'number_line', 'flowchart'].includes(assetType)) {
+    return { ...question, image_url: null, visual_spec: visualSpec };
+  }
+  return { ...question, visual_spec: visualSpec };
 }
