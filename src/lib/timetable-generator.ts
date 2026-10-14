@@ -51,22 +51,22 @@ export interface LevelLessonConfig {
 
 /** Built-in defaults — used only when DB does not supply counts.
  * Senior (Grade 10-12): 8 lessons/day, 2 after lunch.
- * Form 3 & 4 (8-4-4): 7 lessons/day, 1 after lunch.
+ * Form 3 & 4 (8-4-4): 8 lessons/day, 2 after lunch.
  */
 export const LEVEL_CONFIG: Record<string, LevelLessonConfig> = {
-  'pre-primary': { totalLessons: 6, afterLunch: 0 },
+  'pre-primary': { totalLessons: 5, afterLunch: 0 },
   'lower-primary': { totalLessons: 6, afterLunch: 0 },
-  'upper-primary': { totalLessons: 6, afterLunch: 0 },
+  'upper-primary': { totalLessons: 7, afterLunch: 1 },
   'combined-primary': { totalLessons: 6, afterLunch: 0 },
   junior: { totalLessons: 8, afterLunch: 2 },
   senior: { totalLessons: 8, afterLunch: 2 },
-  'form-3-4': { totalLessons: 7, afterLunch: 1 },
+  'form-3-4': { totalLessons: 8, afterLunch: 2 },
   // legacy aliases
   lower_primary: { totalLessons: 6, afterLunch: 0 },
   upper_primary: { totalLessons: 7, afterLunch: 1 },
   junior_school: { totalLessons: 8, afterLunch: 2 },
   senior_school: { totalLessons: 8, afterLunch: 2 },
-  '8-4-4': { totalLessons: 7, afterLunch: 1 },
+  '8-4-4': { totalLessons: 8, afterLunch: 2 },
 };
 
 /** @deprecated prefer LEVEL_CONFIG */
